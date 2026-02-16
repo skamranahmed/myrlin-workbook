@@ -124,21 +124,29 @@ class PtySessionManager {
       // Non-critical — session can work without docs integration
     }
 
-    console.log(`[PTY] Spawning: cmd.exe /c ${fullCommand} (cwd: ${resolvedCwd})`);
+    // Platform-specific shell selection
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+    const shellArgs = isWindows ? ['/c', fullCommand] : ['-l', '-c', fullCommand];
 
-    // Spawn PTY process via cmd.exe on Windows
-    // Use /c so cmd.exe exits when Claude exits (Ctrl+C, completion, crash)
-    // This prevents stale cmd prompts when re-opening sessions
+    console.log(`[PTY] Spawning: ${shell} ${shellArgs.join(' ')} (cwd: ${resolvedCwd})`);
+
+    // Spawn PTY process
+    // Windows: cmd.exe /c so it exits when Claude exits (Ctrl+C, completion, crash)
+    // Linux/WSL: login shell (-l) ensures PATH includes nvm/npm paths where claude lives
     let ptyProcess;
     try {
-      ptyProcess = pty.spawn('cmd.exe', ['/c', fullCommand], {
+      const spawnOpts = {
         name: 'xterm-256color',
         cols,
         rows,
         cwd: resolvedCwd,
         env: sessionEnv,
-        useConpty: true,
-      });
+      };
+      if (isWindows) {
+        spawnOpts.useConpty = true;
+      }
+      ptyProcess = pty.spawn(shell, shellArgs, spawnOpts);
     } catch (err) {
       console.error(`[PTY] Failed to spawn for session ${sessionId}:`, err.message);
       return null; // caller should check for null

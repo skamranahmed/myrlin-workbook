@@ -1,13 +1,13 @@
 /**
  * Session Manager - Manages Claude Code session lifecycle
- * Handles launching, stopping, and restarting session processes on Windows.
+ * Handles launching, stopping, and restarting session processes.
  */
 
 const { spawn } = require('child_process');
 const { getStore } = require('../state/store');
 
 /**
- * Launch a Claude Code session by spawning a new Windows cmd process.
+ * Launch a Claude Code session by spawning a new detached process.
  * Updates the store with the new PID and sets status to 'running'.
  * @param {string} sessionId - The session ID to launch
  * @returns {{ success: boolean, pid?: number, error?: string }}
@@ -30,12 +30,22 @@ function launchSession(sessionId) {
     const command = baseCommand + bypassFlag;
     const workingDir = session.workingDir || process.cwd();
 
-    const child = spawn('cmd', ['/c', 'start', 'cmd', '/k', command], {
-      detached: true,
-      stdio: 'ignore',
-      cwd: workingDir,
-      shell: false,
-    });
+    let child;
+    if (process.platform === 'win32') {
+      child = spawn('cmd', ['/c', 'start', 'cmd', '/k', command], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: workingDir,
+        shell: false,
+      });
+    } else {
+      const shell = process.env.SHELL || '/bin/bash';
+      child = spawn(shell, ['-l', '-c', command], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: workingDir,
+      });
+    }
 
     const pid = child.pid;
 
