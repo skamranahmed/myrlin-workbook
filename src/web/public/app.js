@@ -1346,7 +1346,7 @@ class CWMApp {
       // Show template chips above the form if templates exist
       headerHtml: templates.length > 0 ? `
         <div class="template-list">${templates.map(t => `
-          <button class="template-chip" data-template-id="${t.id}" title="${t.workingDir || ''}${t.model ? ' · ' + t.model : ''}${t.bypassPermissions ? ' · bypass' : ''}">
+          <button class="template-chip" data-template-id="${t.id}" title="${this.escapeHtml(t.workingDir || '')}${t.model ? ' &middot; ' + this.escapeHtml(t.model) : ''}${t.bypassPermissions ? ' &middot; bypass' : ''}">
             <span class="template-chip-icon">&#9889;</span>${this.escapeHtml(t.name)}
           </button>`).join('')}
         </div>` : '',

@@ -19,6 +19,71 @@ const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
 
+// ─── Input Sanitization ────────────────────────────────────
+// Validates user-controlled fields that flow into shell commands.
+// Rejects shell metacharacters to prevent command injection.
+
+/** Regex matching shell metacharacters that could enable command injection */
+const SHELL_UNSAFE = /[;&|`$(){}[\]<>!#*?\n\r\\'"]/;
+
+/**
+ * Validate a command string. Must be a safe executable name/path.
+ * Allows alphanumeric, hyphens, dots, forward slashes (paths), spaces (for args).
+ * Rejects shell metacharacters that could chain commands.
+ * @param {string} cmd - The command to validate
+ * @returns {string|null} Sanitized command or null if invalid
+ */
+function sanitizeCommand(cmd) {
+  if (!cmd || typeof cmd !== 'string') return null;
+  const trimmed = cmd.trim();
+  if (trimmed.length === 0 || trimmed.length > 200) return null;
+  if (SHELL_UNSAFE.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Validate a model identifier. Must be alphanumeric with hyphens, dots, colons.
+ * Examples: "claude-opus-4-6", "claude-sonnet-4-5-20250929"
+ * @param {string} model - The model identifier
+ * @returns {string|null} Sanitized model or null if invalid
+ */
+function sanitizeModel(model) {
+  if (!model || typeof model !== 'string') return null;
+  const trimmed = model.trim();
+  if (trimmed.length === 0 || trimmed.length > 100) return null;
+  if (!/^[a-zA-Z0-9._:-]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Validate a session ID for --resume. Must be UUID-like (hex + hyphens).
+ * @param {string} id - The session/resume ID
+ * @returns {string|null} Sanitized ID or null if invalid
+ */
+function sanitizeSessionId(id) {
+  if (!id || typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  if (trimmed.length === 0 || trimmed.length > 100) return null;
+  if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Validate a working directory path. Rejects shell metacharacters.
+ * Does NOT check existence (that's done at spawn time by pty-manager).
+ * @param {string} dir - The directory path
+ * @returns {string|null} Sanitized path or null if invalid
+ */
+function sanitizeWorkingDir(dir) {
+  if (!dir || typeof dir !== 'string') return null;
+  const trimmed = dir.trim();
+  if (trimmed.length === 0 || trimmed.length > 500) return null;
+  // Allow path separators (/ and \), colons (C:), dots, spaces, tildes, hyphens
+  // Reject shell metacharacters that could enable injection
+  if (/[;&|`$(){}[\]<>!#*?\n\r]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 // ─── App Creation ──────────────────────────────────────────
 
 const app = express();
@@ -542,14 +607,28 @@ app.post('/api/sessions', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'workspaceId is required.' });
   }
 
+  // Validate fields that flow into shell commands
+  const safeCommand = command ? sanitizeCommand(command) : 'claude';
+  if (command && !safeCommand) {
+    return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
+  }
+  const safeDir = workingDir ? sanitizeWorkingDir(workingDir) : '';
+  if (workingDir && !safeDir) {
+    return res.status(400).json({ error: 'Invalid working directory path.' });
+  }
+  const safeResumeId = resumeSessionId ? sanitizeSessionId(resumeSessionId) : null;
+  if (resumeSessionId && !safeResumeId) {
+    return res.status(400).json({ error: 'Invalid resume session ID.' });
+  }
+
   const store = getStore();
   const session = store.createSession({
     name: name.trim(),
     workspaceId,
-    workingDir: workingDir || '',
+    workingDir: safeDir,
     topic: topic || '',
-    command: command || 'claude',
-    resumeSessionId: resumeSessionId || null,
+    command: safeCommand,
+    resumeSessionId: safeResumeId,
   });
 
   if (!session) {
@@ -565,13 +644,36 @@ app.post('/api/sessions', requireAuth, (req, res) => {
  */
 app.put('/api/sessions/:id', requireAuth, (req, res) => {
   const store = getStore();
+  const updates = req.body || {};
+
+  // Validate fields that flow into shell commands before storing
+  if (updates.command !== undefined) {
+    const safe = sanitizeCommand(updates.command);
+    if (!safe && updates.command) return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
+    updates.command = safe || 'claude';
+  }
+  if (updates.workingDir !== undefined) {
+    const safe = sanitizeWorkingDir(updates.workingDir);
+    if (!safe && updates.workingDir) return res.status(400).json({ error: 'Invalid working directory path.' });
+    updates.workingDir = safe || '';
+  }
+  if (updates.model !== undefined) {
+    const safe = sanitizeModel(updates.model);
+    if (!safe && updates.model) return res.status(400).json({ error: 'Invalid model identifier.' });
+    updates.model = safe || '';
+  }
+  if (updates.resumeSessionId !== undefined) {
+    const safe = sanitizeSessionId(updates.resumeSessionId);
+    if (!safe && updates.resumeSessionId) return res.status(400).json({ error: 'Invalid resume session ID.' });
+    updates.resumeSessionId = safe || null;
+  }
 
   // Capture previous status before applying updates so we can detect
   // running->stopped transitions for auto-summary generation.
   const existingSession = store.getSession(req.params.id);
   const previousStatus = existingSession ? existingSession.status : null;
 
-  const session = store.updateSession(req.params.id, req.body);
+  const session = store.updateSession(req.params.id, updates);
 
   if (!session) {
     return res.status(404).json({ error: 'Session not found.' });
@@ -579,7 +681,6 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
 
   // Auto-generate summary when a session transitions from running to stopped
   // and the workspace has autoSummary enabled (defaults to true).
-  const updates = req.body || {};
   if (updates.status === 'stopped' && previousStatus === 'running') {
     const ws = session.workspaceId ? store.getWorkspace(session.workspaceId) : null;
     const autoSummaryEnabled = ws ? (ws.autoSummary !== false) : false;
@@ -2678,14 +2779,28 @@ app.post('/api/templates', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Template name must be 200 characters or fewer.' });
   }
 
+  // Validate fields that flow into shell commands
+  const safeCommand = command ? sanitizeCommand(command) : 'claude';
+  if (command && !safeCommand) {
+    return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
+  }
+  const safeDir = workingDir ? sanitizeWorkingDir(workingDir) : '';
+  if (workingDir && !safeDir) {
+    return res.status(400).json({ error: 'Invalid working directory path.' });
+  }
+  const safeModel = model ? sanitizeModel(model) : '';
+  if (model && !safeModel) {
+    return res.status(400).json({ error: 'Invalid model identifier.' });
+  }
+
   const store = getStore();
   const template = store.createTemplate({
     name: name.trim(),
-    command: command || 'claude',
-    workingDir: workingDir || '',
+    command: safeCommand,
+    workingDir: safeDir,
     bypassPermissions: bypassPermissions || false,
     verbose: verbose || false,
-    model: model || '',
+    model: safeModel,
     agentTeams: agentTeams || false,
   });
 

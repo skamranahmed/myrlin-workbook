@@ -78,7 +78,24 @@ class PtySessionManager {
       return existing;
     }
 
-    // Build full command string
+    // ── Defense-in-depth: validate all user-controlled inputs ──
+    // Primary validation happens at the API/WebSocket boundary (server.js, pty-server.js).
+    // This is a secondary gate to catch any bypass or future code path that skips validation.
+    const SHELL_UNSAFE = /[;&|`$(){}[\]<>!#*?\n\r\\'"]/;
+    if (SHELL_UNSAFE.test(command)) {
+      console.error(`[PTY] Rejected unsafe command for session ${sessionId}: ${command}`);
+      return null;
+    }
+    if (resumeSessionId && !/^[a-zA-Z0-9_-]+$/.test(resumeSessionId)) {
+      console.error(`[PTY] Rejected unsafe resumeSessionId for session ${sessionId}: ${resumeSessionId}`);
+      return null;
+    }
+    if (model && !/^[a-zA-Z0-9._:-]+$/.test(model)) {
+      console.error(`[PTY] Rejected unsafe model for session ${sessionId}: ${model}`);
+      return null;
+    }
+
+    // Build full command string (all inputs validated above)
     let fullCommand = command;
     if (resumeSessionId) {
       fullCommand += ' --resume ' + resumeSessionId;

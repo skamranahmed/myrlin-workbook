@@ -14,6 +14,14 @@ const url = require('url');
 const { isValidToken } = require('./auth');
 const { PtySessionManager } = require('./pty-manager');
 
+// ─── Input Sanitization (mirrors server.js validators) ─────
+// Prevents shell injection via WebSocket query params
+const SHELL_UNSAFE = /[;&|`$(){}[\]<>!#*?\n\r\\'"]/;
+const isSafeCommand = (v) => v && typeof v === 'string' && v.length <= 200 && !SHELL_UNSAFE.test(v);
+const isSafeModel = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9._:-]+$/.test(v) && v.length <= 100;
+const isSafeSessionId = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9_-]+$/.test(v) && v.length <= 100;
+const isSafeDir = (v) => v && typeof v === 'string' && v.length <= 500 && !/[;&|`$(){}[\]<>!#*?\n\r]/.test(v);
+
 /**
  * Attach a WebSocket server to an existing HTTP server for PTY terminal access.
  *
@@ -63,16 +71,18 @@ function attachPtyWebSocket(httpServer) {
     ptyWss.handleUpgrade(request, socket, head, (ws) => {
       ptyWss.emit('connection', ws, request);
 
-      // Build spawn options from query params
+      // Build spawn options from query params with input validation.
+      // All string values that flow into shell commands are sanitized to
+      // prevent command injection (critical for remote access scenarios).
       const spawnOpts = {};
       if (query.cols) spawnOpts.cols = parseInt(query.cols, 10);
       if (query.rows) spawnOpts.rows = parseInt(query.rows, 10);
-      if (query.cwd) spawnOpts.cwd = query.cwd;
-      if (query.command) spawnOpts.command = query.command;
-      if (query.resumeSessionId) spawnOpts.resumeSessionId = query.resumeSessionId;
+      if (query.cwd && isSafeDir(query.cwd)) spawnOpts.cwd = query.cwd;
+      if (query.command && isSafeCommand(query.command)) spawnOpts.command = query.command;
+      if (query.resumeSessionId && isSafeSessionId(query.resumeSessionId)) spawnOpts.resumeSessionId = query.resumeSessionId;
       if (query.bypassPermissions === 'true') spawnOpts.bypassPermissions = true;
       if (query.verbose === 'true') spawnOpts.verbose = true;
-      if (query.model) spawnOpts.model = query.model;
+      if (query.model && isSafeModel(query.model)) spawnOpts.model = query.model;
 
       // Attach the client to the PTY session
       ptyManager.attachClient(sessionId, ws, spawnOpts);
