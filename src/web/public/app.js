@@ -329,6 +329,12 @@ class CWMApp {
       notesEditorCancel: document.getElementById('notes-editor-cancel'),
       notesEditorSave: document.getElementById('notes-editor-save'),
 
+      // Costs
+      costsPanel: document.getElementById('costs-panel'),
+      costsBody: document.getElementById('costs-body'),
+      costsRefreshBtn: document.getElementById('costs-refresh-btn'),
+      costsPeriodSelector: document.getElementById('costs-period-selector'),
+
       // Resources
       resourcesPanel: document.getElementById('resources-panel'),
       resourcesBody: document.getElementById('resources-body'),
@@ -589,6 +595,19 @@ class CWMApp {
     // Board add button
     if (this.els.boardAddBtn) {
       this.els.boardAddBtn.addEventListener('click', () => this.createFeature());
+    }
+
+    // Cost dashboard controls
+    if (this.els.costsRefreshBtn) {
+      this.els.costsRefreshBtn.addEventListener('click', () => this.loadCosts());
+    }
+    if (this.els.costsPeriodSelector) {
+      this.els.costsPeriodSelector.addEventListener('click', (e) => {
+        const btn = e.target.closest('.costs-period-btn');
+        if (btn && btn.dataset.period) {
+          this.loadCosts(btn.dataset.period);
+        }
+      });
     }
 
     // Resources refresh
@@ -988,7 +1007,7 @@ class CWMApp {
     // Restore persisted state
     const savedWorkspaceId = localStorage.getItem('cwm_activeWorkspace');
     const savedViewMode = localStorage.getItem('cwm_viewMode');
-    if (savedViewMode && ['workspace', 'all', 'recent', 'terminal', 'docs', 'resources'].includes(savedViewMode)) {
+    if (savedViewMode && ['workspace', 'all', 'costs', 'recent', 'terminal', 'docs', 'resources'].includes(savedViewMode)) {
       this.state.viewMode = savedViewMode;
     }
     // Always apply the current view mode (handles default 'terminal' for new users)
@@ -1254,10 +1273,10 @@ class CWMApp {
     this.state.selectedSession = session;
 
     // If in a view mode that hides the detail panel, switch to a compatible mode
-    const hiddenModes = ['terminal', 'docs', 'resources'];
+    const hiddenModes = ['terminal', 'docs', 'resources', 'costs'];
     if (session && hiddenModes.includes(this.state.viewMode)) {
-      // Switch to workspace view if a workspace is active, otherwise 'all'
-      const targetMode = this.state.activeWorkspace ? 'workspace' : 'all';
+      // Switch to workspace view if a workspace is active, otherwise 'recent'
+      const targetMode = this.state.activeWorkspace ? 'workspace' : 'recent';
       this.setViewMode(targetMode);
     }
 
@@ -2661,6 +2680,9 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   setViewMode(mode) {
+    // Migrate legacy "all" mode to "workspace" for existing users
+    if (mode === 'all') mode = 'workspace';
+
     this.state.viewMode = mode;
     localStorage.setItem('cwm_viewMode', mode);
 
@@ -2684,12 +2706,13 @@ class CWMApp {
       this._resourcesInterval = null;
     }
 
-    // Toggle terminal grid vs session panels vs docs vs resources
+    // Toggle terminal grid vs session panels vs docs vs resources vs costs
     const isTerminal = mode === 'terminal';
     const isDocs = mode === 'docs';
     const isResources = mode === 'resources';
-    this.els.sessionListPanel.hidden = isTerminal || isDocs || isResources;
-    this.els.detailPanel.hidden = isTerminal || isDocs || isResources || !this.state.selectedSession;
+    const isCosts = mode === 'costs';
+    this.els.sessionListPanel.hidden = isTerminal || isDocs || isResources || isCosts;
+    this.els.detailPanel.hidden = isTerminal || isDocs || isResources || isCosts || !this.state.selectedSession;
     if (this.els.terminalGrid) {
       this.els.terminalGrid.hidden = !isTerminal;
     }
@@ -2712,11 +2735,16 @@ class CWMApp {
     if (this.els.resourcesPanel) {
       this.els.resourcesPanel.hidden = !isResources;
     }
+    if (this.els.costsPanel) {
+      this.els.costsPanel.hidden = !isCosts;
+    }
 
     if (isDocs) {
       this.loadDocs();
     } else if (isResources) {
       this.loadResources();
+    } else if (isCosts) {
+      this.loadCosts();
     } else if (isTerminal) {
       if (this._tabGroups) this.renderTerminalGroupTabs();
       // Update mobile terminal tab strip when switching to terminal view
@@ -2733,7 +2761,7 @@ class CWMApp {
       });
     } else {
       // Update panel title
-      const titles = { workspace: 'Sessions', all: 'All Sessions', recent: 'Recent Sessions' };
+      const titles = { workspace: 'Sessions', recent: 'Recent Sessions' };
       this.els.sessionPanelTitle.textContent = titles[mode] || 'Sessions';
 
       // Load sessions for new mode
@@ -7932,6 +7960,441 @@ class CWMApp {
         <div class="ai-insight-recent"><strong>Recent:</strong> ${this.escapeHtml(data.recentTasking || 'No recent activity')}</div>
       </div>`;
     }).join('');
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     COST DASHBOARD
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Load cost dashboard data from the API.
+   * @param {string} [period='week'] - Time period: day, week, month, all
+   */
+  async loadCosts(period) {
+    if (!period) {
+      period = this._costsPeriod || 'week';
+    }
+    this._costsPeriod = period;
+
+    // Update period selector active state
+    if (this.els.costsPeriodSelector) {
+      this.els.costsPeriodSelector.querySelectorAll('.costs-period-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.period === period);
+      });
+    }
+
+    const body = this.els.costsBody;
+    if (!body) return;
+
+    try {
+      const data = await this.api('GET', `/api/cost/dashboard?period=${period}`);
+      this.renderCostsDashboard(data);
+    } catch (err) {
+      body.innerHTML = `<div class="costs-loading">Failed to load cost data: ${err.message}</div>`;
+    }
+  }
+
+  /**
+   * Render the full costs dashboard into the costs body element.
+   * @param {object} data - Dashboard data from /api/cost/dashboard
+   */
+  renderCostsDashboard(data) {
+    const body = this.els.costsBody;
+    if (!body) return;
+
+    const { summary, timeline, byModel, byWorkspace, sessions } = data;
+
+    // Format currency helper
+    const fmtCost = (v) => {
+      if (v >= 100) return '$' + v.toFixed(0);
+      if (v >= 10) return '$' + v.toFixed(1);
+      if (v >= 1) return '$' + v.toFixed(2);
+      return '$' + v.toFixed(3);
+    };
+
+    // Format token count helper
+    const fmtTokens = (v) => {
+      if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
+      if (v >= 1_000) return (v / 1_000).toFixed(0) + 'K';
+      return v.toString();
+    };
+
+    // Friendly model name helper
+    const fmtModel = (m) => {
+      if (m.includes('opus-4-6')) return 'Opus 4.6';
+      if (m.includes('opus-4-5')) return 'Opus 4.5';
+      if (m.includes('opus-4-1')) return 'Opus 4.1';
+      if (m.includes('opus-4-0') || m.includes('opus-4-2')) return 'Opus 4';
+      if (m.includes('sonnet-4-5')) return 'Sonnet 4.5';
+      if (m.includes('sonnet-4-0') || m.includes('sonnet-4-2')) return 'Sonnet 4';
+      if (m.includes('3-7-sonnet')) return 'Sonnet 3.7';
+      if (m.includes('haiku-4-5')) return 'Haiku 4.5';
+      if (m.includes('3-5-haiku')) return 'Haiku 3.5';
+      if (m.includes('3-haiku')) return 'Haiku 3';
+      return m.replace('claude-', '');
+    };
+
+    // Color palette for breakdown bars (Catppuccin accent colors)
+    const barColors = ['var(--green)', 'var(--blue)', 'var(--mauve)', 'var(--peach)', 'var(--red)', 'var(--yellow)', 'var(--teal)', 'var(--pink)'];
+
+    let html = '';
+
+    // ── Summary Cards ──
+    const totalTokenCount = (summary.totalTokens.input || 0) + (summary.totalTokens.output || 0) +
+      (summary.totalTokens.cacheWrite || 0) + (summary.totalTokens.cacheRead || 0);
+    html += `<div class="costs-summary">
+      <div class="costs-card">
+        <div class="costs-card-label">Total Cost</div>
+        <div class="costs-card-value green">${fmtCost(summary.totalCost)}</div>
+        <div class="costs-card-sub">${fmtTokens(totalTokenCount)} tokens</div>
+      </div>
+      <div class="costs-card">
+        <div class="costs-card-label">${this.escapeHtml(summary.periodLabel)}</div>
+        <div class="costs-card-value blue">${fmtCost(summary.periodCost)}</div>
+        <div class="costs-card-sub">${summary.messageCount} messages</div>
+      </div>
+      <div class="costs-card">
+        <div class="costs-card-label">Avg / Message</div>
+        <div class="costs-card-value mauve">${fmtCost(summary.avgCostPerMessage)}</div>
+        <div class="costs-card-sub">across all sessions</div>
+      </div>
+      <div class="costs-card">
+        <div class="costs-card-label">Cache Savings</div>
+        <div class="costs-card-value peach">${fmtCost(summary.cacheSavings)}</div>
+        <div class="costs-card-sub">${fmtTokens(summary.totalTokens.cacheRead || 0)} read hits</div>
+      </div>
+    </div>`;
+
+    // ── Timeline Chart ──
+    html += `<div class="costs-chart-section">
+      <h3 class="costs-chart-title">Cost Over Time</h3>
+      <div class="costs-chart-container" id="costs-chart-container">
+        ${timeline.length > 1
+          ? '<div class="costs-chart-tooltip" id="costs-chart-tooltip"><div class="costs-chart-tooltip-date"></div><div class="costs-chart-tooltip-value"></div></div>'
+          : '<div class="costs-chart-empty">Not enough data for timeline</div>'}
+      </div>
+    </div>`;
+
+    // ── Breakdown: By Model + By Workspace ──
+    html += '<div class="costs-breakdown">';
+
+    // By Model
+    html += '<div class="costs-breakdown-card"><h3 class="costs-breakdown-title">By Model</h3>';
+    if (byModel.length === 0) {
+      html += '<div class="costs-breakdown-empty">No model data</div>';
+    } else {
+      const maxModelPct = Math.max(...byModel.map(m => m.pct), 1);
+      byModel.forEach((m, i) => {
+        const barW = Math.max(2, (m.pct / maxModelPct) * 100);
+        html += `<div class="costs-breakdown-item">
+          <span class="costs-breakdown-label">${fmtModel(m.model)}</span>
+          <div class="costs-breakdown-bar-track">
+            <div class="costs-breakdown-bar" style="width:${barW}%;background:${barColors[i % barColors.length]}"></div>
+          </div>
+          <span class="costs-breakdown-value">${fmtCost(m.cost)}</span>
+        </div>`;
+      });
+    }
+    html += '</div>';
+
+    // By Workspace
+    html += '<div class="costs-breakdown-card"><h3 class="costs-breakdown-title">By Workspace</h3>';
+    if (byWorkspace.length === 0) {
+      html += '<div class="costs-breakdown-empty">No workspace data</div>';
+    } else {
+      const maxWsPct = Math.max(...byWorkspace.map(w => w.pct), 1);
+      byWorkspace.forEach((w, i) => {
+        const barW = Math.max(2, (w.pct / maxWsPct) * 100);
+        html += `<div class="costs-breakdown-item">
+          <span class="costs-breakdown-label" title="${this.escapeHtml(w.name)}">${this.escapeHtml(w.name)}</span>
+          <div class="costs-breakdown-bar-track">
+            <div class="costs-breakdown-bar" style="width:${barW}%;background:${barColors[i % barColors.length]}"></div>
+          </div>
+          <span class="costs-breakdown-value">${fmtCost(w.cost)}</span>
+        </div>`;
+      });
+    }
+    html += '</div></div>';
+
+    // ── Session Cost Table ──
+    html += `<div class="costs-sessions-section">
+      <div class="costs-sessions-header">
+        <h3 class="costs-sessions-title">Sessions</h3>
+        <input type="text" class="costs-sessions-search" id="costs-sessions-search" placeholder="Filter sessions..." />
+      </div>`;
+
+    if (sessions.length === 0) {
+      html += '<div class="costs-sessions-empty">No session cost data available</div>';
+    } else {
+      html += `<table class="costs-sessions-table">
+        <thead><tr>
+          <th data-sort="name">Name</th>
+          <th data-sort="workspace">Workspace</th>
+          <th data-sort="cost" class="sort-active">Cost</th>
+          <th data-sort="messages">Msgs</th>
+          <th data-sort="model">Model</th>
+        </tr></thead>
+        <tbody id="costs-sessions-tbody">`;
+      for (const s of sessions.slice(0, 50)) {
+        html += `<tr data-session-id="${s.id}" class="costs-session-row">
+          <td class="name-cell" title="${this.escapeHtml(s.name)}">${this.escapeHtml(s.name)}</td>
+          <td class="workspace-cell" title="${this.escapeHtml(s.workspaceName)}">${this.escapeHtml(s.workspaceName)}</td>
+          <td class="cost-cell">${fmtCost(s.cost)}</td>
+          <td>${s.messageCount}</td>
+          <td class="model-cell">${fmtModel(s.model)}</td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+
+    body.innerHTML = html;
+
+    // ── Render SVG chart if we have timeline data ──
+    if (timeline.length > 1) {
+      this.renderCostChart(timeline);
+    }
+
+    // ── Wire up session search filter ──
+    const searchInput = document.getElementById('costs-sessions-search');
+    const tbody = document.getElementById('costs-sessions-tbody');
+    if (searchInput && tbody) {
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.toLowerCase();
+        tbody.querySelectorAll('.costs-session-row').forEach(row => {
+          const name = (row.querySelector('.name-cell')?.textContent || '').toLowerCase();
+          const ws = (row.querySelector('.workspace-cell')?.textContent || '').toLowerCase();
+          row.hidden = q && !name.includes(q) && !ws.includes(q);
+        });
+      });
+    }
+
+    // ── Wire up table sorting ──
+    const table = body.querySelector('.costs-sessions-table');
+    if (table && tbody) {
+      this._costsSortCol = 'cost';
+      this._costsSortAsc = false;
+      this._costsSessionsData = sessions;
+
+      table.querySelectorAll('th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.sort;
+          if (this._costsSortCol === col) {
+            this._costsSortAsc = !this._costsSortAsc;
+          } else {
+            this._costsSortCol = col;
+            this._costsSortAsc = col === 'name' || col === 'workspace'; // alpha default asc
+          }
+          // Update header styling
+          table.querySelectorAll('th').forEach(h => {
+            h.classList.remove('sort-active', 'sort-asc');
+          });
+          th.classList.add('sort-active');
+          if (this._costsSortAsc) th.classList.add('sort-asc');
+
+          // Sort and re-render rows
+          this._sortCostsTable(tbody);
+        });
+      });
+    }
+
+    // ── Wire up row click to navigate to session ──
+    if (tbody) {
+      tbody.querySelectorAll('.costs-session-row').forEach(row => {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+          const sid = row.dataset.sessionId;
+          if (sid) {
+            this.state.selectedSession = sid;
+            this.setViewMode('workspace');
+            this.selectSession(sid);
+          }
+        });
+      });
+    }
+  }
+
+  /**
+   * Sort the costs session table body by current sort column/direction.
+   * @param {HTMLElement} tbody - Table body element
+   */
+  _sortCostsTable(tbody) {
+    const data = this._costsSessionsData;
+    if (!data) return;
+
+    const col = this._costsSortCol;
+    const asc = this._costsSortAsc;
+
+    const sorted = [...data].sort((a, b) => {
+      let va, vb;
+      switch (col) {
+        case 'name': va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'workspace': va = (a.workspaceName || '').toLowerCase(); vb = (b.workspaceName || '').toLowerCase(); break;
+        case 'cost': va = a.cost; vb = b.cost; break;
+        case 'messages': va = a.messageCount; vb = b.messageCount; break;
+        case 'model': va = a.model || ''; vb = b.model || ''; break;
+        default: return 0;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      return 0;
+    });
+
+    const fmtCost = (v) => {
+      if (v >= 100) return '$' + v.toFixed(0);
+      if (v >= 10) return '$' + v.toFixed(1);
+      if (v >= 1) return '$' + v.toFixed(2);
+      return '$' + v.toFixed(3);
+    };
+    const fmtModel = (m) => {
+      if (m.includes('opus-4-6')) return 'Opus 4.6';
+      if (m.includes('opus-4-5')) return 'Opus 4.5';
+      if (m.includes('opus-4-1')) return 'Opus 4.1';
+      if (m.includes('opus-4-0') || m.includes('opus-4-2')) return 'Opus 4';
+      if (m.includes('sonnet-4-5')) return 'Sonnet 4.5';
+      if (m.includes('sonnet-4-0') || m.includes('sonnet-4-2')) return 'Sonnet 4';
+      if (m.includes('3-7-sonnet')) return 'Sonnet 3.7';
+      if (m.includes('haiku-4-5')) return 'Haiku 4.5';
+      if (m.includes('3-5-haiku')) return 'Haiku 3.5';
+      if (m.includes('3-haiku')) return 'Haiku 3';
+      return m.replace('claude-', '');
+    };
+
+    let rowsHtml = '';
+    for (const s of sorted.slice(0, 50)) {
+      rowsHtml += `<tr data-session-id="${s.id}" class="costs-session-row" style="cursor:pointer">
+        <td class="name-cell" title="${this.escapeHtml(s.name)}">${this.escapeHtml(s.name)}</td>
+        <td class="workspace-cell" title="${this.escapeHtml(s.workspaceName)}">${this.escapeHtml(s.workspaceName)}</td>
+        <td class="cost-cell">${fmtCost(s.cost)}</td>
+        <td>${s.messageCount}</td>
+        <td class="model-cell">${fmtModel(s.model)}</td>
+      </tr>`;
+    }
+    tbody.innerHTML = rowsHtml;
+
+    // Re-wire row clicks
+    tbody.querySelectorAll('.costs-session-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const sid = row.dataset.sessionId;
+        if (sid) {
+          this.state.selectedSession = sid;
+          this.setViewMode('workspace');
+          this.selectSession(sid);
+        }
+      });
+    });
+  }
+
+  /**
+   * Render an SVG line chart for cost timeline data.
+   * Pure SVG — no chart library needed.
+   * @param {Array<{date, cost, tokens, messages}>} timeline - Daily cost data
+   */
+  renderCostChart(timeline) {
+    const container = document.getElementById('costs-chart-container');
+    if (!container || timeline.length < 2) return;
+
+    const tooltip = document.getElementById('costs-chart-tooltip');
+
+    // Chart dimensions (SVG viewBox coordinates)
+    const W = 600, H = 180;
+    const padL = 50, padR = 15, padT = 15, padB = 30;
+    const chartW = W - padL - padR;
+    const chartH = H - padT - padB;
+
+    const maxCost = Math.max(...timeline.map(d => d.cost), 0.01);
+    const n = timeline.length;
+
+    // Map data to SVG coordinates
+    const points = timeline.map((d, i) => ({
+      x: padL + (i / (n - 1)) * chartW,
+      y: padT + chartH - (d.cost / maxCost) * chartH,
+      date: d.date,
+      cost: d.cost,
+      messages: d.messages || 0,
+    }));
+
+    // Build SVG
+    let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">`;
+
+    // Y-axis grid lines + labels (4 lines)
+    for (let i = 0; i <= 4; i++) {
+      const y = padT + (i / 4) * chartH;
+      const val = maxCost * (1 - i / 4);
+      svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" class="chart-grid"/>`;
+      svg += `<text x="${padL - 6}" y="${y + 3}" class="chart-label chart-label-y">$${val >= 1 ? val.toFixed(1) : val.toFixed(2)}</text>`;
+    }
+
+    // Area fill polygon
+    const areaPoints = points.map(p => `${p.x},${p.y}`).join(' ');
+    svg += `<polygon class="chart-area" points="${points[0].x},${padT + chartH} ${areaPoints} ${points[n - 1].x},${padT + chartH}"/>`;
+
+    // Line
+    svg += `<polyline class="chart-line" points="${areaPoints}"/>`;
+
+    // Data dots
+    points.forEach((p, i) => {
+      svg += `<circle class="chart-dot" cx="${p.x}" cy="${p.y}" r="3" data-idx="${i}"/>`;
+    });
+
+    // X-axis labels (show up to 7 labels, evenly spaced)
+    const labelCount = Math.min(7, n);
+    const labelStep = Math.max(1, Math.floor((n - 1) / (labelCount - 1)));
+    for (let i = 0; i < n; i += labelStep) {
+      const p = points[i];
+      // Format date as Mon DD
+      const dateObj = new Date(p.date + 'T00:00:00');
+      const label = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      svg += `<text x="${p.x}" y="${H - 5}" class="chart-label" text-anchor="middle">${label}</text>`;
+    }
+    // Always show last label if not already shown
+    if ((n - 1) % labelStep !== 0) {
+      const p = points[n - 1];
+      const dateObj = new Date(p.date + 'T00:00:00');
+      const label = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      svg += `<text x="${p.x}" y="${H - 5}" class="chart-label" text-anchor="middle">${label}</text>`;
+    }
+
+    svg += '</svg>';
+
+    // Insert SVG before tooltip
+    if (tooltip) {
+      const svgWrapper = document.createElement('div');
+      svgWrapper.innerHTML = svg;
+      container.insertBefore(svgWrapper.firstChild, tooltip);
+    } else {
+      container.innerHTML = svg;
+    }
+
+    // Tooltip hover interaction
+    if (tooltip) {
+      container.querySelectorAll('.chart-dot').forEach(dot => {
+        dot.addEventListener('mouseenter', (e) => {
+          const idx = parseInt(e.target.dataset.idx);
+          const p = points[idx];
+          if (!p) return;
+
+          const dateObj = new Date(p.date + 'T00:00:00');
+          const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+          tooltip.querySelector('.costs-chart-tooltip-date').textContent = dateStr;
+          tooltip.querySelector('.costs-chart-tooltip-value').textContent =
+            `$${p.cost >= 1 ? p.cost.toFixed(2) : p.cost.toFixed(3)} · ${p.messages} msgs`;
+
+          // Position tooltip near the dot
+          const rect = container.getBoundingClientRect();
+          const dotRect = e.target.getBoundingClientRect();
+          tooltip.style.left = (dotRect.left - rect.left - 40) + 'px';
+          tooltip.style.top = (dotRect.top - rect.top - 45) + 'px';
+          tooltip.classList.add('visible');
+        });
+
+        dot.addEventListener('mouseleave', () => {
+          tooltip.classList.remove('visible');
+        });
+      });
+    }
   }
 
 

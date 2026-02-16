@@ -712,8 +712,8 @@ textarea.input {
   color: var(--mauve);
 }
 
-.view-tab.active[data-mode="all"] {
-  color: var(--blue);
+.view-tab.active[data-mode="costs"] {
+  color: var(--green);
 }
 
 .view-tab.active[data-mode="recent"] {
@@ -4196,6 +4196,437 @@ textarea.input {
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* COSTS DASHBOARD                                             */
+/* ═══════════════════════════════════════════════════════════ */
+
+.costs-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.costs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--surface1);
+  flex-shrink: 0;
+}
+
+.costs-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.costs-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.costs-period-selector {
+  display: flex;
+  gap: 2px;
+  background: var(--surface0);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.costs-period-btn {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--subtext0);
+  background: transparent;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.costs-period-btn:hover {
+  color: var(--text);
+}
+
+.costs-period-btn.active {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.costs-refresh-btn {
+  color: var(--subtext0);
+}
+
+.costs-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+
+.costs-loading {
+  text-align: center;
+  color: var(--subtext0);
+  padding: 48px 0;
+  font-size: 13px;
+}
+
+/* Summary Cards */
+.costs-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.costs-card {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.costs-card-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--subtext0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.costs-card-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.costs-card-value.green { color: var(--green); }
+.costs-card-value.blue { color: var(--blue); }
+.costs-card-value.mauve { color: var(--mauve); }
+.costs-card-value.peach { color: var(--peach); }
+
+.costs-card-sub {
+  font-size: 11px;
+  color: var(--subtext0);
+  margin-top: 2px;
+}
+
+/* Timeline Chart */
+.costs-chart-section {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.costs-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 12px;
+}
+
+.costs-chart-container {
+  position: relative;
+  width: 100%;
+  height: 180px;
+}
+
+.costs-chart-container svg {
+  width: 100%;
+  height: 100%;
+}
+
+.costs-chart-container .chart-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.costs-chart-container .chart-area {
+  fill: var(--green);
+  opacity: 0.08;
+}
+
+.costs-chart-container .chart-dot {
+  fill: var(--green);
+  cursor: pointer;
+  transition: r 0.15s ease;
+}
+
+.costs-chart-container .chart-dot:hover {
+  r: 5;
+}
+
+.costs-chart-container .chart-grid {
+  stroke: var(--surface1);
+  stroke-width: 0.5;
+}
+
+.costs-chart-container .chart-label {
+  fill: var(--subtext0);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.costs-chart-container .chart-label-y {
+  text-anchor: end;
+}
+
+.costs-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 180px;
+  color: var(--subtext0);
+  font-size: 13px;
+}
+
+/* Chart Tooltip */
+.costs-chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--crust);
+  border: 1px solid var(--surface2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.costs-chart-tooltip.visible {
+  opacity: 1;
+}
+
+.costs-chart-tooltip-date {
+  color: var(--subtext0);
+  font-size: 10px;
+}
+
+.costs-chart-tooltip-value {
+  font-weight: 600;
+  color: var(--green);
+}
+
+/* Breakdown Section */
+.costs-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.costs-breakdown-card {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.costs-breakdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 12px;
+}
+
+.costs-breakdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.costs-breakdown-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.costs-breakdown-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.costs-breakdown-label {
+  font-size: 12px;
+  color: var(--text);
+  min-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.costs-breakdown-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--subtext1);
+  font-variant-numeric: tabular-nums;
+  min-width: 50px;
+  text-align: right;
+}
+
+.costs-breakdown-empty {
+  color: var(--subtext0);
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+/* Session Cost Table */
+.costs-sessions-section {
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.costs-sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+}
+
+.costs-sessions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.costs-sessions-search {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text);
+  outline: none;
+  width: 180px;
+  transition: border-color 0.15s;
+}
+
+.costs-sessions-search::placeholder {
+  color: var(--overlay0);
+}
+
+.costs-sessions-search:focus {
+  border-color: var(--green);
+}
+
+.costs-sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.costs-sessions-table th {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--subtext0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--surface1);
+  cursor: pointer;
+  user-select: none;
+}
+
+.costs-sessions-table th:hover {
+  color: var(--text);
+}
+
+.costs-sessions-table th.sort-active {
+  color: var(--green);
+}
+
+.costs-sessions-table th.sort-active::after {
+  content: ' ▾';
+}
+
+.costs-sessions-table th.sort-active.sort-asc::after {
+  content: ' ▴';
+}
+
+.costs-sessions-table td {
+  font-size: 12px;
+  color: var(--text);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.costs-sessions-table tr {
+  transition: background 0.1s;
+}
+
+.costs-sessions-table tbody tr:hover {
+  background: var(--mantle);
+}
+
+.costs-sessions-table .cost-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.costs-sessions-table .model-cell {
+  font-size: 11px;
+  color: var(--subtext0);
+}
+
+.costs-sessions-table .workspace-cell {
+  font-size: 11px;
+  color: var(--subtext0);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.costs-sessions-table .name-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.costs-sessions-empty {
+  text-align: center;
+  color: var(--subtext0);
+  padding: 24px;
+  font-size: 12px;
+}
+
+/* Responsive: stack cards on narrow screens */
+@media (max-width: 768px) {
+  .costs-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .costs-breakdown {
+    grid-template-columns: 1fr;
+  }
+  .costs-card-value {
+    font-size: 18px;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════ */

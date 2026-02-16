@@ -2069,6 +2069,241 @@ app.get('/api/workspaces/:id/analytics', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
+//  COST DASHBOARD
+// ──────────────────────────────────────────────────────────
+
+/**
+ * GET /api/cost/dashboard?period=week
+ * Returns aggregated cost dashboard data: summary, timeline, model/workspace
+ * breakdowns, and per-session costs. Used by the Costs tab.
+ * @param {string} [period=week] - One of: day, week, month, all
+ */
+app.get('/api/cost/dashboard', requireAuth, (req, res) => {
+  try {
+    const period = req.query.period || 'week';
+    const store = getStore();
+    const allWorkspaces = store.getAllWorkspaces();
+
+    // Period cutoff calculation
+    const now = Date.now();
+    const periodMs = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+      all: Infinity,
+    };
+    const cutoffMs = periodMs[period] || periodMs.week;
+    const cutoffDate = cutoffMs === Infinity ? null : new Date(now - cutoffMs).toISOString();
+
+    // Collect cost data from all sessions across all workspaces
+    const allSessionCosts = [];        // Per-session cost records
+    const dailyCosts = {};             // date string -> { cost, tokens }
+    const modelAgg = {};               // model -> { cost, tokens }
+    const workspaceAgg = {};           // workspaceId -> { name, cost, sessionCount }
+    let totalCost = 0;
+    let totalTokens = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+    let totalMessages = 0;
+    let periodCost = 0;
+
+    for (const workspace of allWorkspaces) {
+      const sessions = store.getWorkspaceSessions(workspace.id);
+      if (!workspaceAgg[workspace.id]) {
+        workspaceAgg[workspace.id] = { id: workspace.id, name: workspace.name, cost: 0, sessionCount: 0 };
+      }
+
+      for (const session of sessions) {
+        const resumeSessionId = session.resumeSessionId;
+        if (!resumeSessionId) continue;
+
+        const jsonlPath = findJsonlFile(resumeSessionId);
+        if (!jsonlPath) continue;
+
+        try {
+          const stat = fs.statSync(jsonlPath);
+          if (stat.size >= 10 * 1024 * 1024) continue; // Skip >10MB files
+
+          // Check cache
+          const mtimeMs = stat.mtimeMs;
+          const cached = _costCache.get(resumeSessionId);
+          const cacheNow = Date.now();
+          let costData;
+
+          if (cached && cached.mtimeMs === mtimeMs && (cacheNow - cached.timestamp) < COST_CACHE_TTL) {
+            costData = cached.result;
+          } else {
+            costData = calculateSessionCost(jsonlPath);
+            const result = { sessionId: session.id, resumeSessionId, ...costData };
+            _costCache.set(resumeSessionId, { mtimeMs, timestamp: cacheNow, result });
+          }
+
+          const sessionCost = costData.cost ? costData.cost.total : 0;
+          totalCost += sessionCost;
+          totalMessages += costData.messageCount || 0;
+
+          if (costData.tokens) {
+            totalTokens.input += costData.tokens.input || 0;
+            totalTokens.output += costData.tokens.output || 0;
+            totalTokens.cacheWrite += costData.tokens.cacheWrite || 0;
+            totalTokens.cacheRead += costData.tokens.cacheRead || 0;
+          }
+
+          // Workspace aggregation
+          workspaceAgg[workspace.id].cost += sessionCost;
+          workspaceAgg[workspace.id].sessionCount++;
+
+          // Model aggregation
+          if (costData.modelBreakdown) {
+            for (const [model, breakdown] of Object.entries(costData.modelBreakdown)) {
+              if (!modelAgg[model]) {
+                modelAgg[model] = { model, cost: 0, tokens: 0 };
+              }
+              modelAgg[model].cost += breakdown.cost || 0;
+              modelAgg[model].tokens += (breakdown.input || 0) + (breakdown.output || 0) +
+                (breakdown.cacheWrite || 0) + (breakdown.cacheRead || 0);
+            }
+          }
+
+          // Daily timeline from contextSamples timestamps
+          const samples = costData.quota ? costData.quota.contextGrowth : [];
+          if (samples && samples.length > 0) {
+            // Group messages by day, calculate cost per message
+            const perMsgCost = costData.messageCount > 0
+              ? sessionCost / costData.messageCount : 0;
+
+            for (const sample of samples) {
+              if (!sample.ts) continue;
+              const dayKey = sample.ts.substring(0, 10); // YYYY-MM-DD
+              if (!dailyCosts[dayKey]) {
+                dailyCosts[dayKey] = { date: dayKey, cost: 0, tokens: 0, messages: 0 };
+              }
+              dailyCosts[dayKey].cost += perMsgCost;
+              dailyCosts[dayKey].tokens += sample.tokens || 0;
+              dailyCosts[dayKey].messages++;
+            }
+          }
+
+          // Check if within period for periodCost
+          if (cutoffDate && costData.lastMessage && costData.lastMessage >= cutoffDate) {
+            periodCost += sessionCost;
+          } else if (!cutoffDate) {
+            periodCost += sessionCost;
+          }
+
+          // Determine primary model for the session
+          let primaryModel = 'unknown';
+          let maxModelCost = 0;
+          if (costData.modelBreakdown) {
+            for (const [model, breakdown] of Object.entries(costData.modelBreakdown)) {
+              if (breakdown.cost > maxModelCost) {
+                maxModelCost = breakdown.cost;
+                primaryModel = model;
+              }
+            }
+          }
+
+          allSessionCosts.push({
+            id: session.id,
+            name: session.name || session.id.substring(0, 12),
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+            cost: Math.round(sessionCost * 1000) / 1000,
+            messageCount: costData.messageCount || 0,
+            model: primaryModel,
+            lastActive: costData.lastMessage || session.lastActive || null,
+            firstMessage: costData.firstMessage || null,
+          });
+        } catch (_) {
+          // Skip sessions with unreadable JSONL
+        }
+      }
+    }
+
+    // Build timeline sorted by date, filtered to period
+    let timeline = Object.values(dailyCosts).sort((a, b) => a.date.localeCompare(b.date));
+    if (cutoffDate) {
+      const cutoffDay = cutoffDate.substring(0, 10);
+      timeline = timeline.filter(d => d.date >= cutoffDay);
+    }
+    // Round cost values in timeline
+    timeline.forEach(d => {
+      d.cost = Math.round(d.cost * 1000) / 1000;
+    });
+
+    // Build model breakdown sorted by cost descending
+    const totalCostForPct = totalCost || 1;
+    const byModel = Object.values(modelAgg)
+      .map(m => ({
+        model: m.model,
+        cost: Math.round(m.cost * 1000) / 1000,
+        tokens: m.tokens,
+        pct: Math.round((m.cost / totalCostForPct) * 100),
+      }))
+      .sort((a, b) => b.cost - a.cost);
+
+    // Build workspace breakdown sorted by cost descending
+    const byWorkspace = Object.values(workspaceAgg)
+      .filter(w => w.cost > 0)
+      .map(w => ({
+        id: w.id,
+        name: w.name,
+        cost: Math.round(w.cost * 1000) / 1000,
+        sessionCount: w.sessionCount,
+        pct: Math.round((w.cost / totalCostForPct) * 100),
+      }))
+      .sort((a, b) => b.cost - a.cost);
+
+    // Sort sessions by cost descending
+    allSessionCosts.sort((a, b) => b.cost - a.cost);
+
+    // Calculate cache savings: cacheRead tokens charged at cacheRead rate instead of full input rate
+    // Savings = cacheRead tokens * (input_rate - cacheRead_rate)
+    // Use average input rate across models for simplicity
+    const avgInputRate = byModel.length > 0
+      ? byModel.reduce((sum, m) => {
+          const pricing = TOKEN_PRICING[m.model] || DEFAULT_PRICING;
+          return sum + pricing.input;
+        }, 0) / byModel.length
+      : DEFAULT_PRICING.input;
+    const avgCacheReadRate = byModel.length > 0
+      ? byModel.reduce((sum, m) => {
+          const pricing = TOKEN_PRICING[m.model] || DEFAULT_PRICING;
+          return sum + pricing.cacheRead;
+        }, 0) / byModel.length
+      : DEFAULT_PRICING.cacheRead;
+    const cacheSavings = Math.round(
+      (totalTokens.cacheRead / 1_000_000) * (avgInputRate - avgCacheReadRate) * 1000
+    ) / 1000;
+
+    // Period labels
+    const periodLabels = {
+      day: 'Last 24 hours',
+      week: 'Last 7 days',
+      month: 'Last 30 days',
+      all: 'All time',
+    };
+
+    res.json({
+      summary: {
+        totalCost: Math.round(totalCost * 1000) / 1000,
+        totalTokens,
+        periodCost: Math.round(periodCost * 1000) / 1000,
+        periodLabel: periodLabels[period] || periodLabels.week,
+        messageCount: totalMessages,
+        avgCostPerMessage: totalMessages > 0
+          ? Math.round((totalCost / totalMessages) * 10000) / 10000 : 0,
+        cacheSavings,
+      },
+      timeline,
+      byModel,
+      byWorkspace,
+      sessions: allSessionCosts,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get cost dashboard: ' + err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
 //  SESSION CONTEXT EXPORT / HANDOFF
 // ──────────────────────────────────────────────────────────
 

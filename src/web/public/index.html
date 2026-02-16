@@ -108,11 +108,11 @@
             </svg>
             Workspace
           </button>
-          <button class="view-tab" data-mode="all" role="tab" aria-selected="false">
+          <button class="view-tab" data-mode="costs" role="tab" aria-selected="false">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 4h10M2 7h10M2 10h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M7 1v12M4.5 3.5C4.5 2.67 5.62 2 7 2s2.5.67 2.5 1.5S8.38 5 7 5 4.5 5.67 4.5 6.5 5.62 8 7 8s2.5.67 2.5 1.5S8.38 11 7 11s-2.5-.67-2.5-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
             </svg>
-            All
+            Costs
           </button>
           <button class="view-tab" data-mode="recent" role="tab" aria-selected="false">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -688,6 +688,27 @@
           </div>
         </div>
 
+        <!-- Costs Panel -->
+        <div class="costs-panel" id="costs-panel" hidden>
+          <div class="costs-header">
+            <h2 class="costs-title">Cost Dashboard</h2>
+            <div class="costs-header-actions">
+              <div class="costs-period-selector" id="costs-period-selector">
+                <button class="costs-period-btn" data-period="day">Day</button>
+                <button class="costs-period-btn active" data-period="week">Week</button>
+                <button class="costs-period-btn" data-period="month">Month</button>
+                <button class="costs-period-btn" data-period="all">All</button>
+              </div>
+              <button class="btn btn-ghost btn-sm costs-refresh-btn" id="costs-refresh-btn" title="Refresh costs">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M14 2v4h-4M2 14v-4h4M2.5 6.5A6 6 0 0114 4M13.5 9.5A6 6 0 012 12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="costs-body" id="costs-body">
+            <div class="costs-loading">Loading cost data...</div>
+          </div>
+        </div>
+
         <!-- Resources Panel -->
         <div class="resources-panel" id="resources-panel" hidden>
           <div class="resources-header">
@@ -752,11 +773,11 @@
         </svg>
         <span>Spaces</span>
       </button>
-      <button class="mobile-tab" data-view="all" aria-label="All Sessions">
+      <button class="mobile-tab" data-view="costs" aria-label="Costs">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-          <path d="M3 5h14M3 10h14M3 15h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <path d="M10 2v16M7 4.5C7 3.67 8.34 3 10 3s3 .67 3 1.5S11.66 6 10 6 7 6.67 7 7.5 8.34 9 10 9s3 .67 3 1.5S11.66 12 10 12s-3-.67-3-1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
-        <span>Sessions</span>
+        <span>Costs</span>
       </button>
       <button class="mobile-tab" data-view="terminal" aria-label="Terminal">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">

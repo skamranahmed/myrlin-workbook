@@ -99,6 +99,11 @@ class PtySessionManager {
     let fullCommand = command;
     if (resumeSessionId) {
       fullCommand += ' --resume ' + resumeSessionId;
+    } else if (cwd) {
+      // No explicit session to resume — use --continue to pick up most recent
+      // conversation in this working directory. On a fresh dir with no history,
+      // Claude will start a new conversation (same as bare `claude`).
+      fullCommand += ' --continue';
     }
     if (bypassPermissions) {
       fullCommand += ' --dangerously-skip-permissions';
@@ -255,6 +260,67 @@ class PtySessionManager {
     }
 
     console.log(`[PTY] Spawned session ${sessionId} (PID: ${ptyProcess.pid}) cmd: "${fullCommand}" cwd: "${cwd || process.cwd()}"`);
+
+    // ── Async: detect Claude session UUID from newest JSONL after spawn ──
+    // Claude Code creates a JSONL file in ~/.claude/projects/<encoded-cwd>/<uuid>.jsonl.
+    // After a short delay, scan for the newest file and backfill resumeSessionId
+    // so future restarts use the precise --resume <uuid> instead of --continue.
+    if (resolvedCwd && !resumeSessionId) {
+      setTimeout(() => {
+        try {
+          const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+          if (!fs.existsSync(claudeDir)) return;
+
+          // Claude encodes the cwd path as a directory name under ~/.claude/projects/
+          // Try multiple encoding patterns: URL-encoded, slash-replaced
+          const candidates = fs.readdirSync(claudeDir).filter(d => {
+            try {
+              const decoded = decodeURIComponent(d);
+              const normalizedDecoded = decoded.replace(/[/\\]/g, path.sep);
+              const normalizedCwd = resolvedCwd.replace(/[/\\]/g, path.sep);
+              return normalizedDecoded === normalizedCwd;
+            } catch (_) {
+              return false;
+            }
+          });
+
+          if (candidates.length === 0) return;
+
+          const projDir = path.join(claudeDir, candidates[0]);
+          const jsonls = fs.readdirSync(projDir)
+            .filter(f => f.endsWith('.jsonl'))
+            .map(f => {
+              try {
+                return { name: f, mtime: fs.statSync(path.join(projDir, f)).mtimeMs };
+              } catch (_) {
+                return null;
+              }
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.mtime - a.mtime);
+
+          if (jsonls.length === 0) return;
+
+          const uuid = jsonls[0].name.replace('.jsonl', '');
+          console.log(`[PTY] Detected Claude session UUID for ${sessionId}: ${uuid}`);
+
+          // Save to store so future restarts use --resume <uuid>
+          try {
+            const store = getStore();
+            if (store.getSession(sessionId)) {
+              store.updateSession(sessionId, { resumeSessionId: uuid });
+              console.log(`[PTY] Backfilled resumeSessionId=${uuid} for session ${sessionId}`);
+            }
+          } catch (_) {}
+
+          // Also store on the session object for layout saves
+          session.detectedResumeId = uuid;
+        } catch (err) {
+          console.log(`[PTY] UUID detection failed for ${sessionId}: ${err.message}`);
+        }
+      }, 8000); // Wait 8s for Claude to create the JSONL file
+    }
+
     return session;
   }
 
