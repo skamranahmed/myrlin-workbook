@@ -1,0 +1,41 @@
+# Marketing & screenshots (large files, not needed at runtime)
+marketing/
+screenshots/
+docs/
+
+# Site (landing page, not needed at runtime)
+site/
+
+# Development & testing
+test/
+scripts/
+.github/
+.claude/
+
+# State (user-specific, generated at runtime — NOT src/state/)
+/state/
+
+# Backup files
+src/web/public/.backup/
+
+# Log files
+*.log
+
+# Internal docs
+IDEAS.md
+ROADMAP.md
+SESSION_LOG.md
+TODO.md
+TASK.md
+PLANNING.md
+CHANGELOG.md
+DOCS_PLAN.md
+CONTRIBUTING.md
+reddit-launch-post.md
+nul
+
+# Dev config
+.gitignore
+.npmignore
+.eslintrc*
+.prettierrc*
