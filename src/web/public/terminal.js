@@ -104,12 +104,116 @@ class TerminalPane {
     brightWhite: '#cad3f5',
   };
 
+  static THEME_CHERRY = {
+    background: '#221a22',
+    foreground: '#f0ddf0',
+    cursor: '#f5a0d0',
+    cursorAccent: '#221a22',
+    selectionBackground: 'rgba(245, 160, 208, 0.25)',
+    selectionForeground: '#f0ddf0',
+    black: '#4c404e',
+    red: '#f07888',
+    green: '#a0d890',
+    yellow: '#f0d098',
+    blue: '#90b0ea',
+    magenta: '#e890c8',
+    cyan: '#80d8c0',
+    white: '#dcc8e0',
+    brightBlack: '#605464',
+    brightRed: '#f07888',
+    brightGreen: '#a0d890',
+    brightYellow: '#f0d098',
+    brightBlue: '#90b0ea',
+    brightMagenta: '#e890c8',
+    brightCyan: '#80d8c0',
+    brightWhite: '#f0ddf0',
+  };
+
+  static THEME_OCEAN = {
+    background: '#1a1e28',
+    foreground: '#d8e4f5',
+    cursor: '#70a8f0',
+    cursorAccent: '#1a1e28',
+    selectionBackground: 'rgba(112, 168, 240, 0.25)',
+    selectionForeground: '#d8e4f5',
+    black: '#384254',
+    red: '#f08888',
+    green: '#80d8a0',
+    yellow: '#f0d880',
+    blue: '#70a8f0',
+    magenta: '#b0a0ea',
+    cyan: '#60d8d0',
+    white: '#b8ccdc',
+    brightBlack: '#4a5668',
+    brightRed: '#f08888',
+    brightGreen: '#80d8a0',
+    brightYellow: '#f0d880',
+    brightBlue: '#70a8f0',
+    brightMagenta: '#b0a0ea',
+    brightCyan: '#60d8d0',
+    brightWhite: '#d8e4f5',
+  };
+
+  static THEME_AMBER = {
+    background: '#211e1a',
+    foreground: '#f0e8d8',
+    cursor: '#f0d070',
+    cursorAccent: '#211e1a',
+    selectionBackground: 'rgba(240, 208, 112, 0.25)',
+    selectionForeground: '#f0e8d8',
+    black: '#4c4438',
+    red: '#e08878',
+    green: '#a0d090',
+    yellow: '#f0d070',
+    blue: '#88b4d8',
+    magenta: '#d0a8d8',
+    cyan: '#78c8b8',
+    white: '#dcd4bc',
+    brightBlack: '#605848',
+    brightRed: '#e08878',
+    brightGreen: '#a0d090',
+    brightYellow: '#f0d070',
+    brightBlue: '#88b4d8',
+    brightMagenta: '#d0a8d8',
+    brightCyan: '#78c8b8',
+    brightWhite: '#f0e8d8',
+  };
+
+  static THEME_MINT = {
+    background: '#1a2120',
+    foreground: '#d8f0e8',
+    cursor: '#78e0a0',
+    cursorAccent: '#1a2120',
+    selectionBackground: 'rgba(120, 224, 160, 0.25)',
+    selectionForeground: '#d8f0e8',
+    black: '#3c4a48',
+    red: '#e09090',
+    green: '#78e0a0',
+    yellow: '#e0d890',
+    blue: '#80b4e0',
+    magenta: '#c0a0e0',
+    cyan: '#60e0c8',
+    white: '#c0dcd4',
+    brightBlack: '#4e5e5c',
+    brightRed: '#e09090',
+    brightGreen: '#78e0a0',
+    brightYellow: '#e0d890',
+    brightBlue: '#80b4e0',
+    brightMagenta: '#c0a0e0',
+    brightCyan: '#60e0c8',
+    brightWhite: '#d8f0e8',
+  };
+
   static getCurrentTheme() {
     const t = document.documentElement.dataset.theme;
     switch (t) {
       case 'latte': return TerminalPane.THEME_LATTE;
       case 'frappe': return TerminalPane.THEME_FRAPPE;
       case 'macchiato': return TerminalPane.THEME_MACCHIATO;
+      case 'cherry': return TerminalPane.THEME_CHERRY;
+      case 'ocean': return TerminalPane.THEME_OCEAN;
+      case 'amber': return TerminalPane.THEME_AMBER;
+      case 'mint': return TerminalPane.THEME_MINT;
       default: return TerminalPane.THEME_MOCHA;
     }
   }

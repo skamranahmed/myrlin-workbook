@@ -1789,7 +1789,7 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
 app.get('/api/quota-overview', requireAuth, (req, res) => {
   try {
     const store = getStore();
-    const allWorkspaces = store.getAllWorkspaces();
+    const allWorkspaces = store.getAllWorkspacesList();
     const sessionQuotas = [];
 
     for (const workspace of allWorkspaces) {
@@ -2082,7 +2082,7 @@ app.get('/api/cost/dashboard', requireAuth, (req, res) => {
   try {
     const period = req.query.period || 'week';
     const store = getStore();
-    const allWorkspaces = store.getAllWorkspaces();
+    const allWorkspaces = store.getAllWorkspacesList();
 
     // Period cutoff calculation
     const now = Date.now();

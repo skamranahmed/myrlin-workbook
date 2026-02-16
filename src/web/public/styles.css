@@ -5373,6 +5373,242 @@ html {
   background: rgba(198, 160, 246, 0.4);
 }
 
+/* ═══════════════════════════════════════════════════════════ */
+/* CHERRY (Rose-Tinted Dark Theme)                             */
+/* ═══════════════════════════════════════════════════════════ */
+
+:root[data-theme="cherry"] {
+  --base: #221a22;
+  --mantle: #1c141c;
+  --crust: #161018;
+  --surface0: #382e3a;
+  --surface1: #4c404e;
+  --surface2: #605464;
+  --overlay0: #786c80;
+  --overlay1: #908498;
+  --text: #f0ddf0;
+  --subtext0: #c8b4cc;
+  --subtext1: #dcc8e0;
+  --mauve: #e890c8;
+  --blue: #90b0ea;
+  --green: #a0d890;
+  --yellow: #f0d098;
+  --red: #f07888;
+  --peach: #f0a088;
+  --teal: #80d8c0;
+  --sky: #90c8ea;
+  --pink: #f5a0d0;
+  --lavender: #c0a8f0;
+  --flamingo: #f0b8b8;
+  --rosewater: #f5d0c8;
+  --sapphire: #80c0e0;
+
+  --border-subtle: rgba(96, 84, 100, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="cherry"] .theme-icon-moon { display: inline; }
+:root[data-theme="cherry"] .theme-icon-sun { display: none; }
+
+:root[data-theme="cherry"] ::selection {
+  background: rgba(245, 160, 208, 0.25);
+  color: var(--text);
+}
+
+:root[data-theme="cherry"] .stat-dot-running {
+  background: var(--green);
+  box-shadow: 0 0 4px rgba(160, 216, 144, 0.5);
+}
+
+:root[data-theme="cherry"] .terminal-pane-empty.drag-over .terminal-container {
+  background: rgba(245, 160, 208, 0.05);
+}
+
+:root[data-theme="cherry"] .terminal-resize-handle:hover {
+  background: rgba(245, 160, 208, 0.4);
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* OCEAN (Cool Navy Dark Theme)                                */
+/* ═══════════════════════════════════════════════════════════ */
+
+:root[data-theme="ocean"] {
+  --base: #1a1e28;
+  --mantle: #141822;
+  --crust: #10141c;
+  --surface0: #283040;
+  --surface1: #384254;
+  --surface2: #4a5668;
+  --overlay0: #607080;
+  --overlay1: #788898;
+  --text: #d8e4f5;
+  --subtext0: #a0b4cc;
+  --subtext1: #b8ccdc;
+  --mauve: #b0a0ea;
+  --blue: #70a8f0;
+  --green: #80d8a0;
+  --yellow: #f0d880;
+  --red: #f08888;
+  --peach: #f0b088;
+  --teal: #60d8d0;
+  --sky: #80c8f0;
+  --pink: #ea9cc8;
+  --lavender: #a0b0f0;
+  --flamingo: #f0c0c0;
+  --rosewater: #f0d8d0;
+  --sapphire: #68c0f0;
+
+  --border-subtle: rgba(74, 86, 104, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="ocean"] .theme-icon-moon { display: inline; }
+:root[data-theme="ocean"] .theme-icon-sun { display: none; }
+
+:root[data-theme="ocean"] ::selection {
+  background: rgba(112, 168, 240, 0.25);
+  color: var(--text);
+}
+
+:root[data-theme="ocean"] .stat-dot-running {
+  background: var(--green);
+  box-shadow: 0 0 4px rgba(128, 216, 160, 0.5);
+}
+
+:root[data-theme="ocean"] .terminal-pane-empty.drag-over .terminal-container {
+  background: rgba(112, 168, 240, 0.05);
+}
+
+:root[data-theme="ocean"] .terminal-resize-handle:hover {
+  background: rgba(112, 168, 240, 0.4);
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* AMBER (Warm Gold Dark Theme)                                */
+/* ═══════════════════════════════════════════════════════════ */
+
+:root[data-theme="amber"] {
+  --base: #211e1a;
+  --mantle: #1b1816;
+  --crust: #151210;
+  --surface0: #38322a;
+  --surface1: #4c4438;
+  --surface2: #605848;
+  --overlay0: #787060;
+  --overlay1: #8e8878;
+  --text: #f0e8d8;
+  --subtext0: #ccc0a8;
+  --subtext1: #dcd4bc;
+  --mauve: #d0a8d8;
+  --blue: #88b4d8;
+  --green: #a0d090;
+  --yellow: #f0d070;
+  --red: #e08878;
+  --peach: #f0b870;
+  --teal: #78c8b8;
+  --sky: #88c0d8;
+  --pink: #e0a8c0;
+  --lavender: #b0a8d0;
+  --flamingo: #e8c0a8;
+  --rosewater: #f0d8c0;
+  --sapphire: #78b8d0;
+
+  --border-subtle: rgba(96, 88, 72, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="amber"] .theme-icon-moon { display: inline; }
+:root[data-theme="amber"] .theme-icon-sun { display: none; }
+
+:root[data-theme="amber"] ::selection {
+  background: rgba(240, 208, 112, 0.25);
+  color: var(--text);
+}
+
+:root[data-theme="amber"] .stat-dot-running {
+  background: var(--green);
+  box-shadow: 0 0 4px rgba(160, 208, 144, 0.5);
+}
+
+:root[data-theme="amber"] .terminal-pane-empty.drag-over .terminal-container {
+  background: rgba(240, 184, 112, 0.05);
+}
+
+:root[data-theme="amber"] .terminal-resize-handle:hover {
+  background: rgba(240, 184, 112, 0.4);
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* MINT (Cool Green-Tinted Dark Theme)                         */
+/* ═══════════════════════════════════════════════════════════ */
+
+:root[data-theme="mint"] {
+  --base: #1a2120;
+  --mantle: #161b1a;
+  --crust: #101514;
+  --surface0: #2a3634;
+  --surface1: #3c4a48;
+  --surface2: #4e5e5c;
+  --overlay0: #647676;
+  --overlay1: #7c8e8e;
+  --text: #d8f0e8;
+  --subtext0: #a8ccc0;
+  --subtext1: #c0dcd4;
+  --mauve: #c0a0e0;
+  --blue: #80b4e0;
+  --green: #78e0a0;
+  --yellow: #e0d890;
+  --red: #e09090;
+  --peach: #e8b890;
+  --teal: #60e0c8;
+  --sky: #80d0ea;
+  --pink: #e0a8c8;
+  --lavender: #a8a8e0;
+  --flamingo: #e8c0c0;
+  --rosewater: #f0d8d0;
+  --sapphire: #70c0e0;
+
+  --border-subtle: rgba(78, 94, 92, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
+  --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
+}
+
+:root[data-theme="mint"] .theme-icon-moon { display: inline; }
+:root[data-theme="mint"] .theme-icon-sun { display: none; }
+
+:root[data-theme="mint"] ::selection {
+  background: rgba(120, 224, 160, 0.25);
+  color: var(--text);
+}
+
+:root[data-theme="mint"] .stat-dot-running {
+  background: var(--green);
+  box-shadow: 0 0 4px rgba(120, 224, 160, 0.5);
+}
+
+:root[data-theme="mint"] .terminal-pane-empty.drag-over .terminal-container {
+  background: rgba(96, 224, 200, 0.05);
+}
+
+:root[data-theme="mint"] .terminal-resize-handle:hover {
+  background: rgba(96, 224, 200, 0.4);
+}
+
+
 /* ─── Update Button & Modal ─────────────────────────────── */
 
 .update-btn {

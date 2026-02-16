@@ -103,8 +103,6 @@ There are good tools in this space. I tried them. Here's where Myrlin fits:
 
 ### Cost Tracking
 
-![Session detail with token breakdown and cost](docs/images/session-detail.png)
-
 Per-session and per-workspace cost breakdown. Parses Claude's JSONL usage data, applies model-aware pricing (Opus, Sonnet, Haiku), shows input/output/cache tokens. Know exactly what you're spending.
 
 ### Session Discovery
@@ -157,8 +155,6 @@ Real-time warnings when two or more running sessions are editing the same files.
 
 ### Quick Switcher
 
-![Quick switcher with fuzzy search](docs/images/quick-switcher.png)
-
 `Ctrl+K` / `Cmd+K` opens a fuzzy search across all sessions and workspaces. Jump to anything instantly.
 
 ### Git & Worktree Management
@@ -174,7 +170,7 @@ Real-time warnings when two or more running sessions are editing the same files.
 
 ![Theme switching in action](docs/images/theme-switching.gif)
 
-4 [Catppuccin](https://github.com/catppuccin/catppuccin) themes: Mocha (dark), Macchiato, Frappe, and Latte (light). Toggle from the header dropdown. Choice persists in localStorage.
+8 themes: 4 classic [Catppuccin](https://github.com/catppuccin/catppuccin) (Mocha, Macchiato, Frappe, Latte) plus 4 fun flavors — Cherry (rose), Ocean (navy), Amber (gold), and Mint (jade). Toggle from the header dropdown. Choice persists in localStorage.
 
 ### Port Detection & Resource Monitoring
 

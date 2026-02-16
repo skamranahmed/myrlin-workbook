@@ -2214,7 +2214,7 @@ class CWMApp {
   // Legacy alias for any remaining callers
   toggleTheme() {
     const current = document.documentElement.dataset.theme || 'mocha';
-    const themes = ['mocha', 'macchiato', 'frappe', 'latte'];
+    const themes = ['mocha', 'macchiato', 'frappe', 'latte', 'cherry', 'ocean', 'amber', 'mint'];
     const next = themes[(themes.indexOf(current) + 1) % themes.length];
     this.setTheme(next);
   }
