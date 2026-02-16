@@ -1,13 +1,44 @@
 /**
  * Session Manager - Manages Claude Code session lifecycle
  * Handles launching, stopping, and restarting session processes.
+ * Supports Windows (cmd.exe), macOS, and Linux/WSL.
  */
 
 const { spawn } = require('child_process');
 const { getStore } = require('../state/store');
 
 /**
+ * Allowlist of known-safe login shells.
+ * Used to validate process.env.SHELL on non-Windows platforms to prevent
+ * arbitrary binary execution if the environment is compromised.
+ */
+const ALLOWED_SHELLS = [
+  '/bin/bash', '/usr/bin/bash',
+  '/bin/sh', '/usr/bin/sh',
+  '/bin/zsh', '/usr/bin/zsh',
+  '/bin/fish', '/usr/bin/fish',
+  '/bin/dash', '/usr/bin/dash',
+  '/bin/ash',
+];
+
+/**
+ * Get a safe shell path for the current platform.
+ * Validates process.env.SHELL against an allowlist; falls back to /bin/bash.
+ * @returns {string} Absolute path to a safe shell binary
+ */
+function getSafeShell() {
+  const envShell = process.env.SHELL;
+  if (envShell && ALLOWED_SHELLS.includes(envShell)) {
+    return envShell;
+  }
+  return '/bin/bash';
+}
+
+/**
  * Launch a Claude Code session by spawning a new detached process.
+ * On Windows, opens a new cmd.exe console window.
+ * On Linux/macOS, spawns a detached shell process (primarily used by TUI;
+ * the web GUI uses PTY terminals via pty-manager.js instead).
  * Updates the store with the new PID and sets status to 'running'.
  * @param {string} sessionId - The session ID to launch
  * @returns {{ success: boolean, pid?: number, error?: string }}
@@ -32,6 +63,7 @@ function launchSession(sessionId) {
 
     let child;
     if (process.platform === 'win32') {
+      // Windows: open a new console window via `cmd /c start cmd /k`
       child = spawn('cmd', ['/c', 'start', 'cmd', '/k', command], {
         detached: true,
         stdio: 'ignore',
@@ -39,7 +71,11 @@ function launchSession(sessionId) {
         shell: false,
       });
     } else {
-      const shell = process.env.SHELL || '/bin/bash';
+      // Linux/macOS/WSL: spawn a detached login shell
+      // Note: without a TTY, interactive CLI tools will exit immediately.
+      // The web GUI uses pty-manager.js (with a real PTY) for terminal sessions.
+      // This code path is kept for TUI compatibility and headless/scripted launches.
+      const shell = getSafeShell();
       child = spawn(shell, ['-l', '-c', command], {
         detached: true,
         stdio: 'ignore',

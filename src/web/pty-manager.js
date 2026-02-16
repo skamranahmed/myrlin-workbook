@@ -125,8 +125,18 @@ class PtySessionManager {
     }
 
     // Platform-specific shell selection
+    // On non-Windows, validate SHELL against an allowlist to prevent arbitrary
+    // binary execution if the server environment is compromised (important for remote access)
     const isWindows = process.platform === 'win32';
-    const shell = isWindows ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+    const ALLOWED_SHELLS = [
+      '/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh',
+      '/bin/zsh', '/usr/bin/zsh', '/bin/fish', '/usr/bin/fish',
+      '/bin/dash', '/usr/bin/dash', '/bin/ash',
+    ];
+    const safeShell = (process.env.SHELL && ALLOWED_SHELLS.includes(process.env.SHELL))
+      ? process.env.SHELL
+      : '/bin/bash';
+    const shell = isWindows ? 'cmd.exe' : safeShell;
     const shellArgs = isWindows ? ['/c', fullCommand] : ['-l', '-c', fullCommand];
 
     console.log(`[PTY] Spawning: ${shell} ${shellArgs.join(' ')} (cwd: ${resolvedCwd})`);

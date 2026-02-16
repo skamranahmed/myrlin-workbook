@@ -95,11 +95,16 @@ function seedDemoData(store, notifications) {
     color: 'yellow',
   });
 
+  // Use platform-appropriate demo paths
+  const path = require('path');
+  const home = require('os').homedir();
+  const demoBase = path.join(home, 'Projects');
+
   // Create sessions for Project Alpha
   const s1 = store.createSession({
     name: 'ui-components',
     workspaceId: ws1.id,
-    workingDir: 'C:\\Projects\\project-alpha\\src',
+    workingDir: path.join(demoBase, 'project-alpha', 'src'),
     topic: 'React component library',
     command: 'claude',
   });
@@ -110,7 +115,7 @@ function seedDemoData(store, notifications) {
   const s2 = store.createSession({
     name: 'perf-analysis',
     workspaceId: ws1.id,
-    workingDir: 'C:\\Projects\\project-alpha\\perf',
+    workingDir: path.join(demoBase, 'project-alpha', 'perf'),
     topic: 'Performance profiling and optimization',
     command: 'claude',
   });
@@ -120,7 +125,7 @@ function seedDemoData(store, notifications) {
   const s3 = store.createSession({
     name: 'test-runner',
     workspaceId: ws1.id,
-    workingDir: 'C:\\Projects\\project-alpha\\test',
+    workingDir: path.join(demoBase, 'project-alpha', 'test'),
     topic: 'Integration tests for UI components',
     command: 'claude',
   });
@@ -131,7 +136,7 @@ function seedDemoData(store, notifications) {
   const s4 = store.createSession({
     name: 'api-endpoints',
     workspaceId: ws2.id,
-    workingDir: 'C:\\Projects\\backend-api\\src',
+    workingDir: path.join(demoBase, 'backend-api', 'src'),
     topic: 'REST API for resource management',
     command: 'claude',
   });
@@ -141,7 +146,7 @@ function seedDemoData(store, notifications) {
   const s5 = store.createSession({
     name: 'db-migrations',
     workspaceId: ws2.id,
-    workingDir: 'C:\\Projects\\backend-api\\db',
+    workingDir: path.join(demoBase, 'backend-api', 'db'),
     topic: 'Database schema and migrations',
     command: 'claude',
   });
@@ -152,7 +157,7 @@ function seedDemoData(store, notifications) {
   const s6 = store.createSession({
     name: 'architecture-docs',
     workspaceId: ws3.id,
-    workingDir: 'C:\\Projects\\docs',
+    workingDir: path.join(demoBase, 'docs'),
     topic: 'System architecture documentation',
     command: 'claude',
   });

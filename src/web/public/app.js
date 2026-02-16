@@ -1317,7 +1317,7 @@ class CWMApp {
     const fields = [
       { key: 'name', label: 'Name', placeholder: 'feature-auth', required: true },
       { key: 'topic', label: 'Topic', placeholder: 'Working on authentication flow' },
-      { key: 'workingDir', label: 'Working Directory', placeholder: 'C:\\Users\\...\\project' },
+      { key: 'workingDir', label: 'Working Directory', placeholder: '~/projects/my-app' },
       { key: 'command', label: 'Command', placeholder: 'claude (default)' },
     ];
 
@@ -8427,7 +8427,7 @@ class CWMApp {
     const result = await this.showPromptModal({
       title: 'Create Git Worktree',
       fields: [
-        { key: 'repoDir', label: 'Repository Path', placeholder: 'C:\\path\\to\\repo', required: true },
+        { key: 'repoDir', label: 'Repository Path', placeholder: '~/repos/my-project', required: true },
         { key: 'branch', label: 'Branch Name', placeholder: 'feat/my-feature', required: true },
         { key: 'path', label: 'Worktree Path (optional)', placeholder: 'Leave blank for default' },
       ],

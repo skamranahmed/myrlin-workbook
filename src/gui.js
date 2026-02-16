@@ -39,40 +39,45 @@ if (process.argv.includes('--demo')) {
       description: 'Docs & guides',
     });
 
+    // Use platform-appropriate demo paths (PTY manager validates and falls back to homedir)
+    const path = require('path');
+    const home = require('os').homedir();
+    const demoBase = path.join(home, 'Projects');
+
     store.createSession({
       name: 'ui-components',
       workspaceId: ws1.id,
-      workingDir: 'C:\\Projects\\project-alpha',
+      workingDir: path.join(demoBase, 'project-alpha'),
       topic: 'React components',
     });
     store.createSession({
       name: 'state-mgmt',
       workspaceId: ws1.id,
-      workingDir: 'C:\\Projects\\project-alpha\\state',
+      workingDir: path.join(demoBase, 'project-alpha', 'state'),
       topic: 'State management',
     });
     store.createSession({
       name: 'api-routes',
       workspaceId: ws2.id,
-      workingDir: 'C:\\Projects\\backend-api',
+      workingDir: path.join(demoBase, 'backend-api'),
       topic: 'REST endpoints',
     });
     store.createSession({
       name: 'db-migrations',
       workspaceId: ws2.id,
-      workingDir: 'C:\\Projects\\backend-api\\db',
+      workingDir: path.join(demoBase, 'backend-api', 'db'),
       topic: 'Database schema',
     });
     store.createSession({
       name: 'readme-update',
       workspaceId: ws3.id,
-      workingDir: 'C:\\Projects\\docs',
+      workingDir: path.join(demoBase, 'docs'),
       topic: 'README overhaul',
     });
     store.createSession({
       name: 'api-docs',
       workspaceId: ws3.id,
-      workingDir: 'C:\\Projects\\docs\\api',
+      workingDir: path.join(demoBase, 'docs', 'api'),
       topic: 'API reference',
     });
 
@@ -93,33 +98,83 @@ console.log('Press Ctrl+C to stop.');
 // Snapshot frontend files as "last known good" on successful start
 backupFrontend();
 
-// ─── Open Browser (Windows) ────────────────────────────────
+// ─── Open Browser ────────────────────────────────────────────
 // Skip auto-open when running headless (e.g., marketing capture pipeline)
 // --cdp flag launches browser with Chrome DevTools Protocol remote debugging
 // so the visual-qa MCP server can screenshot and inspect the UI.
 
-if (!process.env.CWM_NO_OPEN) {
+/**
+ * Open a URL in the default browser, cross-platform.
+ * Windows: 'start', macOS: 'open', Linux/WSL: 'xdg-open'.
+ * @param {string} url - The URL to open
+ * @param {Function} [callback] - Optional error callback
+ */
+function openBrowser(url, callback) {
   const { exec } = require('child_process');
+  const platform = process.platform;
+  let cmd;
+  if (platform === 'win32') {
+    cmd = `start "" "${url}"`;
+  } else if (platform === 'darwin') {
+    cmd = `open "${url}"`;
+  } else {
+    cmd = `xdg-open "${url}"`;
+  }
+  exec(cmd, (err) => {
+    if (err && callback) callback(err);
+    else if (err) console.log(`Could not auto-open browser. Visit ${url} manually.`);
+  });
+}
+
+/**
+ * Launch a specific browser with CDP remote debugging enabled, cross-platform.
+ * Tries Chrome first, then Edge (Windows) / Chromium (Linux), then falls back to default browser.
+ * @param {string} url - The URL to open
+ * @param {number} cdpPort - Chrome DevTools Protocol debugging port
+ */
+function openBrowserWithCDP(url, cdpPort) {
+  const { exec } = require('child_process');
+  const platform = process.platform;
+
+  // Platform-specific browser launch commands for CDP
+  const attempts = [];
+  if (platform === 'win32') {
+    attempts.push(`start "" chrome --remote-debugging-port=${cdpPort} "${url}"`);
+    attempts.push(`start "" msedge --remote-debugging-port=${cdpPort} "${url}"`);
+  } else if (platform === 'darwin') {
+    attempts.push(`open -a "Google Chrome" "${url}" --args --remote-debugging-port=${cdpPort}`);
+    attempts.push(`open -a "Chromium" "${url}" --args --remote-debugging-port=${cdpPort}`);
+  } else {
+    attempts.push(`google-chrome --remote-debugging-port=${cdpPort} "${url}"`);
+    attempts.push(`chromium-browser --remote-debugging-port=${cdpPort} "${url}"`);
+    attempts.push(`chromium --remote-debugging-port=${cdpPort} "${url}"`);
+  }
+
+  // Try each in sequence, fall back to default browser if all fail
+  function tryNext(index) {
+    if (index >= attempts.length) {
+      console.log(`Could not launch browser with CDP. Open manually with --remote-debugging-port=${cdpPort}`);
+      openBrowser(url);
+      return;
+    }
+    exec(attempts[index], (err) => {
+      if (err) tryNext(index + 1);
+    });
+  }
+  tryNext(0);
+}
+
+if (!process.env.CWM_NO_OPEN) {
   const cdpEnabled = process.argv.includes('--cdp');
   const cdpPort = parseInt(process.env.CDP_PORT, 10) || 9222;
+  const url = `http://localhost:${port}`;
 
   if (cdpEnabled) {
-    // Launch Chrome/Edge with remote debugging enabled for CDP inspection
-    exec(`start chrome --remote-debugging-port=${cdpPort} http://localhost:${port}`, (err) => {
-      if (err) {
-        // Chrome not found — try Edge (common on Windows)
-        exec(`start msedge --remote-debugging-port=${cdpPort} http://localhost:${port}`, (err2) => {
-          if (err2) {
-            console.log(`Could not launch browser with CDP. Open manually with --remote-debugging-port=${cdpPort}`);
-            exec(`start http://localhost:${port}`);
-          }
-        });
-      }
-    });
+    openBrowserWithCDP(url, cdpPort);
     console.log(`CDP remote debugging enabled on port ${cdpPort}`);
     console.log(`Visual QA MCP can connect at localhost:${cdpPort}`);
   } else {
-    exec(`start http://localhost:${port}`);
+    openBrowser(url);
   }
 }
 
