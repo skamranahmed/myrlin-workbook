@@ -5660,7 +5660,10 @@ class CWMApp {
     if (!el) return;
 
     if (!activity) {
-      el.innerHTML = '';
+      if (el.dataset.activityKey) {
+        el.dataset.activityKey = '';
+        el.innerHTML = '';
+      }
       return;
     }
 
@@ -5677,6 +5680,11 @@ class CWMApp {
     const label = labels[activity.type] || activity.type;
     const detail = activity.detail ? ': ' + this.escapeHtml(activity.detail) : '';
     const dotClass = 'activity-dot-' + activity.type;
+
+    // Deduplicate — skip innerHTML write if content hasn't changed
+    const key = activity.type + '|' + (activity.detail || '');
+    if (el.dataset.activityKey === key) return;
+    el.dataset.activityKey = key;
 
     el.innerHTML = `<span class="activity-dot ${dotClass}"></span>${label}${detail}`;
   }
@@ -7223,6 +7231,7 @@ class CWMApp {
       <span class="terminal-group-tab-dot${hasActive ? '' : ' inactive'}"></span>
       <span class="terminal-group-tab-name">${this.escapeHtml(g.name)}</span>
       ${paneCount > 0 ? `<span class="terminal-group-tab-count">${paneCount}</span>` : ''}
+      <span class="terminal-group-tab-close" data-group-id="${g.id}" title="Close tab">&times;</span>
     </button>`;
   }
 
@@ -7350,10 +7359,18 @@ class CWMApp {
         e.dataTransfer.setData('text/tab-group-id', tab.dataset.groupId);
         e.dataTransfer.effectAllowed = 'move';
         tab.classList.add('tab-dragging');
+        // Store dragged tab ID for drag-hold merge (dataTransfer not readable in dragover)
+        this._draggedTabGroupId = tab.dataset.groupId;
       });
       tab.addEventListener('dragend', () => {
         tab.classList.remove('tab-dragging');
-        this.els.terminalGroupsTabs.querySelectorAll('.tab-drag-over').forEach(el => el.classList.remove('tab-drag-over'));
+        this.els.terminalGroupsTabs.querySelectorAll('.tab-drag-over, .tab-drag-merge').forEach(el => {
+          el.classList.remove('tab-drag-over');
+          el.classList.remove('tab-drag-merge');
+        });
+        // Clear drag-hold timer
+        clearTimeout(this._dragHoldTimer);
+        this._dragHoldTarget = null;
       });
       tab.addEventListener('dragover', (e) => {
         // Accept tab reorder drags and terminal pane move drags
@@ -7364,14 +7381,51 @@ class CWMApp {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           tab.classList.add('tab-drag-over');
+
+          // Drag-hold timer for tab grouping: hold over another tab for 1s to create a folder
+          if (hasTabGroup) {
+            const targetId = tab.dataset.groupId;
+            if (this._dragHoldTarget !== targetId) {
+              // Target changed — reset timer
+              clearTimeout(this._dragHoldTimer);
+              this._dragHoldTarget = targetId;
+              // Show merge indicator after 500ms, complete merge after 1200ms
+              this._dragHoldTimer = setTimeout(() => {
+                tab.classList.add('tab-drag-merge');
+              }, 500);
+              this._dragMergeTimer = setTimeout(() => {
+                // Merge the tabs into a folder
+                // We can't access draggedId from dragover (dataTransfer restricted),
+                // so we store it on dragstart and read it here
+                const draggedId = this._draggedTabGroupId;
+                if (draggedId && draggedId !== targetId) {
+                  this._mergeTabsIntoFolder(draggedId, targetId);
+                }
+                tab.classList.remove('tab-drag-merge');
+                this._dragHoldTarget = null;
+              }, 1200);
+            }
+          }
         }
       });
       tab.addEventListener('dragleave', () => {
         tab.classList.remove('tab-drag-over');
+        tab.classList.remove('tab-drag-merge');
+        // Clear hold timer when leaving the target
+        if (this._dragHoldTarget === tab.dataset.groupId) {
+          clearTimeout(this._dragHoldTimer);
+          clearTimeout(this._dragMergeTimer);
+          this._dragHoldTarget = null;
+        }
       });
       tab.addEventListener('drop', (e) => {
         e.preventDefault();
         tab.classList.remove('tab-drag-over');
+        tab.classList.remove('tab-drag-merge');
+        // Clear hold timer on drop — normal drop/reorder takes precedence
+        clearTimeout(this._dragHoldTimer);
+        clearTimeout(this._dragMergeTimer);
+        this._dragHoldTarget = null;
 
         // Handle terminal pane drop — move terminal to this tab group
         const swapSource = e.dataTransfer.getData('cwm/terminal-swap');
@@ -7456,6 +7510,15 @@ class CWMApp {
           { label: 'Delete', danger: true, action: () => this.deleteTerminalGroup(groupId) },
         );
         this.showContextMenu(ctxItems, e.clientX, e.clientY);
+      });
+    });
+
+    // Bind close buttons on tab group tabs
+    this.els.terminalGroupsTabs.querySelectorAll('.terminal-group-tab-close').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation(); // Don't switch to the tab
+        const groupId = btn.dataset.groupId;
+        await this.closeTabGroupWithConfirmation(groupId);
       });
     });
   }
@@ -7553,6 +7616,44 @@ class CWMApp {
     this.renderTerminalGroupTabs();
     this.saveTerminalLayout();
     this.showToast(`Created group "${group.name}"`, 'success');
+  }
+
+  /**
+   * Merge two tab groups into a folder via drag-and-hold.
+   * If the target is already in a folder, the dragged tab joins that folder.
+   * Otherwise, a new folder is created containing both tabs.
+   * @param {string} draggedGroupId - Tab being dragged
+   * @param {string} targetGroupId - Tab being held over
+   */
+  _mergeTabsIntoFolder(draggedGroupId, targetGroupId) {
+    const draggedGroup = this._tabGroups.find(g => g.id === draggedGroupId);
+    const targetGroup = this._tabGroups.find(g => g.id === targetGroupId);
+    if (!draggedGroup || !targetGroup) return;
+
+    // If dragged tab is already in the same folder as target, nothing to do
+    if (draggedGroup.folderId && draggedGroup.folderId === targetGroup.folderId) return;
+
+    if (targetGroup.folderId) {
+      // Target is already in a folder — add dragged tab to that folder
+      draggedGroup.folderId = targetGroup.folderId;
+      const folder = this._tabFolders.find(f => f.id === targetGroup.folderId);
+      const folderName = folder ? folder.name : 'Group';
+      this.showToast(`Added "${draggedGroup.name}" to group "${folderName}"`, 'success');
+    } else {
+      // Neither in a folder — create a new folder containing both
+      const folderId = 'tf_' + Date.now().toString(36);
+      const colors = ['mauve', 'blue', 'green', 'peach', 'red', 'pink', 'teal', 'yellow'];
+      const color = colors[this._tabFolders.length % colors.length];
+      const folderName = 'Group ' + (this._tabFolders.length + 1);
+
+      this._tabFolders.push({ id: folderId, name: folderName, color, collapsed: false });
+      draggedGroup.folderId = folderId;
+      targetGroup.folderId = folderId;
+      this.showToast(`Created group "${folderName}" — double-click header to rename`, 'success');
+    }
+
+    this.renderTerminalGroupTabs();
+    this.saveTerminalLayout();
   }
 
   /**
@@ -7679,6 +7780,70 @@ class CWMApp {
 
     this.saveTerminalLayout();
     this.renderTerminalGroupTabs();
+  }
+
+  /**
+   * Close a tab group with confirmation if it has live sessions.
+   * Kills all PTY sessions in the tab before deleting.
+   * @param {string} groupId - Tab group to close
+   */
+  async closeTabGroupWithConfirmation(groupId) {
+    // Guard: can't delete last tab
+    if (this._tabGroups.length <= 1) {
+      this.showToast('Cannot delete the last tab group', 'warning');
+      return;
+    }
+
+    const group = this._tabGroups.find(g => g.id === groupId);
+    if (!group) return;
+
+    // Check if this group has live terminal sessions
+    const isActive = groupId === this._activeGroupId;
+    const liveSessions = [];
+
+    if (isActive && group.panes) {
+      // For the active group, check actual terminalPanes
+      for (const p of group.panes) {
+        const tp = this.terminalPanes[p.slot];
+        if (tp) liveSessions.push({ slot: p.slot, sessionId: tp.sessionId });
+      }
+    } else if (group.panes) {
+      // For inactive groups, all saved panes are potentially live PTYs
+      for (const p of group.panes) {
+        if (p.sessionId) liveSessions.push({ slot: p.slot, sessionId: p.sessionId });
+      }
+    }
+
+    if (liveSessions.length > 0) {
+      const confirmed = await this.showConfirmModal({
+        title: 'Close Tab',
+        message: `This tab has ${liveSessions.length} live session${liveSessions.length > 1 ? 's' : ''}. Closing will kill them. Continue?`,
+        confirmText: 'Close & Kill',
+        confirmClass: 'btn-danger',
+      });
+      if (!confirmed) return;
+
+      // Kill all PTY sessions
+      await Promise.allSettled(
+        liveSessions.map(s =>
+          this.api('POST', `/api/pty/${encodeURIComponent(s.sessionId)}/kill`).catch(() => {})
+        )
+      );
+
+      // Close active terminal panes if this is the active group
+      if (isActive) {
+        for (const s of liveSessions) {
+          if (this.terminalPanes[s.slot]) {
+            this.terminalPanes[s.slot].dispose();
+            this.terminalPanes[s.slot] = null;
+          }
+        }
+      }
+
+      this.showToast(`Killed ${liveSessions.length} session${liveSessions.length > 1 ? 's' : ''} and closed tab`, 'success');
+    }
+
+    this.deleteTerminalGroup(groupId);
   }
 
   /**

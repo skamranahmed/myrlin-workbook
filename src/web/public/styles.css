@@ -3918,6 +3918,32 @@ textarea.input {
   border-radius: 6px;
 }
 
+.terminal-group-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--subtext0);
+  transition: all 0.12s;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.terminal-group-tab:hover .terminal-group-tab-close {
+  opacity: 0.7;
+}
+
+.terminal-group-tab-close:hover {
+  opacity: 1 !important;
+  color: var(--red);
+  background: rgba(243, 139, 168, 0.15);
+}
+
 .terminal-groups-add {
   position: sticky;
   right: 0;
@@ -5152,6 +5178,17 @@ textarea.input {
 .terminal-group-tab.tab-drag-over {
   background: var(--surface1);
   box-shadow: inset 0 0 0 1px var(--mauve);
+}
+
+.terminal-group-tab.tab-drag-merge {
+  box-shadow: 0 0 8px var(--mauve), inset 0 0 0 1px var(--mauve);
+  background: color-mix(in srgb, var(--mauve) 15%, var(--surface0));
+  animation: drag-merge-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes drag-merge-pulse {
+  0%, 100% { box-shadow: 0 0 4px var(--mauve), inset 0 0 0 1px var(--mauve); }
+  50% { box-shadow: 0 0 12px var(--mauve), inset 0 0 0 1px var(--mauve); }
 }
 
 /* ═══════════════════════════════════════════════════════════ */
