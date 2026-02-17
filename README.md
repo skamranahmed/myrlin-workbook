@@ -1,12 +1,17 @@
-# Myrlin Workbook
+<p align="center">
+  <img src="docs/images/logo.png" alt="Myrlin's Workbook" width="80">
+</p>
+<h1 align="center">Myrlin's Workbook</h1>
+<p align="center">
+  <a href="https://www.npmjs.com/package/myrlin-workbook"><img src="https://img.shields.io/npm/v/myrlin-workbook.svg?style=flat-square" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/myrlin-workbook"><img src="https://img.shields.io/npm/dm/myrlin-workbook.svg?style=flat-square" alt="npm downloads"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=flat-square" alt="License: AGPL-3.0"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-18%2B-green.svg?style=flat-square" alt="Node.js 18+"></a>
+</p>
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![npm](https://img.shields.io/npm/v/myrlin-workbook.svg)](https://www.npmjs.com/package/myrlin-workbook)
-[![Node](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
-[![Tests](https://img.shields.io/badge/Tests-26%20passing-brightgreen.svg)]()
-
-Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, session manager overlay, costs dashboard, 8 themes, [and more](#full-feature-list). Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
+<p align="center">
+Open-source workspace manager for Claude Code — cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, costs dashboard, 8 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
+</p>
 
 <p align="center">
   <img src="docs/images/hero-demo.gif" alt="4-pane terminal grid with live sessions" width="800">
