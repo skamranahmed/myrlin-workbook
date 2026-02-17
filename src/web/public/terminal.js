@@ -608,135 +608,45 @@ class TerminalPane {
     if (!textarea) return;
 
     this._xtermTextarea = textarea;
+    this._xtermScreen = container.querySelector('.xterm-screen');
 
-    // Default to scroll mode: block touch from reaching textarea via CSS.
-    // This prevents the keyboard from appearing when scrolling.
-    // Unlike readonly, this doesn't interfere with programmatic input.
+    // Default to scroll mode: block touch from reaching textarea and screen.
+    // textarea: prevents keyboard popup on scroll
+    // screen: lets touches pass through to .xterm-viewport for native scroll
     textarea.style.pointerEvents = 'none';
-
-    // ── Custom Touch Scroll Handler ──────────────────────────────
-    this._initTouchScroll(container);
+    if (this._xtermScreen) this._xtermScreen.style.pointerEvents = 'none';
   }
 
-  /**
-   * Custom touch scroll for mobile. Directly manipulates the xterm viewport's
-   * scrollTop for pixel-smooth scrolling that feels like native scroll.
-   * xterm.js's .xterm-screen canvas sits on top of .xterm-viewport and
-   * intercepts touch events, so we handle them manually.
-   */
-  _initTouchScroll(container) {
-    let touchStartY = 0;
-    let touchLastY = 0;
-    let touchLastTime = 0;
-    let velocity = 0;
-    let momentumId = null;
-    let isScrolling = false;
-
-    // Get the xterm viewport element (the actual scrollable div)
-    const viewport = container.querySelector('.xterm-viewport');
-    if (!viewport) {
-      this._log('Touch scroll: .xterm-viewport not found');
-      return;
-    }
-
-    const cancelMomentum = () => {
-      if (momentumId) {
-        cancelAnimationFrame(momentumId);
-        momentumId = null;
-      }
-    };
-
-    const applyMomentum = () => {
-      if (Math.abs(velocity) < 0.3) {
-        velocity = 0;
-        return;
-      }
-
-      // Scroll the viewport directly - pixel-smooth, no line snapping
-      viewport.scrollTop += velocity;
-
-      // Decelerate - 0.95 gives a smooth, native-feeling coast
-      velocity *= 0.95;
-
-      momentumId = requestAnimationFrame(applyMomentum);
-    };
-
-    container.addEventListener('touchstart', (e) => {
-      if (this._mobileTypeMode) return;
-
-      cancelMomentum();
-      const touch = e.touches[0];
-      touchStartY = touch.clientY;
-      touchLastY = touch.clientY;
-      touchLastTime = Date.now();
-      velocity = 0;
-      isScrolling = false;
-    }, { passive: true });
-
-    container.addEventListener('touchmove', (e) => {
-      if (this._mobileTypeMode) return;
-
-      const touch = e.touches[0];
-      const deltaY = touchLastY - touch.clientY; // positive = scroll down
-      const now = Date.now();
-      const dt = Math.max(now - touchLastTime, 1);
-
-      // Determine if this is a scroll gesture (>5px vertical movement)
-      if (!isScrolling) {
-        if (Math.abs(touchStartY - touch.clientY) > 5) {
-          isScrolling = true;
-        } else {
-          return;
-        }
-      }
-
-      // Prevent page scroll - we're handling it
-      e.preventDefault();
-
-      // Directly scroll the viewport - pixel smooth, no line quantization
-      viewport.scrollTop += deltaY;
-
-      // Track velocity for momentum (pixels per 16ms frame)
-      velocity = deltaY * (16 / dt);
-
-      touchLastY = touch.clientY;
-      touchLastTime = now;
-    }, { passive: false });
-
-    container.addEventListener('touchend', () => {
-      if (this._mobileTypeMode) return;
-      if (!isScrolling) return;
-
-      // Apply momentum scrolling with deceleration
-      if (Math.abs(velocity) > 0.5) {
-        momentumId = requestAnimationFrame(applyMomentum);
-      }
-      isScrolling = false;
-    }, { passive: true });
-
-    this._touchScrollCleanup = () => cancelMomentum();
-  }
+  // Touch scrolling is handled natively by the browser.
+  // In scroll mode, .xterm-screen has pointer-events: none, so touches
+  // pass through to .xterm-viewport which scrolls natively via CSS
+  // touch-action: pan-y. This runs on the compositor thread for 60fps
+  // smoothness with native momentum/deceleration — no JS needed.
 
   /**
-   * Switch to type mode - keyboard appears, user can type into terminal
+   * Switch to type mode - keyboard appears, user can type into terminal.
+   * Restores pointer-events on both textarea (keyboard input) and screen
+   * (xterm.js touch handling for cursor/selection).
    */
   setMobileTypeMode() {
     if (!this._xtermTextarea || !this.term) return;
     this._mobileTypeMode = true;
-    // Allow touch to reach textarea so keyboard can appear
     this._xtermTextarea.style.pointerEvents = 'auto';
+    if (this._xtermScreen) this._xtermScreen.style.pointerEvents = 'auto';
     this.term.focus();
     if (this.onMobileModeChange) this.onMobileModeChange('type');
   }
 
   /**
-   * Switch to scroll mode - keyboard hidden, touch scrolls terminal output
+   * Switch to scroll mode - keyboard hidden, touch scrolls terminal output.
+   * Disables pointer-events on textarea (prevents keyboard popup) and screen
+   * (lets touches pass through to viewport for native compositor-thread scroll).
    */
   setMobileScrollMode() {
     if (!this._xtermTextarea) return;
     this._mobileTypeMode = false;
-    // Block touch from reaching textarea - prevents keyboard on scroll
     this._xtermTextarea.style.pointerEvents = 'none';
+    if (this._xtermScreen) this._xtermScreen.style.pointerEvents = 'none';
     if (this.term) this.term.blur();
     if (this.onMobileModeChange) this.onMobileModeChange('scroll');
   }

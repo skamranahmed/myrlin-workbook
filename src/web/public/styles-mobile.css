@@ -557,20 +557,24 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    /* Isolate scroll: our custom touch handler manages scrolling */
     overscroll-behavior: contain;
-    touch-action: none;
+    /* Allow native vertical scrolling — compositor-thread smooth */
+    touch-action: pan-y;
   }
 
-  /* xterm viewport (the actual scrollable area inside xterm.js) */
+  /* xterm viewport (the actual scrollable area inside xterm.js).
+     Native touch scroll is enabled via pan-y — the browser handles momentum,
+     deceleration, and overscroll on the compositor thread for 60fps smoothness.
+     -webkit-overflow-scrolling: touch enables iOS inertial scroll. */
   .terminal-pane.mobile-active .xterm-viewport {
     overscroll-behavior: contain;
-    /* Disable native touch scroll - our handler uses term.scrollLines() */
-    touch-action: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
-  /* xterm screen layer - disable browser touch handling so our
-     custom touch scroll handler can manage scrolling directly */
+  /* xterm screen layer (canvas) — pointer-events toggled by JS:
+     Scroll mode: pointer-events: none → touches pass through to viewport for native scroll
+     Type mode:   pointer-events: auto → xterm.js handles touch for cursor/selection */
   .terminal-pane.mobile-active .xterm-screen {
     touch-action: none;
   }
