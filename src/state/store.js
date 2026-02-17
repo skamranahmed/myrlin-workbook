@@ -230,7 +230,7 @@ class Store extends EventEmitter {
     if (!this._state.activeWorkspace) {
       this._state.activeWorkspace = id;
     }
-    this.save(); // Immediate save — workspace creation is critical
+    this.save(); // Immediate save - workspace creation is critical
     this.emit('workspace:created', workspace);
     return workspace;
   }
@@ -258,7 +258,7 @@ class Store extends EventEmitter {
     }
     // Clean up workspace documentation file
     docsManager.deleteDocs(id);
-    this.save(); // Immediate save — workspace deletion is critical
+    this.save(); // Immediate save - workspace deletion is critical
     this.emit('workspace:deleted', { id });
     return true;
   }
@@ -266,7 +266,7 @@ class Store extends EventEmitter {
   setActiveWorkspace(id) {
     if (!this._state.workspaces[id]) return false;
     this._state.activeWorkspace = id;
-    this.save(); // Immediate save — active workspace is critical
+    this.save(); // Immediate save - active workspace is critical
     this.emit('workspace:activated', this._state.workspaces[id]);
     return true;
   }
@@ -294,7 +294,7 @@ class Store extends EventEmitter {
     this._state.sessions[id] = session;
     this._state.workspaces[workspaceId].sessions.push(id);
     this._state.workspaces[workspaceId].lastActive = now;
-    this.save(); // Immediate save — session creation is critical
+    this.save(); // Immediate save - session creation is critical
     this.emit('session:created', session);
     return session;
   }
@@ -303,7 +303,7 @@ class Store extends EventEmitter {
     const session = this._state.sessions[id];
     if (!session) return null;
 
-    // Handle workspace move — update both workspace session arrays
+    // Handle workspace move - update both workspace session arrays
     if (updates.workspaceId && updates.workspaceId !== session.workspaceId) {
       const oldWs = this._state.workspaces[session.workspaceId];
       const newWs = this._state.workspaces[updates.workspaceId];
@@ -334,7 +334,7 @@ class Store extends EventEmitter {
       ws.sessions = ws.sessions.filter(sid => sid !== id);
     }
     delete this._state.sessions[id];
-    this.save(); // Immediate save — deletion is critical
+    this.save(); // Immediate save - deletion is critical
     this.emit('session:deleted', { id });
     return true;
   }

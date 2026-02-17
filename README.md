@@ -6,7 +6,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Tests](https://img.shields.io/badge/Tests-26%20passing-brightgreen.svg)]()
 
-Open-source workspace manager for Claude Code — cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, session manager overlay, costs dashboard, 8 themes, [and more](#full-feature-list). Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
+Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, session manager overlay, costs dashboard, 8 themes, [and more](#full-feature-list). Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
 
 <p align="center">
   <img src="docs/images/hero-demo.gif" alt="4-pane terminal grid with live sessions" width="800">
@@ -174,7 +174,7 @@ Real-time warnings when two or more running sessions are editing the same files.
 
 ![Theme switching in action](docs/images/theme-switching.gif)
 
-8 themes: 4 classic [Catppuccin](https://github.com/catppuccin/catppuccin) (Mocha, Macchiato, Frappe, Latte) plus 4 fun flavors — Cherry (rose), Ocean (navy), Amber (gold), and Mint (jade). Toggle from the header dropdown. Choice persists in localStorage.
+8 themes: 4 classic [Catppuccin](https://github.com/catppuccin/catppuccin) (Mocha, Macchiato, Frappe, Latte) plus 4 fun flavors - Cherry (rose), Ocean (navy), Amber (gold), and Mint (jade). Toggle from the header dropdown. Choice persists in localStorage.
 
 ### Port Detection & Resource Monitoring
 
@@ -204,78 +204,78 @@ A comprehensive list of everything Myrlin Workbook offers today.
 
 ### Core
 
-- **Session discovery** — scans `~/.claude/projects/`, finds every session you've ever run
-- **Workspace management** — named workspaces with color coding, drag-and-drop grouping
-- **Auto-recovery** — restores state after crash or restart, detects orphaned sessions
-- **State persistence** — JSON on disk, survives everything
+- **Session discovery** - scans `~/.claude/projects/`, finds every session you've ever run
+- **Workspace management** - named workspaces with color coding, drag-and-drop grouping
+- **Auto-recovery** - restores state after crash or restart, detects orphaned sessions
+- **State persistence** - JSON on disk, survives everything
 
 ### Terminals
 
-- **4-pane terminal grid** — xterm.js + node-pty + WebSocket, real PTY (not fake)
-- **Tab groups** — named sets of panes ("Research", "Debug"), switchable and persistent
-- **Tab close buttons** — with live session kill confirmation dialog
-- **Drag-and-hold tab grouping** — hold 1.2s over another tab to create a folder
-- **Cross-tab terminal pane dragging** — drag sessions between panes freely
-- **PTY sessions survive page refresh** — scrollback replay on reconnect
-- **Model selection** — Opus, Sonnet, Haiku per terminal
-- **Right-click context menu** — Copy, Stop, Restart, Model picker
-- **Bracketed paste mode** — proper paste handling in terminal sessions
+- **4-pane terminal grid** - xterm.js + node-pty + WebSocket, real PTY (not fake)
+- **Tab groups** - named sets of panes ("Research", "Debug"), switchable and persistent
+- **Tab close buttons** - with live session kill confirmation dialog
+- **Drag-and-hold tab grouping** - hold 1.2s over another tab to create a folder
+- **Cross-tab terminal pane dragging** - drag sessions between panes freely
+- **PTY sessions survive page refresh** - scrollback replay on reconnect
+- **Model selection** - Opus, Sonnet, Haiku per terminal
+- **Right-click context menu** - Copy, Stop, Restart, Model picker
+- **Bracketed paste mode** - proper paste handling in terminal sessions
 
 ### Cost Tracking
 
-- **Per-session and per-workspace cost breakdown** — input/output/cache tokens
-- **Costs dashboard tab** — period selector (Day / Week / Month / All)
-- **SVG timeline chart** — visual spend over time, model breakdown
-- **Sortable session table** — rank sessions by cost, tokens, or duration
-- **Parses JSONL usage data** — model-aware pricing (Opus, Sonnet, Haiku)
+- **Per-session and per-workspace cost breakdown** - input/output/cache tokens
+- **Costs dashboard tab** - period selector (Day / Week / Month / All)
+- **SVG timeline chart** - visual spend over time, model breakdown
+- **Sortable session table** - rank sessions by cost, tokens, or duration
+- **Parses JSONL usage data** - model-aware pricing (Opus, Sonnet, Haiku)
 
 ### Session Management
 
-- **Session manager overlay** — click header stats to open, full session control
-- **Mass selection and batch stop** — select multiple sessions, stop them all at once
-- **Filter** — All / Running / Stopped quick filters
-- **One-click terminal open** — from session manager rows
-- **Session templates** — save launch configs (directory, model, flags), one-click launch
-- **Quick switcher** — `Ctrl+K` / `Cmd+K` fuzzy search across sessions and workspaces
+- **Session manager overlay** - click header stats to open, full session control
+- **Mass selection and batch stop** - select multiple sessions, stop them all at once
+- **Filter** - All / Running / Stopped quick filters
+- **One-click terminal open** - from session manager rows
+- **Session templates** - save launch configs (directory, model, flags), one-click launch
+- **Quick switcher** - `Ctrl+K` / `Cmd+K` fuzzy search across sessions and workspaces
 
 ### Docs & Planning
 
-- **Per-workspace docs** — Notes, Goals, Tasks, Rules, Roadmap sections
-- **Kanban-style feature board** — Planned, Active, Review, Done columns
-- **Markdown editor** — with formatting toolbar
-- **AI Insights tab** — auto-generated summaries of workspace sessions
+- **Per-workspace docs** - Notes, Goals, Tasks, Rules, Roadmap sections
+- **Kanban-style feature board** - Planned, Active, Review, Done columns
+- **Markdown editor** - with formatting toolbar
+- **AI Insights tab** - auto-generated summaries of workspace sessions
 
 ### Conflict Detection
 
-- **Real-time file conflict warnings** — detects when two+ sessions edit the same files
-- **Conflict center UI** — per-file breakdown with session attribution
-- **Click session chips** — jump directly to the terminal pane for that session
+- **Real-time file conflict warnings** - detects when two+ sessions edit the same files
+- **Conflict center UI** - per-file breakdown with session attribution
+- **Click session chips** - jump directly to the terminal pane for that session
 
 ### Git & Worktree
 
-- **Git status per workspace** — current branch, dirty/clean, ahead/behind remote
-- **Branch listing and worktree CRUD** — create, switch, delete from the UI
-- **"New Feature Session"** — creates branch + worktree + Claude session in one click
-- **Branch badges** — shown on session rows
+- **Git status per workspace** - current branch, dirty/clean, ahead/behind remote
+- **Branch listing and worktree CRUD** - create, switch, delete from the UI
+- **"New Feature Session"** - creates branch + worktree + Claude session in one click
+- **Branch badges** - shown on session rows
 
 ### Themes
 
-- **8 themes** — 4 Catppuccin (Mocha, Macchiato, Frappe, Latte) + 4 fun flavors (Cherry, Ocean, Amber, Mint)
-- **Header dropdown toggle** — choice persists in localStorage
+- **8 themes** - 4 Catppuccin (Mocha, Macchiato, Frappe, Latte) + 4 fun flavors (Cherry, Ocean, Amber, Mint)
+- **Header dropdown toggle** - choice persists in localStorage
 
 ### Resources & Monitoring
 
-- **Port detection** — automatic discovery for running sessions (PowerShell on Windows, lsof on Unix)
-- **Per-session CPU and memory** — live tracking
-- **System overview** — CPU, RAM, uptime
-- **Stop / restart / kill** — from the Resources tab
+- **Port detection** - automatic discovery for running sessions (PowerShell on Windows, lsof on Unix)
+- **Per-session CPU and memory** - live tracking
+- **System overview** - CPU, RAM, uptime
+- **Stop / restart / kill** - from the Resources tab
 
 ### Mobile
 
-- **Responsive layout** — bottom tab bar on small screens
-- **Touch gestures** — swipe between panes, edge swipe for sidebar, long-press for context menus
-- **Mobile terminal toolbar** — keyboard toggle, Enter, Tab, Ctrl+C, Ctrl+D, Esc, arrows, Copy, Upload
-- **Keyboard-aware viewport** — terminal stays visible above soft keyboard
+- **Responsive layout** - bottom tab bar on small screens
+- **Touch gestures** - swipe between panes, edge swipe for sidebar, long-press for context menus
+- **Mobile terminal toolbar** - keyboard toggle, Enter, Tab, Ctrl+C, Ctrl+D, Esc, arrows, Copy, Upload
+- **Keyboard-aware viewport** - terminal stays visible above soft keyboard
 
 ... more to come.
 

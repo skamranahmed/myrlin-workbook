@@ -124,9 +124,9 @@ function stopSession(sessionId) {
     store.addSessionLog(sessionId, `Session stopped (PID ${session.pid} killed)`);
     return { success: true };
   } catch (err) {
-    // Process may already be dead — that's fine, mark as stopped anyway
+    // Process may already be dead - that's fine, mark as stopped anyway
     store.updateSessionStatus(sessionId, 'stopped', null);
-    store.addSessionLog(sessionId, `Session stop — process already exited (${err.message})`);
+    store.addSessionLog(sessionId, `Session stop - process already exited (${err.message})`);
     return { success: true };
   }
 }

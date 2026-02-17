@@ -82,7 +82,7 @@ function ok(text) {
 // ─── Session Content ─────────────────────────────────────────────────────────
 
 /**
- * Session 1 — Coding Session
+ * Session 1 - Coding Session
  *
  * Simulates Claude reading a file, editing a component, and writing tests.
  */
@@ -122,7 +122,7 @@ function session1() {
 }
 
 /**
- * Session 2 — Planning Session
+ * Session 2 - Planning Session
  *
  * Simulates creating a PLANNING.md and spawning a subagent for analysis.
  */
@@ -165,7 +165,7 @@ function session2() {
 }
 
 /**
- * Session 3 — Testing Session
+ * Session 3 - Testing Session
  *
  * Simulates running a test suite with coverage results.
  */
@@ -213,7 +213,7 @@ function session3() {
 }
 
 /**
- * Session 4 — Debugging Session
+ * Session 4 - Debugging Session
  *
  * Simulates diagnosing and fixing a port conflict (EADDRINUSE).
  */

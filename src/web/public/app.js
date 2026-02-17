@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Claude Workspace Manager — Frontend Application
+   Claude Workspace Manager - Frontend Application
    Vanilla JS SPA with Catppuccin Mocha theme
    ═══════════════════════════════════════════════════════════════ */
 
@@ -22,7 +22,7 @@ window.addEventListener('error', function _cwmFallbackHandler(e) {
   fetch('/api/health').then(r => r.json()).then(data => {
     if (data.status !== 'ok') return;
 
-    // Server is fine — show fallback recovery UI
+    // Server is fine - show fallback recovery UI
     document.body.innerHTML = `
       <div style="
         display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -70,7 +70,7 @@ window.addEventListener('error', function _cwmFallbackHandler(e) {
         </div>
       </div>`;
   }).catch(() => {
-    // Server is also down — nothing we can do from the client
+    // Server is also down - nothing we can do from the client
     document.body.innerHTML = `
       <div style="
         display:flex;align-items:center;justify-content:center;
@@ -149,7 +149,7 @@ class CWMApp {
     this.bindEvents();
     this.init();
 
-    // Clear the init timeout — we made it
+    // Clear the init timeout - we made it
     clearTimeout(window.__cwmInitTimeout);
 
     // Check if running a restored fallback version
@@ -453,7 +453,7 @@ class CWMApp {
       });
     }
 
-    // Projects refresh — bypass both browser and server caches
+    // Projects refresh - bypass both browser and server caches
     if (this.els.projectsRefresh) {
       this.els.projectsRefresh.addEventListener('click', () => {
         sessionStorage.removeItem('cwm_projects');
@@ -524,7 +524,7 @@ class CWMApp {
       if (this.state.selectedSession) this.restartSession(this.state.selectedSession.id);
     });
 
-    // Context Menu — dismiss on click outside or Escape
+    // Context Menu - dismiss on click outside or Escape
     document.addEventListener('click', (e) => {
       // Don't dismiss if clicking inside the context menu (submenus need to stay open)
       if (this.els.contextMenu && this.els.contextMenu.contains(e.target)) return;
@@ -534,7 +534,7 @@ class CWMApp {
       if (e.key === 'Escape') this.hideContextMenu();
     });
 
-    // Image upload — file input change handler
+    // Image upload - file input change handler
     if (this.els.imageUploadInput) {
       this.els.imageUploadInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -590,7 +590,7 @@ class CWMApp {
       });
     });
 
-    // Docs/Board tab switching — use event delegation on parent to avoid listener leaks
+    // Docs/Board tab switching - use event delegation on parent to avoid listener leaks
     // (Adding listeners to each .docs-tab individually would accumulate if tabs are ever re-rendered)
     const docsTabBar = document.querySelector('.docs-tabs');
     if (docsTabBar) {
@@ -651,7 +651,7 @@ class CWMApp {
       });
     }
 
-    // Session Manager — click stat chips to open overlay
+    // Session Manager - click stat chips to open overlay
     const statChips = document.querySelectorAll('.stat-chip');
     statChips.forEach(chip => {
       chip.style.cursor = 'pointer';
@@ -712,12 +712,12 @@ class CWMApp {
 
     // Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      // Ctrl+K / Cmd+K — Quick Switcher
+      // Ctrl+K / Cmd+K - Quick Switcher
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         if (this.state.token) this.openQuickSwitcher();
       }
-      // Ctrl+Shift+F / Cmd+Shift+F — Global Search
+      // Ctrl+Shift+F / Cmd+Shift+F - Global Search
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'f') {
         e.preventDefault();
         if (this.state.token) this.openGlobalSearch();
@@ -842,7 +842,7 @@ class CWMApp {
     }
 
     // ─── Mobile: Terminal Toolbar ──────────────────────────────
-    // Toolbar buttons send input directly via WebSocket — they work in
+    // Toolbar buttons send input directly via WebSocket - they work in
     // both scroll and type mode, no textarea focus needed.
     document.querySelectorAll('.terminal-mobile-toolbar button').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -859,7 +859,7 @@ class CWMApp {
           return;
         }
 
-        // Keyboard toggle — switches between scroll mode and type mode
+        // Keyboard toggle - switches between scroll mode and type mode
         if (key === 'keyboard') {
           const isTypeMode = activePane.toggleMobileInputMode();
           document.querySelectorAll('.toolbar-keyboard').forEach(kb => {
@@ -876,7 +876,7 @@ class CWMApp {
           if (activePane.term && activePane.term.hasSelection()) {
             textToCopy = activePane.term.getSelection();
           } else if (activePane.term) {
-            // No selection — copy all visible terminal content
+            // No selection - copy all visible terminal content
             const buffer = activePane.term.buffer.active;
             const lines = [];
             for (let i = 0; i < buffer.length; i++) {
@@ -893,7 +893,7 @@ class CWMApp {
             navigator.clipboard.writeText(textToCopy).then(() => {
               this.showToast('Copied to clipboard', 'success');
             }).catch(() => {
-              this.showToast('Failed to copy — check browser permissions', 'error');
+              this.showToast('Failed to copy - check browser permissions', 'error');
             });
           } else {
             this.showToast('Nothing to copy', 'info');
@@ -1043,7 +1043,7 @@ class CWMApp {
     try {
       await this.api('POST', '/api/auth/logout');
     } catch {
-      // ignore — we clear locally regardless
+      // ignore - we clear locally regardless
     }
     this.state.token = null;
     localStorage.removeItem('cwm_token');
@@ -1168,7 +1168,7 @@ class CWMApp {
         const data = await this.api('GET', path);
         this.state.sessions = data.sessions || [];
       } else {
-        // 'all' mode — reuse the full list we already fetched
+        // 'all' mode - reuse the full list we already fetched
         this.state.sessions = this.state.allSessions;
       }
 
@@ -1591,7 +1591,7 @@ class CWMApp {
       || null;
     if (!session) return;
 
-    // Hide session — never delete. Persisted in localStorage.
+    // Hide session - never delete. Persisted in localStorage.
     this.state.hiddenSessions.add(id);
     localStorage.setItem('cwm_hiddenSessions', JSON.stringify([...this.state.hiddenSessions]));
 
@@ -1600,7 +1600,7 @@ class CWMApp {
     }
     this.renderWorkspaces();
     this.renderSessions();
-    this.showToast(`Hidden "${session.name}" — toggle "Show hidden" to see it again`, 'info');
+    this.showToast(`Hidden "${session.name}" - toggle "Show hidden" to see it again`, 'info');
   }
 
   unhideSession(id) {
@@ -1738,7 +1738,7 @@ class CWMApp {
       },
     });
 
-    // Open in terminal (quick action) — pass all session flags as spawnOpts
+    // Open in terminal (quick action) - pass all session flags as spawnOpts
     items.push({
       label: 'Open in Terminal', icon: '&#9654;', action: () => {
         const emptySlot = this.terminalPanes.findIndex(p => p === null);
@@ -1867,7 +1867,7 @@ class CWMApp {
   showProjectSessionContextMenu(sessionName, projectPath, x, y) {
     const items = [];
 
-    // Open in terminal (resume the Claude session) — no workspace needed
+    // Open in terminal (resume the Claude session) - no workspace needed
     items.push({
       label: 'Open in Terminal', icon: '&#9654;', action: () => {
         const emptySlot = this.terminalPanes.findIndex(p => p === null);
@@ -2089,7 +2089,7 @@ class CWMApp {
             this.showToast(`Session restarted with bypass ${newVal ? 'on' : 'off'}`, 'info');
           }, 500);
         } catch (_) {
-          // PTY might not be running — flag is saved for next launch
+          // PTY might not be running - flag is saved for next launch
         }
       }
 
@@ -3215,7 +3215,7 @@ class CWMApp {
       // Re-enable confirm button (may have been disabled by previous modal interaction)
       this.els.modalConfirmBtn.disabled = false;
 
-      // Rebind confirm — disable button immediately to prevent double-click
+      // Rebind confirm - disable button immediately to prevent double-click
       const confirmHandler = () => {
         this.els.modalConfirmBtn.disabled = true;
         this.els.modalConfirmBtn.removeEventListener('click', confirmHandler);
@@ -3328,7 +3328,7 @@ class CWMApp {
       // Re-enable confirm button (may have been disabled by previous modal interaction)
       this.els.modalConfirmBtn.disabled = false;
 
-      // Confirm handler — disable button immediately to prevent double-click
+      // Confirm handler - disable button immediately to prevent double-click
       const confirmHandler = () => {
         this.els.modalConfirmBtn.disabled = true;
         this.els.modalConfirmBtn.removeEventListener('click', confirmHandler);
@@ -3345,7 +3345,7 @@ class CWMApp {
             if (el) result[f.key] = el.value;
           }
         });
-        // Validate required — re-enable button if validation fails so user can try again
+        // Validate required - re-enable button if validation fails so user can try again
         for (const f of fields) {
           if (f.required && !result[f.key]) {
             const el = document.getElementById(`modal-field-${f.key}`);
@@ -3419,7 +3419,7 @@ class CWMApp {
       const onKeyDown = (e) => { if (e.key === 'Escape') close(null); };
 
       /**
-       * Navigate to a directory path — fetches contents and renders.
+       * Navigate to a directory path - fetches contents and renders.
        * @param {string} dirPath - Directory path to navigate to
        */
       const navigateTo = async (dirPath) => {
@@ -3432,13 +3432,13 @@ class CWMApp {
           currentPath = data.currentPath;
           pathDisplay.textContent = currentPath;
 
-          // Render breadcrumb — each path segment is clickable
+          // Render breadcrumb - each path segment is clickable
           const normalized = currentPath.replace(/\\/g, '/');
           const segments = normalized.split('/').filter(Boolean);
           let crumbHtml = '';
           for (let i = 0; i < segments.length; i++) {
             const partialPath = segments.slice(0, i + 1).join('/');
-            // On Windows, first segment is drive letter — needs trailing backslash
+            // On Windows, first segment is drive letter - needs trailing backslash
             const clickPath = i === 0 && partialPath.endsWith(':') ? partialPath + '\\' : partialPath;
             const isLast = i === segments.length - 1;
             if (i > 0) crumbHtml += '<span class="folder-browser-sep">&#9656;</span>';
@@ -3551,7 +3551,7 @@ class CWMApp {
     let startX = 0, currentX = 0, dragging = false;
     const closeBtn = toast.querySelector('.toast-close');
     const onPointerDown = (e) => {
-      // Don't start drag from the close button — let click handle it
+      // Don't start drag from the close button - let click handle it
       if (closeBtn && closeBtn.contains(e.target)) return;
       startX = e.clientX;
       currentX = 0;
@@ -3572,7 +3572,7 @@ class CWMApp {
       dragging = false;
       toast.classList.remove('toast-dragging');
       if (currentX > 80) {
-        // Swiped far enough — dismiss
+        // Swiped far enough - dismiss
         toast.classList.add('toast-swipe-exit');
         toast.addEventListener('transitionend', () => toast.remove(), { once: true });
         // Fallback removal if transitionend doesn't fire
@@ -3778,7 +3778,7 @@ class CWMApp {
 
         // Build inline badges for extra session metadata
         let badges = '';
-        // Port badge — show first discovered port
+        // Port badge - show first discovered port
         if (s.ports && s.ports.length > 0) {
           badges += `<span class="session-badge session-badge-port">:${s.ports[0]}</span>`;
         }
@@ -3819,7 +3819,7 @@ class CWMApp {
       if (dirKeys.length === 0) {
         sessionItems = '';
       } else if (dirKeys.length === 1 && dirKeys[0] === '(no directory)') {
-        // Only sessions without a directory — flat list
+        // Only sessions without a directory - flat list
         sessionItems = wsSessions.map(renderSessionItem).join('');
       } else {
         // Always show project directory headers (even for single directory)
@@ -3938,7 +3938,7 @@ class CWMApp {
         const isAlreadyActive = this.state.activeWorkspace && this.state.activeWorkspace.id === wsId;
 
         if (isAlreadyActive) {
-          // Already the active workspace — just toggle its accordion open/closed
+          // Already the active workspace - just toggle its accordion open/closed
           const accordion = el.closest('.workspace-accordion');
           if (accordion) {
             const body = accordion.querySelector('.workspace-accordion-body');
@@ -3947,7 +3947,7 @@ class CWMApp {
             if (chevron) chevron.classList.toggle('open', body && !body.hidden);
           }
         } else {
-          // Different workspace — select it (renderWorkspaces will open its accordion)
+          // Different workspace - select it (renderWorkspaces will open its accordion)
           // Close all accordion bodies first for visual feedback
           list.querySelectorAll('.workspace-accordion-body').forEach(b => b.hidden = true);
           list.querySelectorAll('.ws-chevron').forEach(c => c.classList.remove('open'));
@@ -4011,7 +4011,7 @@ class CWMApp {
         const dropBefore = el.classList.contains('ws-drop-before');
         el.classList.remove('workspace-drop-target', 'ws-drop-before', 'ws-drop-after');
 
-        // Handle session drop — move session to this workspace
+        // Handle session drop - move session to this workspace
         const sessionId = e.dataTransfer.getData('cwm/session');
         if (sessionId) {
           e.preventDefault();
@@ -4024,7 +4024,7 @@ class CWMApp {
           return;
         }
 
-        // Handle workspace drop — reorder
+        // Handle workspace drop - reorder
         const draggedWsId = e.dataTransfer.getData('cwm/workspace');
         if (draggedWsId && draggedWsId !== el.dataset.id) {
           e.preventDefault();
@@ -4654,7 +4654,7 @@ class CWMApp {
     this.els.detailCreated.textContent = session.createdAt ? this.formatDateTime(session.createdAt) : '--';
     this.els.detailLastActive.textContent = session.lastActive ? this.relativeTime(session.lastActive) : '--';
 
-    // Control buttons — enable/disable based on status
+    // Control buttons - enable/disable based on status
     const isRunning = status === 'running' || status === 'idle';
     this.els.detailStartBtn.disabled = isRunning;
     this.els.detailStopBtn.disabled = !isRunning;
@@ -4663,13 +4663,13 @@ class CWMApp {
     // Logs
     this.renderLogs(session.logs || []);
 
-    // Cost tracking — fetch async
+    // Cost tracking - fetch async
     this.loadSessionCost(session.id);
 
-    // Subagent tracking — fetch async
+    // Subagent tracking - fetch async
     this.loadSessionSubagents(session.id);
 
-    // Workspace analytics — show when session belongs to a workspace
+    // Workspace analytics - show when session belongs to a workspace
     if (session.workspaceId) {
       this.loadWorkspaceAnalytics(session.workspaceId);
     } else if (this.els.detailAnalytics) {
@@ -4742,7 +4742,7 @@ class CWMApp {
             <div style="height:6px;background:var(--surface0);border-radius:3px;overflow:hidden;position:relative">
               <div style="height:100%;width:${pct}%;background:${urgencyColor};border-radius:3px;transition:width 0.3s"></div>
             </div>
-            ${urgency !== 'ok' ? `<div style="color:${urgencyColor};margin-top:3px;font-size:10px">${urgency === 'critical' ? '⚠ Heavy context — consider compacting' : '● Moderate context usage'}</div>` : ''}
+            ${urgency !== 'ok' ? `<div style="color:${urgencyColor};margin-top:3px;font-size:10px">${urgency === 'critical' ? '⚠ Heavy context - consider compacting' : '● Moderate context usage'}</div>` : ''}
           </div>`;
       }
 
@@ -4750,7 +4750,7 @@ class CWMApp {
         this.els.detailCostBreakdown.insertAdjacentHTML('afterend', infoHtml);
       }
     } catch (err) {
-      // Cost tracking is best-effort — don't show errors
+      // Cost tracking is best-effort - don't show errors
       this.els.detailCost.hidden = true;
     }
   }
@@ -4783,7 +4783,7 @@ class CWMApp {
         </div>`;
       }).join('');
     } catch (_) {
-      // Subagent tracking is best-effort — hide section if API unavailable
+      // Subagent tracking is best-effort - hide section if API unavailable
       this.els.detailSubagents.hidden = true;
     }
   }
@@ -4935,7 +4935,7 @@ class CWMApp {
       sessionStorage.setItem('cwm_projects', JSON.stringify({ ts: Date.now(), data: this.state.projects }));
       this.renderProjects();
     } catch {
-      // Non-critical — projects panel just stays empty
+      // Non-critical - projects panel just stays empty
     }
   }
 
@@ -5244,7 +5244,7 @@ class CWMApp {
   }
 
   openConversationResult(sessionId, projectPath) {
-    // Open the session in a terminal pane — not added to any workspace
+    // Open the session in a terminal pane - not added to any workspace
     const emptySlot = this.terminalPanes.findIndex(p => p === null);
     if (emptySlot === -1) {
       this.showToast('All terminal panes full. Close one first.', 'warning');
@@ -5407,7 +5407,7 @@ class CWMApp {
           pane.classList.remove('drag-over');
           console.log('[DnD] Drop on pane', slotIdx, 'types:', Array.from(e.dataTransfer.types));
 
-          // Terminal pane swap/reposition — drag a pane header onto another pane
+          // Terminal pane swap/reposition - drag a pane header onto another pane
           const swapSource = e.dataTransfer.getData('cwm/terminal-swap');
           if (swapSource !== '') {
             const srcSlot = parseInt(swapSource, 10);
@@ -5448,15 +5448,15 @@ class CWMApp {
             try {
               const ps = JSON.parse(projSessJson);
               const claudeSessionId = ps.sessionName; // This IS the Claude session UUID
-              console.log('[DnD] Project-session drop — resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath);
-              // Open terminal directly — use the Claude session UUID as the PTY session ID
+              console.log('[DnD] Project-session drop - resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath);
+              // Open terminal directly - use the Claude session UUID as the PTY session ID
               // so the PTY manager can reuse it on subsequent drops
               this.openTerminalInPane(slotIdx, claudeSessionId, claudeSessionId, {
                 cwd: ps.projectPath,
                 resumeSessionId: claudeSessionId,
                 command: 'claude',
               });
-              this.showToast('Opening session — drag to a workspace to save it', 'info');
+              this.showToast('Opening session - drag to a workspace to save it', 'info');
             } catch (err) {
               this.showToast(err.message || 'Failed to open session', 'error');
             }
@@ -5474,14 +5474,14 @@ class CWMApp {
                 cwd: project.path,
                 command: 'claude',
               });
-              this.showToast('Opening project — drag to a workspace to save it', 'info');
+              this.showToast('Opening project - drag to a workspace to save it', 'info');
             } catch (err) {
               this.showToast(err.message || 'Failed to open project', 'error');
             }
             return;
           }
 
-          // Image file drop — upload and send to Claude
+          // Image file drop - upload and send to Claude
           if (e.dataTransfer.files.length > 0 && this.terminalPanes[slotIdx]) {
             pane.classList.remove('image-drag-over');
             const file = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
@@ -5491,7 +5491,7 @@ class CWMApp {
             }
           }
 
-          // Drop a workspace into terminal pane — start a new Claude session
+          // Drop a workspace into terminal pane - start a new Claude session
           const workspaceId = e.dataTransfer.getData('cwm/workspace');
           if (workspaceId) {
             console.log('[DnD] Workspace drop:', workspaceId);
@@ -5539,7 +5539,7 @@ class CWMApp {
           header.setAttribute('draggable', 'true');
           header.addEventListener('dragstart', (e) => {
             const tp = this.terminalPanes[slotIdx];
-            if (!tp) { e.preventDefault(); return; } // empty pane — not draggable
+            if (!tp) { e.preventDefault(); return; } // empty pane - not draggable
             e.dataTransfer.setData('cwm/terminal-swap', String(slotIdx));
             e.dataTransfer.effectAllowed = 'move';
             pane.classList.add('terminal-pane-dragging');
@@ -5571,7 +5571,7 @@ class CWMApp {
         // Right-click context menu on terminal pane
         pane.addEventListener('contextmenu', (e) => {
           const tp = this.terminalPanes[slotIdx];
-          if (!tp) return; // empty pane — let default menu show
+          if (!tp) return; // empty pane - let default menu show
           e.preventDefault();
           e.stopPropagation();
           this.showTerminalContextMenu(slotIdx, e.clientX, e.clientY);
@@ -5596,7 +5596,7 @@ class CWMApp {
         paneTitleEl.addEventListener('dblclick', (e) => {
           e.stopPropagation();
           const tp = this.terminalPanes[slotIdx];
-          if (!tp) return; // Empty pane — no rename
+          if (!tp) return; // Empty pane - no rename
 
           const sessionId = tp.sessionId;
           const allSessions = [
@@ -5624,7 +5624,7 @@ class CWMApp {
       if (emptySlot !== -1) {
         slotIdx = emptySlot;
       } else {
-        // All 4 slots full — replace the target slot
+        // All 4 slots full - replace the target slot
         this.terminalPanes[slotIdx].dispose();
         this.terminalPanes[slotIdx] = null;
       }
@@ -5709,7 +5709,7 @@ class CWMApp {
     const detail = activity.detail ? ': ' + this.escapeHtml(activity.detail) : '';
     const dotClass = 'activity-dot-' + activity.type;
 
-    // Deduplicate — skip innerHTML write if content hasn't changed
+    // Deduplicate - skip innerHTML write if content hasn't changed
     const key = activity.type + '|' + (activity.detail || '');
     if (el.dataset.activityKey === key) return;
     el.dataset.activityKey = key;
@@ -5745,7 +5745,7 @@ class CWMApp {
 
     items.push({ type: 'sep' });
 
-    // Fix Terminal — sends reset command
+    // Fix Terminal - sends reset command
     items.push({
       label: 'Fix Terminal (reset)', icon: '&#8635;', action: () => {
         tp.sendCommand('reset\r');
@@ -5753,12 +5753,12 @@ class CWMApp {
       },
     });
 
-    // Kill & Restart — kills the PTY process so claude can be restarted
+    // Kill & Restart - kills the PTY process so claude can be restarted
     items.push({
       label: 'Kill Session', icon: '&#9747;', danger: true, action: async () => {
         try {
           await this.api('POST', `/api/pty/${encodeURIComponent(tp.sessionId)}/kill`);
-          this.showToast('Session killed — drop again to restart', 'warning');
+          this.showToast('Session killed - drop again to restart', 'warning');
           // Close the terminal pane since the process is dead
           this.closeTerminalPane(slotIdx);
         } catch (err) {
@@ -5786,13 +5786,13 @@ class CWMApp {
 
     items.push({ type: 'sep' });
 
-    // Inspect — open browser DevTools console
+    // Inspect - open browser DevTools console
     items.push({
       label: 'Inspect', icon: '&#128269;', action: () => {
         // Try to open DevTools programmatically (only works in Electron/NW.js)
         // For regular browsers, show a hint about the keyboard shortcut
         if (window.__TAURI__ || (window.process && window.process.versions && window.process.versions.electron)) {
-          // Electron / Tauri — can open devtools directly
+          // Electron / Tauri - can open devtools directly
           try { require('electron').remote.getCurrentWindow().webContents.openDevTools(); } catch (_) {}
         } else {
           this.showToast('Press F12 or Ctrl+Shift+I to open DevTools', 'info');
@@ -5847,7 +5847,7 @@ class CWMApp {
     }
 
     if (sessionName) {
-      this.showToast(`"${sessionName}" moved to background — drag it back to reconnect`, 'info');
+      this.showToast(`"${sessionName}" moved to background - drag it back to reconnect`, 'info');
     }
   }
 
@@ -5876,7 +5876,7 @@ class CWMApp {
       if (!paneEl) return;
 
       if (tp) {
-        // Occupied pane — move the terminal DOM
+        // Occupied pane - move the terminal DOM
         paneEl.hidden = false;
         paneEl.classList.remove('terminal-pane-empty');
         if (titleEl) titleEl.textContent = tp.sessionName || tp.sessionId;
@@ -5891,7 +5891,7 @@ class CWMApp {
           }
         }
       } else {
-        // Empty pane — reset to drop target
+        // Empty pane - reset to drop target
         paneEl.classList.remove('terminal-pane-active');
         paneEl.classList.add('terminal-pane-empty');
         if (titleEl) titleEl.textContent = 'Drop a session here';
@@ -5938,7 +5938,7 @@ class CWMApp {
       if (!paneEl) continue;
 
       if (this.terminalPanes[i]) {
-        // Filled pane — always show
+        // Filled pane - always show
         paneEl.hidden = false;
       } else if (!emptyShown && filledCount === 0) {
         // Only show one empty pane as drop target when no terminals exist
@@ -6060,7 +6060,7 @@ class CWMApp {
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.3);
     } catch (_) {
-      // Web Audio not available — silent fallback
+      // Web Audio not available - silent fallback
     }
   }
 
@@ -6093,7 +6093,7 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   /**
-   * Set the active terminal pane — blurs all others, focuses target, highlights it.
+   * Set the active terminal pane - blurs all others, focuses target, highlights it.
    */
   setActiveTerminalPane(slotIdx) {
     // Set slot early to prevent focusin recursion
@@ -6373,7 +6373,7 @@ class CWMApp {
   }
 
   /**
-   * "More" tab menu — shows action sheet with utility actions.
+   * "More" tab menu - shows action sheet with utility actions.
    */
   showMoreMenu() {
     const items = [
@@ -6460,7 +6460,7 @@ class CWMApp {
       });
     };
 
-    // Shared close-delay timer — gives the mouse time to cross the gap
+    // Shared close-delay timer - gives the mouse time to cross the gap
     // between the parent wrapper and the fixed-position submenu
     let submenuCloseTimer = null;
     const cancelClose = () => { clearTimeout(submenuCloseTimer); submenuCloseTimer = null; };
@@ -6481,7 +6481,7 @@ class CWMApp {
         const subEl = wrapper.querySelector('.ctx-submenu');
         const parentBtn = wrapper.querySelector(':scope > .context-menu-item');
 
-        // Show submenu on hover (desktop) — uses fixed positioning to escape overflow
+        // Show submenu on hover (desktop) - uses fixed positioning to escape overflow
         wrapper.addEventListener('mouseenter', () => {
           cancelClose(); // cancel any pending close from a prior submenu
           hideAllSubmenus();
@@ -7073,7 +7073,7 @@ class CWMApp {
             const claudeId = (s && s.resumeSessionId) || (as && as.resumeSessionId);
             if (claudeId) this.syncSessionTitle(claudeId, newName);
           } else {
-            // Project session — sync everywhere (localStorage + any linked workspace sessions)
+            // Project session - sync everywhere (localStorage + any linked workspace sessions)
             this.syncSessionTitle(sessionId, newName);
           }
           nameEl.textContent = newName;
@@ -7088,7 +7088,7 @@ class CWMApp {
       }
     };
 
-    // Track mousedown inside input — if user started a click/drag inside,
+    // Track mousedown inside input - if user started a click/drag inside,
     // don't close on blur when they release outside the input
     let mouseDownInside = false;
     input.addEventListener('mousedown', () => { mouseDownInside = true; });
@@ -7147,7 +7147,7 @@ class CWMApp {
             const claudeId = (s && s.resumeSessionId) || (as && as.resumeSessionId);
             if (claudeId) this.syncSessionTitle(claudeId, newName);
           } else {
-            // Project session — sessionId IS the Claude UUID
+            // Project session - sessionId IS the Claude UUID
             this.syncSessionTitle(sessionId, newName);
           }
 
@@ -7170,7 +7170,7 @@ class CWMApp {
       }
     };
 
-    // Track mousedown inside input — if user started a click/drag inside,
+    // Track mousedown inside input - if user started a click/drag inside,
     // don't close on blur when they release outside the input
     let mouseDownInside = false;
     input.addEventListener('mousedown', () => { mouseDownInside = true; });
@@ -7266,7 +7266,7 @@ class CWMApp {
   renderTerminalGroupTabs() {
     if (!this.els.terminalGroupsTabs) return;
 
-    // Available folder colors — maps to Catppuccin CSS vars
+    // Available folder colors - maps to Catppuccin CSS vars
     const FOLDER_COLORS = ['mauve', 'blue', 'green', 'peach', 'red', 'pink', 'teal', 'yellow'];
 
     // Build HTML: folders first (with their tabs), then ungrouped tabs
@@ -7299,7 +7299,7 @@ class CWMApp {
       html += this._renderTabButtonHtml(g);
     }
 
-    // Sticky "+" button at the end — stays pinned when tabs overflow
+    // Sticky "+" button at the end - stays pinned when tabs overflow
     html += `<button class="terminal-groups-add" id="terminal-groups-add" title="New tab group">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
         <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -7352,7 +7352,7 @@ class CWMApp {
         ], e.clientX, e.clientY);
       });
 
-      // Accept terminal pane drops on folder header — adds to first tab in folder
+      // Accept terminal pane drops on folder header - adds to first tab in folder
       hdr.addEventListener('dragover', (e) => {
         const types = e.dataTransfer.types;
         const hasTerminal = (types.includes ? types.includes('cwm/terminal-swap') : types.contains && types.contains('cwm/terminal-swap'));
@@ -7414,7 +7414,7 @@ class CWMApp {
           if (hasTabGroup) {
             const targetId = tab.dataset.groupId;
             if (this._dragHoldTarget !== targetId) {
-              // Target changed — reset timer
+              // Target changed - reset timer
               clearTimeout(this._dragHoldTimer);
               this._dragHoldTarget = targetId;
               // Show merge indicator after 500ms, complete merge after 1200ms
@@ -7450,12 +7450,12 @@ class CWMApp {
         e.preventDefault();
         tab.classList.remove('tab-drag-over');
         tab.classList.remove('tab-drag-merge');
-        // Clear hold timer on drop — normal drop/reorder takes precedence
+        // Clear hold timer on drop - normal drop/reorder takes precedence
         clearTimeout(this._dragHoldTimer);
         clearTimeout(this._dragMergeTimer);
         this._dragHoldTarget = null;
 
-        // Handle terminal pane drop — move terminal to this tab group
+        // Handle terminal pane drop - move terminal to this tab group
         const swapSource = e.dataTransfer.getData('cwm/terminal-swap');
         if (swapSource !== '') {
           const srcSlot = parseInt(swapSource, 10);
@@ -7481,7 +7481,7 @@ class CWMApp {
         if (nameEl) this.startInlineRenameGroup(nameEl, tab.dataset.groupId);
       });
 
-      // Right-click context menu — includes folder management
+      // Right-click context menu - includes folder management
       tab.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const groupId = tab.dataset.groupId;
@@ -7567,7 +7567,7 @@ class CWMApp {
         this.terminalPanes[i].dispose();
         this.terminalPanes[i] = null;
       }
-      // Always reset the pane DOM to empty state — even if terminalPanes[i] was
+      // Always reset the pane DOM to empty state - even if terminalPanes[i] was
       // null, the DOM element might have stale content from a previous group
       const paneEl = document.getElementById(`term-pane-${i}`);
       if (paneEl) {
@@ -7627,7 +7627,7 @@ class CWMApp {
   }
 
   /**
-   * Create a new tab folder from a single tab — the tab becomes the first member.
+   * Create a new tab folder from a single tab - the tab becomes the first member.
    * @param {string} tabGroupId - Tab group to seed the folder with
    */
   _createFolderFromTab(tabGroupId) {
@@ -7662,13 +7662,13 @@ class CWMApp {
     if (draggedGroup.folderId && draggedGroup.folderId === targetGroup.folderId) return;
 
     if (targetGroup.folderId) {
-      // Target is already in a folder — add dragged tab to that folder
+      // Target is already in a folder - add dragged tab to that folder
       draggedGroup.folderId = targetGroup.folderId;
       const folder = this._tabFolders.find(f => f.id === targetGroup.folderId);
       const folderName = folder ? folder.name : 'Group';
       this.showToast(`Added "${draggedGroup.name}" to group "${folderName}"`, 'success');
     } else {
-      // Neither in a folder — create a new folder containing both
+      // Neither in a folder - create a new folder containing both
       const folderId = 'tf_' + Date.now().toString(36);
       const colors = ['mauve', 'blue', 'green', 'peach', 'red', 'pink', 'teal', 'yellow'];
       const color = colors[this._tabFolders.length % colors.length];
@@ -7677,7 +7677,7 @@ class CWMApp {
       this._tabFolders.push({ id: folderId, name: folderName, color, collapsed: false });
       draggedGroup.folderId = folderId;
       targetGroup.folderId = folderId;
-      this.showToast(`Created group "${folderName}" — double-click header to rename`, 'success');
+      this.showToast(`Created group "${folderName}" - double-click header to rename`, 'success');
     }
 
     this.renderTerminalGroupTabs();
@@ -7685,7 +7685,7 @@ class CWMApp {
   }
 
   /**
-   * Ungroup all tabs in a folder — removes the folder, tabs become ungrouped.
+   * Ungroup all tabs in a folder - removes the folder, tabs become ungrouped.
    * @param {string} folderId - Folder to ungroup
    */
   _ungroupFolder(folderId) {
@@ -7707,7 +7707,7 @@ class CWMApp {
     // Don't delete if it would remove the last tab group
     const remainingCount = this._tabGroups.length - folderTabs.length;
     if (remainingCount < 1) {
-      this.showToast('Cannot delete — would remove all tabs', 'warning');
+      this.showToast('Cannot delete - would remove all tabs', 'warning');
       return;
     }
 
@@ -7798,7 +7798,7 @@ class CWMApp {
     this._tabGroups = this._tabGroups.filter(g => g.id !== groupId);
 
     if (wasDeletingActive) {
-      // Must switch to another group — this will dispose current panes and restore the new group's
+      // Must switch to another group - this will dispose current panes and restore the new group's
       this._activeGroupId = this._tabGroups[0].id;
       // Bypass the early-return guard in switchTerminalGroup by setting a temp value
       const targetId = this._activeGroupId;
@@ -7991,7 +7991,7 @@ class CWMApp {
       this.saveTerminalLayout();
     };
 
-    // Track mousedown inside input — if user started a click/drag inside,
+    // Track mousedown inside input - if user started a click/drag inside,
     // don't close on blur when they release outside the input
     let mouseDownInside = false;
     input.addEventListener('mousedown', () => { mouseDownInside = true; });
@@ -8109,7 +8109,7 @@ class CWMApp {
 
     try {
       if (this._notesEditorIndex !== null) {
-        // Edit existing — remove old, add new
+        // Edit existing - remove old, add new
         await this.api('DELETE', `/api/workspaces/${wsId}/docs/${section}/${this._notesEditorIndex}`);
         await this.api('POST', `/api/workspaces/${wsId}/docs/${section}`, { text });
       } else {
@@ -8148,7 +8148,7 @@ class CWMApp {
       return;
     }
 
-    // Show loading state — spinning refresh button + header + skeletons
+    // Show loading state - spinning refresh button + header + skeletons
     const refreshBtn = this.els.docsAiRefresh;
     if (refreshBtn) {
       refreshBtn.classList.add('ai-loading');
@@ -8543,7 +8543,7 @@ class CWMApp {
 
   /**
    * Render an SVG line chart for cost timeline data.
-   * Pure SVG — no chart library needed.
+   * Pure SVG - no chart library needed.
    * @param {Array<{date, cost, tokens, messages}>} timeline - Daily cost data
    */
   renderCostChart(timeline) {
@@ -8786,7 +8786,7 @@ class CWMApp {
 
     html += '</div>';
 
-    // Background PTY sessions section — shows PTYs with no connected terminal pane
+    // Background PTY sessions section - shows PTYs with no connected terminal pane
     html += '<div id="resources-pty-bg" class="resources-pty-bg-section"></div>';
 
     // Stopped sessions section (collapsible)
@@ -9071,7 +9071,7 @@ class CWMApp {
       html += '<div style="display:flex;gap:8px;margin-bottom:10px">';
       if (summary.criticalCount > 0) {
         html += `<div style="flex:1;padding:8px 12px;background:rgba(243,139,168,0.1);border:1px solid var(--red);border-radius:6px;font-size:12px;color:var(--red)">
-          <strong>${summary.criticalCount}</strong> session${summary.criticalCount > 1 ? 's' : ''} over 80% context — consider compacting
+          <strong>${summary.criticalCount}</strong> session${summary.criticalCount > 1 ? 's' : ''} over 80% context - consider compacting
         </div>`;
       }
       if (summary.warningCount > 0) {
@@ -9561,7 +9561,7 @@ class CWMApp {
           this.showToast('Could not copy to clipboard', 'warning');
         }
 
-        // Continue in new session — create a new session in the same workspace/dir and open in terminal
+        // Continue in new session - create a new session in the same workspace/dir and open in terminal
         const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
         if (session && session.workspaceId) {
           try {
@@ -9774,7 +9774,7 @@ class CWMApp {
       // Update the tracked set to match current conflicts
       this._lastConflictKeys = currentKeys;
 
-      // Nothing new to show — all current conflicts were already toasted
+      // Nothing new to show - all current conflicts were already toasted
       if (newConflicts.length === 0) return;
 
       // Show a single toast pointing to the conflict center
@@ -9782,9 +9782,9 @@ class CWMApp {
         const c = newConflicts[0];
         const fileName = c.file || c.path || 'unknown file';
         const sessionCount = c.sessions ? c.sessions.length : c.count || 2;
-        this.showToast(`Conflict: ${fileName} edited by ${sessionCount} sessions — click ⚠ to view`, 'warning');
+        this.showToast(`Conflict: ${fileName} edited by ${sessionCount} sessions - click ⚠ to view`, 'warning');
       } else {
-        this.showToast(`${newConflicts.length} new file conflicts detected — click ⚠ to view`, 'warning');
+        this.showToast(`${newConflicts.length} new file conflicts detected - click ⚠ to view`, 'warning');
       }
 
       // Auto-render conflict center if it's open
@@ -9894,7 +9894,7 @@ class CWMApp {
         </div>`;
     }).join('');
 
-    // Wire up session chip clicks — jump to terminal
+    // Wire up session chip clicks - jump to terminal
     list.querySelectorAll('.conflict-session-chip').forEach(chip => {
       chip.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -10420,7 +10420,7 @@ class CWMApp {
     for (let i = 0; i < this.terminalPanes.length; i++) {
       const pane = this.terminalPanes[i];
       if (pane && pane.sessionId === sessionId) {
-        // Already open — switch to terminal view and activate that pane
+        // Already open - switch to terminal view and activate that pane
         this.setViewMode('terminal');
         this._activeTerminalSlot = i;
         this._syncTerminalTabHighlight();
@@ -10430,10 +10430,10 @@ class CWMApp {
       }
     }
 
-    // Not open yet — find an empty slot
+    // Not open yet - find an empty slot
     const emptySlot = this.terminalPanes.findIndex(p => p === null);
     if (emptySlot === -1) {
-      this.showToast('No empty terminal pane — close one first', 'warning');
+      this.showToast('No empty terminal pane - close one first', 'warning');
       return;
     }
 

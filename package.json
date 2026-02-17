@@ -1,7 +1,7 @@
 {
   "name": "myrlin-workbook",
   "version": "0.3.0-alpha",
-  "description": "Browser-based workspace manager for Claude Code sessions — session discovery, multi-terminal, cost tracking, docs, and kanban board",
+  "description": "Browser-based workspace manager for Claude Code sessions - session discovery, multi-terminal, cost tracking, docs, and kanban board",
   "main": "src/index.js",
   "bin": {
     "myrlin": "./src/gui.js",

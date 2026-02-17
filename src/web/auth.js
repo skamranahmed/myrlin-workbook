@@ -2,9 +2,9 @@
  * Authentication module for Claude Workspace Manager Web API.
  * Uses a simple in-memory token approach with Bearer token auth.
  *
- * - POST /api/auth/login  - Validates password, returns a Bearer token
+ * - POST /api/auth/login - Validates password, returns a Bearer token
  * - POST /api/auth/logout - Invalidates the token
- * - GET  /api/auth/check  - Validates current token
+ * - GET  /api/auth/check - Validates current token
  *
  * Protected routes use the requireAuth middleware which checks
  * the Authorization: Bearer <token> header.
@@ -42,7 +42,7 @@ function isRateLimited(ip) {
   const entry = loginAttempts.get(ip);
 
   if (!entry || now > entry.resetAt) {
-    // Window expired or new IP — start fresh
+    // Window expired or new IP - start fresh
     loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW_MS });
     return false;
   }
@@ -86,7 +86,7 @@ function loadPassword() {
       }
     }
   } catch (_) {
-    // Corrupted config — regenerate
+    // Corrupted config - regenerate
   }
 
   // 3. Auto-generate and save
@@ -173,7 +173,7 @@ function requireAuth(req, res, next) {
 
 /**
  * Mount authentication routes on the Express app.
- * These routes are NOT protected by requireAuth — they are public.
+ * These routes are NOT protected by requireAuth - they are public.
  *
  * @param {import('express').Express} app - The Express application
  */

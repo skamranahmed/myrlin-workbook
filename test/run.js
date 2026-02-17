@@ -43,7 +43,7 @@ function assertNotNull(val, msg) {
 }
 
 // ──────────────────────────────────────────────────────
-// Clean state before tests — PRESERVES production state
+// Clean state before tests - PRESERVES production state
 const fs = require('fs');
 const stateDir = path.join(__dirname, '..', 'state');
 const stateFile = path.join(stateDir, 'workspaces.json');

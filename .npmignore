@@ -12,7 +12,7 @@ scripts/
 .github/
 .claude/
 
-# State (user-specific, generated at runtime — NOT src/state/)
+# State (user-specific, generated at runtime - NOT src/state/)
 /state/
 
 # Backup files

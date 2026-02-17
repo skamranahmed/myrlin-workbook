@@ -100,7 +100,7 @@ class PtySessionManager {
     if (resumeSessionId) {
       fullCommand += ' --resume ' + resumeSessionId;
     } else if (cwd) {
-      // No explicit session to resume — use --continue to pick up most recent
+      // No explicit session to resume - use --continue to pick up most recent
       // conversation in this working directory. On a fresh dir with no history,
       // Claude will start a new conversation (same as bare `claude`).
       fullCommand += ' --continue';
@@ -115,7 +115,7 @@ class PtySessionManager {
       fullCommand += ' --model ' + model;
     }
 
-    // Validate cwd exists — fall back to home directory if not
+    // Validate cwd exists - fall back to home directory if not
     let resolvedCwd = cwd || process.cwd();
     try {
       if (!fs.existsSync(resolvedCwd) || !fs.statSync(resolvedCwd).isDirectory()) {
@@ -143,7 +143,7 @@ class PtySessionManager {
         sessionEnv.CWM_DOCS_API_BASE = `http://localhost:${port}/api/workspaces/${storeSession.workspaceId}/docs`;
       }
     } catch (_) {
-      // Non-critical — session can work without docs integration
+      // Non-critical - session can work without docs integration
     }
 
     // Platform-specific shell selection
@@ -211,7 +211,7 @@ class PtySessionManager {
         }
       }
 
-      // Throttled lastActive update — fires immediately then at most once per 30s
+      // Throttled lastActive update - fires immediately then at most once per 30s
       if (!session._lastActiveTimer) {
         try {
           const store = getStore();

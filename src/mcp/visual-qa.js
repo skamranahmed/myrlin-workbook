@@ -365,7 +365,7 @@ function sendResponse(msg) {
 async function handleRequest(request) {
   const { id, method, params } = request;
 
-  // Notifications (no id) — just acknowledge silently
+  // Notifications (no id) - just acknowledge silently
   if (id === undefined || id === null) {
     return;
   }
@@ -484,12 +484,12 @@ function main() {
   });
 
   rl.on('close', () => {
-    // stdin closed — mark for shutdown, but wait for in-flight requests
+    // stdin closed - mark for shutdown, but wait for in-flight requests
     _stdinClosed = true;
     shutdownIfReady();
   });
 
-  // Log to stderr (safe — doesn't interfere with JSON-RPC on stdout)
+  // Log to stderr (safe - doesn't interfere with JSON-RPC on stdout)
   process.stderr.write(`[visual-qa] MCP server started. CDP target: ${CDP_HOST}:${CDP_PORT}\n`);
 }
 

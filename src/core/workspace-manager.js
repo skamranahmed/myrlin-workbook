@@ -26,7 +26,7 @@ function createWorkspace(name, opts = {}) {
     color: opts.color || 'cyan',
   });
 
-  store.addSessionLog && undefined; // noop — workspaces don't have logs
+  store.addSessionLog && undefined; // noop - workspaces don't have logs
   return workspace;
 }
 

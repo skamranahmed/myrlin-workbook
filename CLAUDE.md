@@ -13,11 +13,11 @@ If you need to READ files outside this folder (e.g., to understand Claude sessio
 
 ## Project Goal
 Build a lightweight terminal workspace manager for Claude Code sessions that:
-1. **Persists session state** — tracks which Claude sessions are running, their IDs, working directories, topics
-2. **Auto-recovers after crash/restart** — saves state to disk, auto-reopens sessions on launch
-3. **Groups sessions** — organize related sessions into named workspaces
-4. **Notifications** — surface agent status, completion, errors
-5. **Terminal UI** — clean, fast, minimal. Think tmux-inspired but purpose-built for Claude sessions
+1. **Persists session state** - tracks which Claude sessions are running, their IDs, working directories, topics
+2. **Auto-recovers after crash/restart** - saves state to disk, auto-reopens sessions on launch
+3. **Groups sessions** - organize related sessions into named workspaces
+4. **Notifications** - surface agent status, completion, errors
+5. **Terminal UI** - clean, fast, minimal. Think tmux-inspired but purpose-built for Claude sessions
 
 ## Tech Stack Preferences
 - PowerShell or Node.js (must work natively on Windows without WSL)

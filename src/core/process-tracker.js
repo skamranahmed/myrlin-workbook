@@ -69,7 +69,7 @@ function checkAll() {
       alive.push(sessionId);
     } else {
       dead.push(sessionId);
-      // Update store — session process died unexpectedly
+      // Update store - session process died unexpectedly
       const session = store.getSession(sessionId);
       if (session && session.status === 'running') {
         store.updateSessionStatus(sessionId, 'stopped', null);
@@ -107,7 +107,7 @@ function getStats() {
 
 /**
  * Start the periodic health check (every 5 seconds).
- * Safe to call multiple times — only one interval runs at a time.
+ * Safe to call multiple times - only one interval runs at a time.
  */
 function startHealthCheck() {
   if (healthCheckInterval) return;

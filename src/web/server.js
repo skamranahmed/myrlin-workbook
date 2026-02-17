@@ -93,7 +93,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// CORS headers — restrict to localhost origins only
+// CORS headers - restrict to localhost origins only
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
   const allowedOrigins = [
@@ -118,7 +118,7 @@ app.use((req, res, next) => {
 
 // ─── Security Headers ────────────────────────────────────────
 app.use((req, res, next) => {
-  // Content Security Policy — allow self + inline styles (for dynamic UI) + WebSocket
+  // Content Security Policy - allow self + inline styles (for dynamic UI) + WebSocket
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
     "connect-src 'self' ws://localhost:* wss://localhost:* ws://127.0.0.1:* wss://127.0.0.1:*; " +
@@ -167,7 +167,7 @@ app.get('/api/fallback/status', requireAuth, (req, res) => {
 
 app.post('/api/fallback/restore', requireAuth, (req, res) => {
   const manifest = restoreFrontend();
-  if (!manifest) return res.status(500).json({ error: 'Restore failed — no backup found' });
+  if (!manifest) return res.status(500).json({ error: 'Restore failed - no backup found' });
   return res.json({ success: true, restored: manifest });
 });
 
@@ -701,7 +701,7 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
             }
           }
         } catch (_) {
-          // Best-effort — don't crash on summary failure
+          // Best-effort - don't crash on summary failure
         }
       });
     }
@@ -901,7 +901,7 @@ app.get('/api/discover', requireAuth, (req, res) => {
  * Encoding rules:
  *   "C--"  at start    →  "C:\"          (drive separator)
  *   "--"   in middle   →  "\."           (dot-prefixed dir, e.g. .claude)
- *   "-"    elsewhere   →  "\" OR literal "-"  (ambiguous — resolved via fs)
+ *   "-"    elsewhere   →  "\" OR literal "-"  (ambiguous - resolved via fs)
  *
  * Examples:
  *   C--Users-Jane-Desktop-my-project
@@ -955,7 +955,7 @@ function decodeClaudePath(encoded) {
       }
 
       if (!matched) {
-        // Single token — treat as its own directory segment
+        // Single token - treat as its own directory segment
         resolved = path.join(resolved, tokens[idx]);
         idx++;
       }
@@ -1040,7 +1040,7 @@ function generateSessionTitle(firstMessage, firstAssistantResponse, recentUserMe
 
   // ── Strategy: Build title from best available source ──
   // Priority: assistant summary > user first message > recent assistant > recent user
-  // Assistants describe the WORK, users describe the REQUEST — work descriptions make better titles
+  // Assistants describe the WORK, users describe the REQUEST - work descriptions make better titles
 
   let title = '';
 
@@ -2380,7 +2380,7 @@ function extractFilePaths(text) {
  * Generates a structured context export for session handoff.
  * When a Claude session runs out of context, this endpoint produces a
  * markdown summary with the original request, work done, files touched,
- * and token usage — ready to paste into a new session.
+ * and token usage - ready to paste into a new session.
  * Protected by auth.
  */
 app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
@@ -2399,7 +2399,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
   const jsonlPath = findJsonlFile(claudeSessionId);
 
   if (!jsonlPath) {
-    // No JSONL file found — return basic info from store session data
+    // No JSONL file found - return basic info from store session data
     return res.json({
       sessionId: req.params.id,
       sessionName,
@@ -2432,7 +2432,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
 
     fs.closeSync(fd);
 
-    // Parse head messages — collect first 5 user messages
+    // Parse head messages - collect first 5 user messages
     const headContent = headBuf.toString('utf-8');
     const headLines = headContent.split('\n').filter(l => l.trim());
     const firstUserMessages = [];
@@ -2444,7 +2444,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
       }
     }
 
-    // Parse tail messages — collect last 5 assistant messages
+    // Parse tail messages - collect last 5 assistant messages
     const tailContent = tailBuf.toString('utf-8');
     const tailLines = tailContent.split('\n').filter(l => l.trim());
     // Drop partial first line if we started mid-file
@@ -2513,7 +2513,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
     mdParts.push(`# Session Context: ${sessionName}`);
     mdParts.push('');
 
-    // Original Request — first user message in full
+    // Original Request - first user message in full
     mdParts.push('## Original Request');
     if (firstUserMessages.length > 0) {
       mdParts.push(firstUserMessages[0]);
@@ -2534,7 +2534,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
       mdParts.push('');
     }
 
-    // Work Done — last 3 assistant messages, truncated to 500 chars each
+    // Work Done - last 3 assistant messages, truncated to 500 chars each
     mdParts.push('## Work Done');
     if (lastAssistantMessages.length > 0) {
       const workMessages = lastAssistantMessages.slice(-3);
@@ -2567,7 +2567,7 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
     mdParts.push(`- Estimated cost: $${tokenSummary.cost.toFixed(2)}`);
     mdParts.push('');
 
-    // Last State — last assistant message content, truncated to 2000 chars
+    // Last State - last assistant message content, truncated to 2000 chars
     mdParts.push('## Last State');
     if (lastAssistantMessages.length > 0) {
       const lastMsg = lastAssistantMessages[lastAssistantMessages.length - 1];
@@ -3332,7 +3332,7 @@ function getCpuUsagePercent() {
   }
 
   _prevCpuTimes = totals;
-  return 0; // First call — no delta yet
+  return 0; // First call - no delta yet
 }
 
 function getProcessMemory(pid) {
@@ -3805,7 +3805,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
       sendStep('version', 'done', 'Version check skipped');
     }
 
-    // Step 4: Auto-restart — write a restart script, close server, spawn it, then exit
+    // Step 4: Auto-restart - write a restart script, close server, spawn it, then exit
     sendStep('restart', 'running', 'Restarting server...');
     res.end();
 
@@ -3830,7 +3830,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
           s.once('error', () => setTimeout(waitForPort, 200));
           s.once('listening', () => {
             s.close(() => {
-              // Port is free — start the GUI server
+              // Port is free - start the GUI server
               const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'gui.js')], {
                 detached: true,
                 stdio: 'ignore',
@@ -3854,7 +3854,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
       });
       child.unref();
 
-      // Now exit — the restart script will wait for the port and re-launch
+      // Now exit - the restart script will wait for the port and re-launch
       process.exit(0);
     }, 1500);
 
@@ -4119,7 +4119,7 @@ app.get('/api/search', requireAuth, (req, res) => {
     }
 
     const lines = content.split('\n');
-    let sessionName = null; // Lazy — computed on first match
+    let sessionName = null; // Lazy - computed on first match
 
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       // Check timeout inside large files too
@@ -4279,7 +4279,7 @@ app.get('/api/workspaces/:id/conflicts', requireAuth, (req, res) => {
         // Skip deleted files (they're not actively being edited)
         if (statusCode === 'D' || statusCode === 'DD') continue;
 
-        // Extract filename — for renamed files (R), the new name is after " -> "
+        // Extract filename - for renamed files (R), the new name is after " -> "
         let filename = line.substring(3).trim();
         if (filename.includes(' -> ')) {
           filename = filename.split(' -> ')[1].trim();
@@ -4305,7 +4305,7 @@ app.get('/api/workspaces/:id/conflicts', requireAuth, (req, res) => {
         });
       }
     } catch (_) {
-      // git status failed (not a git repo, timeout, etc.) — skip this session
+      // git status failed (not a git repo, timeout, etc.) - skip this session
       checkedSessions++;
     }
   }

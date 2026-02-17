@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Claude Workspace Manager — Catppuccin Mocha Theme
+   Claude Workspace Manager - Catppuccin Mocha Theme
    Linear/Raycast/Vercel-inspired design language
    ═══════════════════════════════════════════════════════════════ */
 
@@ -175,7 +175,7 @@ h1, h2, h3, h4 {
   flex-shrink: 0;
 }
 
-/* Primary — mauve accent */
+/* Primary - mauve accent */
 .btn-primary {
   background: var(--mauve);
   color: var(--crust);
@@ -196,7 +196,7 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.2);
 }
 
-/* Ghost — transparent */
+/* Ghost - transparent */
 .btn-ghost {
   background: transparent;
   color: var(--text-secondary);
@@ -301,7 +301,7 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.15);
 }
 
-/* Password input with toggle — extra padding-right for the eye icon */
+/* Password input with toggle - extra padding-right for the eye icon */
 .input.input-has-toggle {
   padding-right: 40px;
 }
@@ -586,7 +586,7 @@ textarea.input {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  height: 100dvh; /* Dynamic viewport height — adjusts for mobile browser chrome */
+  height: 100dvh; /* Dynamic viewport height - adjusts for mobile browser chrome */
 }
 
 /* ─── Header ────────────────────────────────────────────────── */
@@ -2246,7 +2246,7 @@ textarea.input {
     max-width: 100%;
   }
 
-  /* Mobile terminal — detailed rules in styles-mobile.css (Phase 4).
+  /* Mobile terminal - detailed rules in styles-mobile.css (Phase 4).
      Keep minimal overrides here for base layout. */
   .terminal-resize-handle { display: none; }
 
@@ -2494,7 +2494,7 @@ textarea.input {
   z-index: 10000;
   min-width: 180px;
   /* overflow must be visible so submenus (position: absolute, left: 100%)
-     aren't clipped — scrolling is on the inner .context-menu-items instead */
+     aren't clipped - scrolling is on the inner .context-menu-items instead */
   overflow: visible;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -2581,7 +2581,7 @@ textarea.input {
   color: var(--text);
 }
 
-/* Danger items (e.g. bypass permissions when active) — red text and bright red check */
+/* Danger items (e.g. bypass permissions when active) - red text and bright red check */
 .context-menu-item.ctx-danger {
   color: var(--red);
 }
@@ -2993,7 +2993,7 @@ textarea.input {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--subtext1);
-  /* Subtle tinted background — lighter than active workspace to avoid confusion */
+  /* Subtle tinted background - lighter than active workspace to avoid confusion */
   background: color-mix(in srgb, var(--group-color, var(--mauve)) 6%, var(--mantle));
   border: 1px solid color-mix(in srgb, var(--group-color, var(--mauve)) 15%, var(--surface1));
   border-left: 3px solid var(--group-color, var(--mauve));
@@ -3608,7 +3608,7 @@ textarea.input {
   cursor: text;
 }
 
-/* Activity indicator — shows real-time Claude Code activity (Reading, Writing, etc.) */
+/* Activity indicator - shows real-time Claude Code activity (Reading, Writing, etc.) */
 .terminal-pane-activity {
   font-size: 11px;
   color: var(--overlay1);
@@ -3653,7 +3653,7 @@ textarea.input {
 }
 
 .terminal-pane-close { width: 20px; height: 20px; padding: 0; }
-/* Upload image button — floating bottom-right of terminal pane */
+/* Upload image button - floating bottom-right of terminal pane */
 .terminal-pane-upload {
   position: absolute; bottom: 12px; right: 12px; z-index: 5;
   width: 32px; height: 32px; padding: 0;
@@ -3665,11 +3665,11 @@ textarea.input {
 .terminal-pane:not(.terminal-pane-empty):hover .terminal-pane-upload,
 .terminal-pane-upload:focus-visible { opacity: 0.7; }
 .terminal-pane-upload:hover { opacity: 1 !important; background: var(--surface1); color: var(--text); }
-/* On mobile, hide floating upload button — mobile toolbar has its own upload btn */
+/* On mobile, hide floating upload button - mobile toolbar has its own upload btn */
 @media (max-width: 768px) {
   .terminal-pane-upload { display: none; }
 }
-/* Image file drag indicator — blue dashed (vs mauve for sessions) */
+/* Image file drag indicator - blue dashed (vs mauve for sessions) */
 .terminal-pane.image-drag-over { position: relative; }
 .terminal-pane.image-drag-over .terminal-container {
   outline: 2px dashed var(--blue); outline-offset: -2px;
@@ -5096,7 +5096,7 @@ textarea.input {
 }
 
 /* ═══════════════════════════════════════════════════════════ */
-/* Terminal loading animation — subtle RGB border glow         */
+/* Terminal loading animation - subtle RGB border glow         */
 /* ═══════════════════════════════════════════════════════════ */
 
 @keyframes rgb-border-glow {
@@ -5138,7 +5138,7 @@ textarea.input {
   .terminal-pane-loading .terminal-pane-title::after { animation: none; }
 }
 
-/* Terminal pane done — green flash when Claude finishes working */
+/* Terminal pane done - green flash when Claude finishes working */
 @keyframes pane-done-flash {
   0% { box-shadow: inset 0 0 0 2px var(--green), 0 0 12px rgba(166, 227, 161, 0.3); }
   100% { box-shadow: none; }
@@ -5148,7 +5148,7 @@ textarea.input {
   animation: pane-done-flash 4s ease-out forwards;
 }
 
-/* Tab group notification badge — pulsing green dot on inactive group tabs */
+/* Tab group notification badge - pulsing green dot on inactive group tabs */
 .terminal-group-tab.tab-notify {
   position: relative;
 }
@@ -5225,7 +5225,7 @@ textarea.input {
   /* Semantic overrides */
   --border-subtle: rgba(172, 176, 190, 0.5);
 
-  /* Shadows — lighter for light theme */
+  /* Shadows - lighter for light theme */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -5386,14 +5386,14 @@ html {
   /* Semantic overrides */
   --border-subtle: rgba(98, 104, 128, 0.5);
 
-  /* Shadows — dark theme */
+  /* Shadows - dark theme */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
   --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
 }
 
-/* Frappe theme icon visibility (dark theme — show moon, hide sun) */
+/* Frappe theme icon visibility (dark theme - show moon, hide sun) */
 :root[data-theme="frappe"] .theme-icon-moon { display: inline; }
 :root[data-theme="frappe"] .theme-icon-sun { display: none; }
 
@@ -5451,14 +5451,14 @@ html {
   /* Semantic overrides */
   --border-subtle: rgba(91, 96, 120, 0.5);
 
-  /* Shadows — dark theme */
+  /* Shadows - dark theme */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
   --shadow-lg: 0 8px 30px rgba(0,0,0,0.3);
   --shadow-xl: 0 16px 50px rgba(0,0,0,0.35);
 }
 
-/* Macchiato theme icon visibility (dark theme — show moon, hide sun) */
+/* Macchiato theme icon visibility (dark theme - show moon, hide sun) */
 :root[data-theme="macchiato"] .theme-icon-moon { display: inline; }
 :root[data-theme="macchiato"] .theme-icon-sun { display: none; }
 

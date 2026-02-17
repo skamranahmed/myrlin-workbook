@@ -108,7 +108,7 @@ function recoverSessions(sessionManager) {
 }
 
 /**
- * Get a full recovery report — useful for displaying to the user on startup.
+ * Get a full recovery report - useful for displaying to the user on startup.
  * @returns {{ recovered: object[], stale: object[], healthy: object[] }}
  */
 function getRecoveryReport() {

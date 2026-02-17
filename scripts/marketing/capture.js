@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Marketing Capture Pipeline — Playwright Orchestrator
+ * Marketing Capture Pipeline - Playwright Orchestrator
  *
  * Automates screenshots and GIF video recordings of the GUI in demo mode.
- * CRITICAL: Never captures personal information — uses demo data only.
+ * CRITICAL: Never captures personal information - uses demo data only.
  *
  * Usage:
  *   node scripts/marketing/capture.js                  Full capture (screenshots + GIFs)
@@ -39,7 +39,7 @@ try {
 }
 
 // ════════════════════════════════════════════════════════════════
-//  MarketingCapture — orchestrates all captures
+//  MarketingCapture - orchestrates all captures
 // ════════════════════════════════════════════════════════════════
 
 class MarketingCapture {
@@ -250,7 +250,7 @@ class MarketingCapture {
     await this.page.click('[data-mode="terminal"]');
     await this.page.waitForTimeout(500);
 
-    // Prevent WebSocket connections entirely — override connect() to no-op
+    // Prevent WebSocket connections entirely - override connect() to no-op
     // This avoids PTY spawn failures and real output leaking into terminals
     await this.page.evaluate(() => {
       TerminalPane.prototype._originalConnect = TerminalPane.prototype.connect;
@@ -443,7 +443,7 @@ class MarketingCapture {
       return window.cwm.state.activeWorkspace ? window.cwm.state.activeWorkspace.id : null;
     });
     if (!wsId) {
-      console.log('  [skip] kanban — no active workspace');
+      console.log('  [skip] kanban - no active workspace');
       return;
     }
 
@@ -498,7 +498,7 @@ class MarketingCapture {
       return window.cwm.state.activeWorkspace ? window.cwm.state.activeWorkspace.id : null;
     });
     if (!wsId) {
-      console.log('  [skip] docs — no active workspace');
+      console.log('  [skip] docs - no active workspace');
       return;
     }
 
@@ -621,7 +621,7 @@ class MarketingCapture {
 
   /**
    * Creates a fresh context with video recording enabled.
-   * Returns { context, page } — caller must close when done.
+   * Returns { context, page } - caller must close when done.
    */
   async _startRecording(name, viewport = DESKTOP) {
     const ctx = await this.browser.newContext({
@@ -652,7 +652,7 @@ class MarketingCapture {
       await page.fill('#login-password', password);
       await page.click('#login-btn');
     }
-    // Wait for app to load — retry login with escalating recovery if needed
+    // Wait for app to load - retry login with escalating recovery if needed
     let appVisible = false;
     for (let attempt = 0; attempt < 3 && !appVisible; attempt++) {
       try {

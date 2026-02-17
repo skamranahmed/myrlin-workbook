@@ -1,5 +1,5 @@
 /**
- * TerminalPane — xterm.js terminal connected via WebSocket to server-side PTY
+ * TerminalPane - xterm.js terminal connected via WebSocket to server-side PTY
  * Performance-critical: raw binary I/O, no JSON wrapping for terminal data
  */
 class TerminalPane {
@@ -299,7 +299,7 @@ class TerminalPane {
 
       // IMPORTANT: Fit BEFORE connecting WebSocket so we know the real
       // terminal dimensions. The PTY spawns at whatever cols/rows we pass
-      // in the WS URL — if we connect before fit, the PTY starts at
+      // in the WS URL - if we connect before fit, the PTY starts at
       // hardcoded 120x30, outputs formatted for 120 cols, then gets
       // resized to the actual (smaller) dimensions. That mismatch garbles
       // the display and forces users to type "reset".
@@ -318,7 +318,7 @@ class TerminalPane {
           this._log('Calling connect()...');
           this.connect();
 
-          // Safety refit after 200ms — catches edge cases where the grid
+          // Safety refit after 200ms - catches edge cases where the grid
           // is still settling (e.g., CSS transitions, slow layout)
           setTimeout(() => {
             if (this.fitAddon) {
@@ -505,7 +505,7 @@ class TerminalPane {
       this.connected = false;
       this._log('WebSocket CLOSED code=' + event.code + ' reason=' + (event.reason || 'none'));
 
-      // Code 1011 = server error (PTY spawn failed). Don't retry — it won't fix itself.
+      // Code 1011 = server error (PTY spawn failed). Don't retry - it won't fix itself.
       if (event.code === 1011) {
         const reason = event.reason || 'PTY session failed to spawn';
         this._status('[Server error: ' + reason + ']', 'red');
@@ -534,7 +534,7 @@ class TerminalPane {
     // On mobile in scroll mode, don't focus textarea (prevents keyboard popup)
     if (this._isMobile() && !this._mobileTypeMode) return;
     this.term.focus();
-    // Also explicitly focus the hidden textarea — xterm.js's focus()
+    // Also explicitly focus the hidden textarea - xterm.js's focus()
     // sometimes doesn't propagate in multi-instance setups
     const container = document.getElementById(this.containerId);
     if (container) {
@@ -586,12 +586,12 @@ class TerminalPane {
   _isMobile() {
     // Use width-based check matching the CSS media query, NOT touch detection.
     // Touch-enabled desktops (Windows laptops) have 'ontouchstart' but should
-    // NOT get mobile treatment — they have keyboards and wide screens.
+    // NOT get mobile treatment - they have keyboards and wide screens.
     return window.innerWidth <= 768;
   }
 
   /**
-   * Initialize mobile input mode — called after terminal mounts.
+   * Initialize mobile input mode - called after terminal mounts.
    * Uses CSS pointer-events to prevent touch from focusing xterm's hidden
    * textarea (which triggers the keyboard). Toolbar buttons send via WebSocket
    * directly and don't need the textarea. The "Type" button toggles
@@ -652,10 +652,10 @@ class TerminalPane {
         return;
       }
 
-      // Scroll the viewport directly — pixel-smooth, no line snapping
+      // Scroll the viewport directly - pixel-smooth, no line snapping
       viewport.scrollTop += velocity;
 
-      // Decelerate — 0.95 gives a smooth, native-feeling coast
+      // Decelerate - 0.95 gives a smooth, native-feeling coast
       velocity *= 0.95;
 
       momentumId = requestAnimationFrame(applyMomentum);
@@ -690,10 +690,10 @@ class TerminalPane {
         }
       }
 
-      // Prevent page scroll — we're handling it
+      // Prevent page scroll - we're handling it
       e.preventDefault();
 
-      // Directly scroll the viewport — pixel smooth, no line quantization
+      // Directly scroll the viewport - pixel smooth, no line quantization
       viewport.scrollTop += deltaY;
 
       // Track velocity for momentum (pixels per 16ms frame)
@@ -718,7 +718,7 @@ class TerminalPane {
   }
 
   /**
-   * Switch to type mode — keyboard appears, user can type into terminal
+   * Switch to type mode - keyboard appears, user can type into terminal
    */
   setMobileTypeMode() {
     if (!this._xtermTextarea || !this.term) return;
@@ -730,12 +730,12 @@ class TerminalPane {
   }
 
   /**
-   * Switch to scroll mode — keyboard hidden, touch scrolls terminal output
+   * Switch to scroll mode - keyboard hidden, touch scrolls terminal output
    */
   setMobileScrollMode() {
     if (!this._xtermTextarea) return;
     this._mobileTypeMode = false;
-    // Block touch from reaching textarea — prevents keyboard on scroll
+    // Block touch from reaching textarea - prevents keyboard on scroll
     this._xtermTextarea.style.pointerEvents = 'none';
     if (this.term) this.term.blur();
     if (this.onMobileModeChange) this.onMobileModeChange('scroll');
@@ -775,7 +775,7 @@ class TerminalPane {
 
     let newActivity = null;
 
-    // Pattern matching — check most specific patterns first
+    // Pattern matching - check most specific patterns first
     // Claude Code tool use headers look like: "⏺ Read(file_path)" or "⏺ Write(file_path)" or "⏺ Bash(command)"
     const toolMatch = this._activityBuffer.match(/⏺\s*(Read|Write|Edit|Bash|Glob|Grep|Task|WebFetch|WebSearch)\(([^)]*)\)\s*$/m);
     if (toolMatch) {
@@ -791,7 +791,7 @@ class TerminalPane {
       else if (tool === 'WebFetch' || tool === 'WebSearch') newActivity = { type: 'searching', detail: 'Web search' };
     }
 
-    // Thinking/streaming indicator — detect Claude's actual response marker.
+    // Thinking/streaming indicator - detect Claude's actual response marker.
     // Claude Code prefixes all output (responses + tool calls) with ⏺.
     // Tool calls are already caught above, so a ⏺ in the CURRENT chunk
     // without a tool match means Claude is streaming a text response.
@@ -824,7 +824,7 @@ class TerminalPane {
 
   /**
    * Called after every terminal write. Marks the pane as working and
-   * schedules a debounced idle check — if no output arrives for 2s
+   * schedules a debounced idle check - if no output arrives for 2s
    * after the last burst, we inspect the buffer for a prompt.
    */
   _trackActivityForCompletion() {
@@ -832,7 +832,7 @@ class TerminalPane {
     if (!this._isWorking) {
       this._isWorking = true;
     }
-    // Debounced idle check — if no output for 2 seconds after burst, check for prompt
+    // Debounced idle check - if no output for 2 seconds after burst, check for prompt
     clearTimeout(this._idleCheckTimer);
     this._idleCheckTimer = setTimeout(() => {
       this._checkForCompletion();

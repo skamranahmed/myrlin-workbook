@@ -10,7 +10,7 @@ const OUTPUT_DIR = path.join(PROJECT_ROOT, 'marketing', 'screenshots');
  * Add a drop shadow behind an image with transparent padding.
  * Creates a blurred dark rounded-rect SVG shadow composited under the original.
  *
- * @param {string} inputPath  - Absolute path to the source PNG
+ * @param {string} inputPath - Absolute path to the source PNG
  * @param {string} outputPath - Absolute path for the output PNG
  */
 async function addDropShadow(inputPath, outputPath) {
@@ -65,7 +65,7 @@ async function createThemeGrid() {
   const missing = themes.filter((t) => !fs.existsSync(path.join(RAW_DIR, t.file)));
   if (missing.length > 0) {
     console.warn(
-      `  [WARN] Skipping theme grid — missing files: ${missing.map((m) => m.file).join(', ')}`
+      `  [WARN] Skipping theme grid - missing files: ${missing.map((m) => m.file).join(', ')}`
     );
     return;
   }
@@ -145,7 +145,7 @@ async function createThemeGrid() {
 /**
  * Add rounded corners to an image using an SVG mask with dest-in blending.
  *
- * @param {string} inputPath  - Absolute path to the source PNG
+ * @param {string} inputPath - Absolute path to the source PNG
  * @param {string} outputPath - Absolute path for the output PNG
  * @param {number} radius     - Corner radius in pixels (default 24)
  */
@@ -173,7 +173,7 @@ async function addRoundedCorners(inputPath, outputPath, radius = 24) {
 }
 
 /**
- * Main orchestrator — processes all marketing screenshots.
+ * Main orchestrator - processes all marketing screenshots.
  * Gracefully skips any missing raw files and copies unprocessed PNGs.
  */
 async function processAll() {

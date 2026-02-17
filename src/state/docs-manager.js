@@ -5,7 +5,7 @@
  * Each workspace gets a dedicated file at state/docs/{workspaceId}.md with three
  * structured sections: Notes, Goals, and Tasks.
  *
- * This is a pure utility module with no EventEmitter dependency — the store
+ * This is a pure utility module with no EventEmitter dependency - the store
  * calls these functions and emits events itself.
  */
 
