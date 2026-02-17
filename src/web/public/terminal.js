@@ -555,7 +555,10 @@ class TerminalPane {
     try {
       const text = await navigator.clipboard.readText();
       if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'input', data: text }));
+        // Wrap in bracketed paste escape sequences so the shell correctly
+        // handles pasted content (prevents misinterpreting special chars)
+        const bracketedText = '\x1b[200~' + text + '\x1b[201~';
+        this.ws.send(JSON.stringify({ type: 'input', data: bracketedText }));
       }
     } catch (err) {
       this._log('Clipboard paste failed: ' + err.message);

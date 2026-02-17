@@ -205,6 +205,30 @@
           <div class="session-manager-list" id="session-manager-list"></div>
         </div>
 
+        <!-- Conflict Indicator -->
+        <button class="btn btn-ghost btn-icon conflict-indicator" id="conflict-indicator-btn" title="File conflicts" hidden>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1.5L14.5 13H1.5L8 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M8 6v3M8 11v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span class="conflict-badge" id="conflict-badge">0</span>
+        </button>
+
+        <!-- Conflict Center Overlay -->
+        <div class="conflict-center-overlay" id="conflict-center-overlay" hidden>
+          <div class="conflict-center-header">
+            <h3>File Conflicts</h3>
+            <div class="conflict-center-actions">
+              <button class="btn btn-ghost btn-sm" id="conflict-refresh-btn" title="Refresh">Refresh</button>
+              <button class="btn btn-ghost btn-icon btn-sm" id="conflict-close-btn" title="Close">&times;</button>
+            </div>
+          </div>
+          <div class="conflict-center-info">
+            <span id="conflict-center-summary">Multiple sessions editing the same files</span>
+          </div>
+          <div class="conflict-center-list" id="conflict-center-list"></div>
+        </div>
+
         <button class="btn btn-ghost btn-icon header-search-btn" id="open-switcher-btn" title="Quick Switcher (Ctrl+K)">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.3"/>

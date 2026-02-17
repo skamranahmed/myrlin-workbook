@@ -368,6 +368,15 @@ class CWMApp {
       // Image upload
       imageUploadInput: document.getElementById('image-upload-input'),
 
+      // Conflict Center
+      conflictIndicatorBtn: document.getElementById('conflict-indicator-btn'),
+      conflictBadge: document.getElementById('conflict-badge'),
+      conflictCenterOverlay: document.getElementById('conflict-center-overlay'),
+      conflictCenterList: document.getElementById('conflict-center-list'),
+      conflictCenterSummary: document.getElementById('conflict-center-summary'),
+      conflictRefreshBtn: document.getElementById('conflict-refresh-btn'),
+      conflictCloseBtn: document.getElementById('conflict-close-btn'),
+
       // Session Manager
       sessionManagerOverlay: document.getElementById('session-manager-overlay'),
       sessionManagerList: document.getElementById('session-manager-list'),
@@ -625,6 +634,23 @@ class CWMApp {
       this.els.resourcesRefreshBtn.addEventListener('click', () => this.refreshResources());
     }
 
+    // Conflict Center
+    if (this.els.conflictIndicatorBtn) {
+      this.els.conflictIndicatorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleConflictCenter();
+      });
+    }
+    if (this.els.conflictCloseBtn) {
+      this.els.conflictCloseBtn.addEventListener('click', () => this.closeConflictCenter());
+    }
+    if (this.els.conflictRefreshBtn) {
+      this.els.conflictRefreshBtn.addEventListener('click', () => {
+        this.checkForConflicts();
+        if (this._conflictCenterOpen) this.renderConflictCenter();
+      });
+    }
+
     // Session Manager — click stat chips to open overlay
     const statChips = document.querySelectorAll('.stat-chip');
     statChips.forEach(chip => {
@@ -698,7 +724,9 @@ class CWMApp {
       }
       // Escape
       if (e.key === 'Escape') {
-        if (this.els.sessionManagerOverlay && !this.els.sessionManagerOverlay.hidden) {
+        if (this.els.conflictCenterOverlay && !this.els.conflictCenterOverlay.hidden) {
+          this.closeConflictCenter();
+        } else if (this.els.sessionManagerOverlay && !this.els.sessionManagerOverlay.hidden) {
           this.closeSessionManager();
         } else if (this.els.searchOverlay && !this.els.searchOverlay.hidden) {
           this.closeGlobalSearch();
@@ -9707,19 +9735,29 @@ class CWMApp {
   async checkForConflicts() {
     try {
       const ws = this.state.activeWorkspace;
-      if (!ws) return;
+      if (!ws) {
+        this._updateConflictBadge(0);
+        return;
+      }
 
       // Count running sessions in the active workspace
       const runningSessions = (this.state.allSessions || this.state.sessions || []).filter(s =>
         s.workspaceId === ws.id && s.status === 'running'
       );
-      if (runningSessions.length < 2) return;
+      if (runningSessions.length < 2) {
+        this._currentConflicts = [];
+        this._updateConflictBadge(0);
+        return;
+      }
 
       const data = await this.api('GET', `/api/workspaces/${ws.id}/conflicts`);
       const conflicts = data.conflicts || [];
 
+      // Store conflicts for the conflict center UI
+      this._currentConflicts = conflicts;
+      this._updateConflictBadge(conflicts.length);
+
       if (conflicts.length === 0) {
-        // All conflicts resolved — reset so future reappearances trigger toasts again
         this._lastConflictKeys.clear();
         return;
       }
@@ -9739,22 +9777,134 @@ class CWMApp {
       // Nothing new to show — all current conflicts were already toasted
       if (newConflicts.length === 0) return;
 
-      // Show a toast warning for each NEW conflict (max 3 to avoid spam)
-      const shown = newConflicts.slice(0, 3);
-      shown.forEach(c => {
+      // Show a single toast pointing to the conflict center
+      if (newConflicts.length === 1) {
+        const c = newConflicts[0];
         const fileName = c.file || c.path || 'unknown file';
         const sessionCount = c.sessions ? c.sessions.length : c.count || 2;
-        this.showToast(`Warning: ${fileName} is being edited by ${sessionCount} sessions`, 'warning');
-      });
-
-      // If there are more new conflicts than shown, add a summary toast
-      if (newConflicts.length > 3) {
-        this.showToast(`${newConflicts.length - 3} more file conflicts detected in ${this.escapeHtml(ws.name)}`, 'warning');
+        this.showToast(`Conflict: ${fileName} edited by ${sessionCount} sessions — click ⚠ to view`, 'warning');
+      } else {
+        this.showToast(`${newConflicts.length} new file conflicts detected — click ⚠ to view`, 'warning');
       }
+
+      // Auto-render conflict center if it's open
+      if (this._conflictCenterOpen) this.renderConflictCenter();
     } catch {
-      // Silently ignore conflict check failures — the API endpoint may not exist yet.
-      // This is a non-critical background check.
+      // Silently ignore conflict check failures
     }
+  }
+
+  /**
+   * Update the conflict indicator badge in the header.
+   * @param {number} count - Number of active conflicts
+   */
+  _updateConflictBadge(count) {
+    if (this.els.conflictIndicatorBtn) {
+      this.els.conflictIndicatorBtn.hidden = count === 0;
+    }
+    if (this.els.conflictBadge) {
+      this.els.conflictBadge.textContent = count;
+    }
+  }
+
+  /**
+   * Toggle the conflict center overlay open/closed.
+   */
+  toggleConflictCenter() {
+    if (this._conflictCenterOpen) {
+      this.closeConflictCenter();
+    } else {
+      this.openConflictCenter();
+    }
+  }
+
+  /**
+   * Open the conflict center overlay and render its content.
+   */
+  openConflictCenter() {
+    this._conflictCenterOpen = true;
+    if (this.els.conflictCenterOverlay) {
+      this.els.conflictCenterOverlay.hidden = false;
+    }
+    // Refresh data and render
+    this.checkForConflicts().then(() => this.renderConflictCenter());
+
+    // Close on outside click
+    this._conflictOutsideHandler = (e) => {
+      if (this.els.conflictCenterOverlay && !this.els.conflictCenterOverlay.hidden &&
+          !this.els.conflictCenterOverlay.contains(e.target) &&
+          !e.target.closest('.conflict-indicator')) {
+        this.closeConflictCenter();
+      }
+    };
+    setTimeout(() => document.addEventListener('click', this._conflictOutsideHandler), 0);
+  }
+
+  /**
+   * Close the conflict center overlay.
+   */
+  closeConflictCenter() {
+    this._conflictCenterOpen = false;
+    if (this.els.conflictCenterOverlay) {
+      this.els.conflictCenterOverlay.hidden = true;
+    }
+    document.removeEventListener('click', this._conflictOutsideHandler);
+  }
+
+  /**
+   * Render the conflict center list with current conflict data.
+   */
+  renderConflictCenter() {
+    const list = this.els.conflictCenterList;
+    if (!list) return;
+
+    const conflicts = this._currentConflicts || [];
+
+    // Update summary
+    if (this.els.conflictCenterSummary) {
+      if (conflicts.length === 0) {
+        this.els.conflictCenterSummary.textContent = 'No conflicts detected';
+      } else {
+        const ws = this.state.activeWorkspace;
+        this.els.conflictCenterSummary.textContent =
+          `${conflicts.length} file${conflicts.length > 1 ? 's' : ''} edited by multiple sessions${ws ? ' in ' + ws.name : ''}`;
+      }
+    }
+
+    if (conflicts.length === 0) {
+      list.innerHTML = '<div class="conflict-empty">No file conflicts detected</div>';
+      return;
+    }
+
+    list.innerHTML = conflicts.map(c => {
+      const filePath = c.file || c.path || 'unknown';
+      const sessions = c.sessions || [];
+
+      return `
+        <div class="conflict-file-card">
+          <div class="conflict-file-path">${this.escapeHtml(filePath)}</div>
+          <div class="conflict-sessions">
+            ${sessions.map(s => `
+              <button class="conflict-session-chip" data-session-id="${s.id}" title="Open in terminal">
+                <span class="conflict-session-dot"></span>
+                ${this.escapeHtml(s.name || s.id)}
+              </button>
+            `).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    // Wire up session chip clicks — jump to terminal
+    list.querySelectorAll('.conflict-session-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sessionId = chip.dataset.sessionId;
+        if (sessionId) {
+          this._smFindOrOpenTerminal(sessionId);
+          this.closeConflictCenter();
+        }
+      });
+    });
   }
 
   /* ═══════════════════════════════════════════════════════════
