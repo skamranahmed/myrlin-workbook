@@ -11,8 +11,9 @@
  *
  * Password is loaded from (in priority order):
  *   1. CWM_PASSWORD environment variable
- *   2. state/config.json file
- *   3. Auto-generated on first run (saved to state/config.json)
+ *   2. ~/.myrlin/config.json (persists across npx updates/reinstalls)
+ *   3. ./state/config.json (local project config)
+ *   4. Auto-generated on first run (saved to both locations)
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -20,11 +21,14 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // ─── Configuration ─────────────────────────────────────────
 const TOKEN_BYTE_LENGTH = 32;
-const CONFIG_DIR = path.join(__dirname, '..', '..', 'state');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const HOME_CONFIG_DIR = path.join(os.homedir(), '.myrlin');
+const HOME_CONFIG_FILE = path.join(HOME_CONFIG_DIR, 'config.json');
+const LOCAL_CONFIG_DIR = path.join(__dirname, '..', '..', 'state');
+const LOCAL_CONFIG_FILE = path.join(LOCAL_CONFIG_DIR, 'config.json');
 
 // ─── Rate Limiting ─────────────────────────────────────────
 // Simple in-memory rate limiter: max 5 login attempts per IP per 60 seconds
@@ -67,50 +71,86 @@ setInterval(() => {
 // ─── Password Management ──────────────────────────────────
 
 /**
- * Load or generate the auth password.
- * Priority: env var > config file > auto-generate.
- * @returns {string}
+ * Read password from a config file, returns null if not found.
+ * @param {string} filePath - Path to config.json
+ * @returns {string|null}
  */
-function loadPassword() {
-  // 1. Environment variable
-  if (process.env.CWM_PASSWORD) {
-    return process.env.CWM_PASSWORD;
-  }
-
-  // 2. Config file
+function readPasswordFromFile(filePath) {
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    if (fs.existsSync(filePath)) {
+      const config = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
       if (config.password && typeof config.password === 'string') {
         return config.password;
       }
     }
   } catch (_) {
-    // Corrupted config - regenerate
+    // Corrupted config - skip
   }
+  return null;
+}
 
-  // 3. Auto-generate and save
-  const generated = crypto.randomBytes(16).toString('base64url');
+/**
+ * Save password to a config file (merges with existing keys).
+ * @param {string} dir - Config directory path
+ * @param {string} filePath - Config file path
+ * @param {string} password - Password to save
+ */
+function savePasswordToFile(dir, filePath, password) {
   try {
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
     const config = {};
     try {
-      if (fs.existsSync(CONFIG_FILE)) {
-        Object.assign(config, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')));
+      if (fs.existsSync(filePath)) {
+        Object.assign(config, JSON.parse(fs.readFileSync(filePath, 'utf-8')));
       }
     } catch (_) {}
-    config.password = generated;
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    config.password = password;
+    fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8');
   } catch (err) {
-    console.error('[AUTH] Failed to save generated password to config:', err.message);
+    // Non-fatal: password still works in memory for this session
   }
+}
+
+/**
+ * Load or generate the auth password.
+ * Priority: env var > ~/.myrlin/config.json > ./state/config.json > auto-generate.
+ * When auto-generating, saves to both ~/.myrlin/ and ./state/ so the password
+ * persists across npx cache clears and project reinstalls.
+ * @returns {string}
+ */
+function loadPassword() {
+  // 1. Environment variable (highest priority, always wins)
+  if (process.env.CWM_PASSWORD) {
+    return process.env.CWM_PASSWORD;
+  }
+
+  // 2. Home directory config (~/.myrlin/config.json) — persists across reinstalls
+  const homePassword = readPasswordFromFile(HOME_CONFIG_FILE);
+  if (homePassword) {
+    // Also sync to local config so it's visible in the project
+    savePasswordToFile(LOCAL_CONFIG_DIR, LOCAL_CONFIG_FILE, homePassword);
+    return homePassword;
+  }
+
+  // 3. Local project config (./state/config.json)
+  const localPassword = readPasswordFromFile(LOCAL_CONFIG_FILE);
+  if (localPassword) {
+    // Promote to home config for persistence across reinstalls
+    savePasswordToFile(HOME_CONFIG_DIR, HOME_CONFIG_FILE, localPassword);
+    return localPassword;
+  }
+
+  // 4. Auto-generate and save to both locations
+  const generated = crypto.randomBytes(16).toString('base64url');
+  savePasswordToFile(HOME_CONFIG_DIR, HOME_CONFIG_FILE, generated);
+  savePasswordToFile(LOCAL_CONFIG_DIR, LOCAL_CONFIG_FILE, generated);
 
   console.log('');
   console.log('══════════════════════════════════════════════════');
   console.log('  CWM auto-generated password: ' + generated);
-  console.log('  Saved to: state/config.json');
+  console.log('  Saved to: ~/.myrlin/config.json');
   console.log('  Set CWM_PASSWORD env var to override.');
   console.log('══════════════════════════════════════════════════');
   console.log('');

@@ -38,20 +38,21 @@ npm run gui                   # Real sessions
 npm run gui:demo              # Sample data
 ```
 
-On first launch, a random password is generated and printed to the console. Saved to `state/config.json`.
+### Password
 
-**Custom password:**
+On first launch, a random password is generated and saved to `~/.myrlin/config.json`. This password **persists across updates, reinstalls, and npx cache clears** — you'll always use the same password.
+
+To set your own:
 
 ```bash
-# Bash/zsh
-CWM_PASSWORD=mypassword npm run gui
+# Option 1: Edit the config file (recommended — persists forever)
+# ~/.myrlin/config.json → { "password": "your-password-here" }
 
-# PowerShell
-$env:CWM_PASSWORD="mypassword"; npm run gui
-
-# cmd.exe
-set CWM_PASSWORD=mypassword && npm run gui
+# Option 2: Environment variable (overrides config, per-session)
+CWM_PASSWORD=mypassword npx myrlin-workbook
 ```
+
+Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./state/config.json` > auto-generate.
 
 ### Prerequisites
 
