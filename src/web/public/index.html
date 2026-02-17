@@ -17,7 +17,7 @@
   <script>
     (function() {
       var t = localStorage.getItem('cwm_theme');
-      if (['latte','frappe','macchiato'].includes(t)) document.documentElement.dataset.theme = t;
+      if (['latte','frappe','macchiato','cherry','ocean','amber','mint','nord','dracula','tokyo-night','rose-pine-dawn','gruvbox-light'].includes(t)) document.documentElement.dataset.theme = t;
       var s = parseFloat(localStorage.getItem('cwm_ui_scale'));
       if (s && s >= 0.85 && s <= 1.2) {
         document.documentElement.style.setProperty('--ui-scale', s);
@@ -156,14 +156,21 @@
             </svg>
           </button>
           <div class="theme-dropdown" id="theme-dropdown" hidden>
-            <button class="theme-option" data-theme="mocha"><span class="theme-swatch" style="background:#1e1e2e"></span>Mocha</button>
-            <button class="theme-option" data-theme="macchiato"><span class="theme-swatch" style="background:#24273a"></span>Macchiato</button>
-            <button class="theme-option" data-theme="frappe"><span class="theme-swatch" style="background:#303446"></span>Frapp&eacute;</button>
-            <button class="theme-option" data-theme="latte"><span class="theme-swatch" style="background:#eff1f5;border:1px solid #ccd0da"></span>Latte</button>
+            <div class="theme-dropdown-section">Dark</div>
+            <button class="theme-option" data-theme="mocha"><span class="theme-swatch" style="background:#1e1e2e"></span>Mocha<span class="theme-catppuccin-badge" title="Official Catppuccin">&#9733;</span></button>
+            <button class="theme-option" data-theme="macchiato"><span class="theme-swatch" style="background:#24273a"></span>Macchiato<span class="theme-catppuccin-badge" title="Official Catppuccin">&#9733;</span></button>
+            <button class="theme-option" data-theme="frappe"><span class="theme-swatch" style="background:#303446"></span>Frapp&eacute;<span class="theme-catppuccin-badge" title="Official Catppuccin">&#9733;</span></button>
+            <button class="theme-option" data-theme="nord"><span class="theme-swatch" style="background:#2e3440"></span>Nord</button>
+            <button class="theme-option" data-theme="dracula"><span class="theme-swatch" style="background:#282a36"></span>Dracula</button>
+            <button class="theme-option" data-theme="tokyo-night"><span class="theme-swatch" style="background:#1a1b26"></span>Tokyo Night</button>
             <button class="theme-option" data-theme="cherry"><span class="theme-swatch" style="background:linear-gradient(135deg,#221a22,#f5a0d0)"></span>Cherry</button>
             <button class="theme-option" data-theme="ocean"><span class="theme-swatch" style="background:linear-gradient(135deg,#1a1e28,#70a8f0)"></span>Ocean</button>
             <button class="theme-option" data-theme="amber"><span class="theme-swatch" style="background:linear-gradient(135deg,#211e1a,#f0d070)"></span>Amber</button>
             <button class="theme-option" data-theme="mint"><span class="theme-swatch" style="background:linear-gradient(135deg,#1a2120,#78e0a0)"></span>Mint</button>
+            <div class="theme-dropdown-section">Light</div>
+            <button class="theme-option" data-theme="latte"><span class="theme-swatch" style="background:#eff1f5;border:1px solid #ccd0da"></span>Latte<span class="theme-catppuccin-badge" title="Official Catppuccin">&#9733;</span></button>
+            <button class="theme-option" data-theme="rose-pine-dawn"><span class="theme-swatch" style="background:#faf4ed;border:1px solid #dfdad9"></span>Rose Pine Dawn</button>
+            <button class="theme-option" data-theme="gruvbox-light"><span class="theme-swatch" style="background:#fbf1c7;border:1px solid #d5c4a1"></span>Gruvbox Light</button>
           </div>
         </div>
         <div class="scale-controls" id="scale-controls">

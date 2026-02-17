@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.png" alt="Myrlin's Workbook" width="80">
+  <img src="docs/images/logo.png" alt="Myrlin's Workbook" width="250">
 </p>
 <h1 align="center">Myrlin's Workbook</h1>
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-Open-source workspace manager for Claude Code — cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, costs dashboard, 8 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
+Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, costs dashboard, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
 </p>
 
 <p align="center">
@@ -92,7 +92,7 @@ There are good tools in this space. I tried them. Here's where Myrlin fits:
 | Session discovery | Yes | Yes | No | No |
 | Session manager overlay | Yes | No | No | No |
 | Workspace docs/kanban | Yes | No | No | No |
-| Themes | 8 (Catppuccin + fun flavors) | No | No | No |
+| Themes | 13 (Catppuccin, Nord, Dracula, etc.) | No | No | No |
 | Session templates | Yes | No | No | No |
 | Conflict detection | Yes | No | No | No |
 | Embedded terminals | 4-pane grid | Single | No | No |
@@ -179,7 +179,7 @@ Real-time warnings when two or more running sessions are editing the same files.
 
 ![Theme switching in action](docs/images/theme-switching.gif)
 
-8 themes: 4 classic [Catppuccin](https://github.com/catppuccin/catppuccin) (Mocha, Macchiato, Frappe, Latte) plus 4 fun flavors - Cherry (rose), Ocean (navy), Amber (gold), and Mint (jade). Toggle from the header dropdown. Choice persists in localStorage.
+13 themes organized into Dark and Light sections. 4 official [Catppuccin](https://github.com/catppuccin/catppuccin) (Mocha, Macchiato, Frappe, Latte), 3 community favorites (Nord, Dracula, Tokyo Night), 4 custom flavors (Cherry, Ocean, Amber, Mint), and 2 light alternatives (Rose Pine Dawn, Gruvbox Light). Toggle from the header dropdown. Choice persists in localStorage.
 
 ### Port Detection & Resource Monitoring
 
@@ -265,7 +265,7 @@ A comprehensive list of everything Myrlin Workbook offers today.
 
 ### Themes
 
-- **8 themes** - 4 Catppuccin (Mocha, Macchiato, Frappe, Latte) + 4 fun flavors (Cherry, Ocean, Amber, Mint)
+- **13 themes** - 4 Catppuccin (Mocha, Macchiato, Frappe, Latte) + Nord, Dracula, Tokyo Night + Cherry, Ocean, Amber, Mint + Rose Pine Dawn, Gruvbox Light
 - **Header dropdown toggle** - choice persists in localStorage
 
 ### Resources & Monitoring
