@@ -2978,23 +2978,24 @@ textarea.input {
    ═══════════════════════════════════════════════════════════════ */
 
 .workspace-group {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .workspace-group-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  margin: 0 8px 2px;
+  padding: 10px 14px;
+  margin: 0 6px 3px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text);
-  background: var(--surface0);
-  border: 1px solid var(--surface2);
+  color: var(--subtext1);
+  /* Subtle tinted background — lighter than active workspace to avoid confusion */
+  background: color-mix(in srgb, var(--group-color, var(--mauve)) 6%, var(--mantle));
+  border: 1px solid color-mix(in srgb, var(--group-color, var(--mauve)) 15%, var(--surface1));
   border-left: 3px solid var(--group-color, var(--mauve));
   border-radius: 6px;
   transition: all 0.15s ease;
@@ -3002,13 +3003,13 @@ textarea.input {
 }
 
 .workspace-group-header:hover {
-  background: var(--surface1);
-  border-color: var(--overlay0);
+  color: var(--text);
+  background: color-mix(in srgb, var(--group-color, var(--mauve)) 10%, var(--mantle));
+  border-color: color-mix(in srgb, var(--group-color, var(--mauve)) 25%, var(--surface2));
   border-left-color: var(--group-color, var(--mauve));
 }
 
 .workspace-group-header:active {
-  background: var(--surface0);
   transform: scale(0.99);
 }
 
@@ -3016,7 +3017,7 @@ textarea.input {
   transition: transform 0.15s ease;
   font-size: 10px;
   display: inline-block;
-  color: var(--overlay1);
+  color: var(--overlay0);
   flex-shrink: 0;
 }
 
@@ -3025,11 +3026,11 @@ textarea.input {
 }
 
 .workspace-group-header .group-color-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 4px color-mix(in srgb, var(--group-color, var(--mauve)) 40%, transparent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--group-color, var(--mauve)) 40%, transparent);
 }
 
 .workspace-group-header .group-name {
@@ -3043,7 +3044,7 @@ textarea.input {
   margin-left: auto;
   font-size: 10px;
   color: var(--overlay0);
-  background: var(--surface1);
+  background: color-mix(in srgb, var(--group-color, var(--mauve)) 10%, var(--surface0));
   padding: 1px 6px;
   border-radius: 8px;
   font-family: var(--font-mono);
@@ -3051,18 +3052,21 @@ textarea.input {
   flex-shrink: 0;
 }
 
+/* Indent grouped workspaces more so they visually nest under the header */
 .workspace-group .workspace-group-items {
-  padding-left: 8px;
+  padding-left: 16px;
+  margin-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--group-color, var(--mauve)) 15%, var(--surface1));
 }
 
 .workspace-group-empty {
-  padding: 6px 16px;
+  padding: 8px 16px;
   font-size: 11px;
   color: var(--overlay0);
 }
 
 .workspace-group-header.group-drop-target {
-  background: color-mix(in srgb, var(--group-color, var(--mauve)) 12%, var(--surface0));
+  background: color-mix(in srgb, var(--group-color, var(--mauve)) 15%, var(--mantle));
   border-color: var(--group-color, var(--mauve));
   border-left-color: var(--group-color, var(--mauve));
   color: var(--text);

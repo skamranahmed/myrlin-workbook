@@ -1803,7 +1803,7 @@ app.get('/api/quota-overview', requireAuth, (req, res) => {
 
         try {
           const stat = fs.statSync(jsonlPath);
-          if (stat.size >= 10 * 1024 * 1024) continue; // Skip >10MB files
+          if (stat.size >= 500 * 1024 * 1024) continue; // Skip >500MB files
           const mtimeMs = stat.mtimeMs;
           const cached = _costCache.get(resumeSessionId);
           const now = Date.now();
@@ -2028,8 +2028,8 @@ app.get('/api/workspaces/:id/analytics', requireAuth, (req, res) => {
         if (cached && cached.mtimeMs === mtimeMs && (now - cached.timestamp) < COST_CACHE_TTL) {
           costData = cached.result;
         } else {
-          // Only process files under 10MB to avoid blocking
-          if (stat.size >= 10 * 1024 * 1024) continue;
+          // Only process files under 500MB to avoid blocking
+          if (stat.size >= 500 * 1024 * 1024) continue;
           costData = calculateSessionCost(jsonlPath);
           const result = { sessionId: s.id, resumeSessionId, ...costData };
           _costCache.set(resumeSessionId, { mtimeMs, timestamp: now, result });
@@ -2120,7 +2120,7 @@ app.get('/api/cost/dashboard', requireAuth, (req, res) => {
 
         try {
           const stat = fs.statSync(jsonlPath);
-          if (stat.size >= 10 * 1024 * 1024) continue; // Skip >10MB files
+          if (stat.size >= 500 * 1024 * 1024) continue; // Skip >500MB files
 
           // Check cache
           const mtimeMs = stat.mtimeMs;
