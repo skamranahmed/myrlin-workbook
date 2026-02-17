@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-02-16
+
+### Added
+
+- **5 New Themes** - Nord, Dracula, Tokyo Night (dark), Rose Pine Dawn, Gruvbox Light (light). Now 13 themes total.
+- **Theme Dropdown Sections** - Dark and Light categories with section headers. Official Catppuccin themes marked with star badge.
+- **Cropped Logo** - updated app header and README with larger cropped logo (64px header, 250px README).
+
+### Fixed
+
+- **Project Discovery with Spaces** - directories with spaces in names (e.g. "Work AI Project") now correctly discovered. `decodeClaudePath()` tries space-joined candidates alongside hyphen-joined.
+- **Marketing Scripts Removed from Repo** - internal scripts and strategy docs properly gitignored and untracked.
+
 ## [0.3.0-alpha] - 2026-02-16
 
 ### Added
