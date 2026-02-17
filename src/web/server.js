@@ -942,16 +942,23 @@ function decodeClaudePath(encoded) {
       let matched = false;
 
       for (let len = tokens.length - idx; len > 1; len--) {
-        const candidate = tokens.slice(idx, idx + len).join('-');
-        const candidatePath = path.join(resolved, candidate);
-        try {
-          if (fs.existsSync(candidatePath)) {
-            resolved = candidatePath;
-            idx += len;
-            matched = true;
-            break;
-          }
-        } catch (_) { /* skip */ }
+        const slice = tokens.slice(idx, idx + len);
+        // Try hyphen-joined (e.g. "claude-workspace-manager") and
+        // space-joined (e.g. "Work AI Project") since Claude encodes
+        // both path separators and spaces as dashes
+        const candidates = [slice.join('-'), slice.join(' ')];
+        for (const candidate of candidates) {
+          const candidatePath = path.join(resolved, candidate);
+          try {
+            if (fs.existsSync(candidatePath)) {
+              resolved = candidatePath;
+              idx += len;
+              matched = true;
+              break;
+            }
+          } catch (_) { /* skip */ }
+        }
+        if (matched) break;
       }
 
       if (!matched) {
