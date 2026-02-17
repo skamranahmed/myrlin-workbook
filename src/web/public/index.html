@@ -187,6 +187,24 @@
           </div>
         </div>
 
+        <!-- Session Manager Overlay -->
+        <div class="session-manager-overlay" id="session-manager-overlay" hidden>
+          <div class="session-manager-header">
+            <h3>Sessions</h3>
+            <div class="session-manager-actions">
+              <button class="btn btn-ghost btn-sm" id="sm-select-all-btn">Select All</button>
+              <button class="btn btn-ghost btn-sm" id="sm-stop-selected-btn" disabled>Stop Selected</button>
+              <button class="btn btn-ghost btn-icon btn-sm" id="sm-close-btn" title="Close">&times;</button>
+            </div>
+          </div>
+          <div class="session-manager-filters">
+            <button class="sm-filter active" data-filter="all">All</button>
+            <button class="sm-filter" data-filter="running">Running</button>
+            <button class="sm-filter" data-filter="stopped">Stopped</button>
+          </div>
+          <div class="session-manager-list" id="session-manager-list"></div>
+        </div>
+
         <button class="btn btn-ghost btn-icon header-search-btn" id="open-switcher-btn" title="Quick Switcher (Ctrl+K)">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" stroke-width="1.3"/>

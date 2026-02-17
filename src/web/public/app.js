@@ -367,6 +367,13 @@ class CWMApp {
 
       // Image upload
       imageUploadInput: document.getElementById('image-upload-input'),
+
+      // Session Manager
+      sessionManagerOverlay: document.getElementById('session-manager-overlay'),
+      sessionManagerList: document.getElementById('session-manager-list'),
+      smSelectAllBtn: document.getElementById('sm-select-all-btn'),
+      smStopSelectedBtn: document.getElementById('sm-stop-selected-btn'),
+      smCloseBtn: document.getElementById('sm-close-btn'),
     };
   }
 
@@ -618,6 +625,51 @@ class CWMApp {
       this.els.resourcesRefreshBtn.addEventListener('click', () => this.refreshResources());
     }
 
+    // Session Manager — click stat chips to open overlay
+    const statChips = document.querySelectorAll('.stat-chip');
+    statChips.forEach(chip => {
+      chip.style.cursor = 'pointer';
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const title = chip.getAttribute('title') || '';
+        if (title.includes('Running')) {
+          this.toggleSessionManager('running');
+        } else {
+          this.toggleSessionManager('all');
+        }
+      });
+    });
+
+    // Session Manager overlay controls
+    if (this.els.smCloseBtn) {
+      this.els.smCloseBtn.addEventListener('click', () => this.closeSessionManager());
+    }
+    if (this.els.smSelectAllBtn) {
+      this.els.smSelectAllBtn.addEventListener('click', () => this.smToggleSelectAll());
+    }
+    if (this.els.smStopSelectedBtn) {
+      this.els.smStopSelectedBtn.addEventListener('click', () => this.smStopSelected());
+    }
+    // Filter buttons
+    if (this.els.sessionManagerOverlay) {
+      this.els.sessionManagerOverlay.querySelector('.session-manager-filters')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.sm-filter');
+        if (!btn) return;
+        this._smFilter = btn.dataset.filter || 'all';
+        this.els.sessionManagerOverlay.querySelectorAll('.sm-filter').forEach(f => f.classList.remove('active'));
+        btn.classList.add('active');
+        this.renderSessionManager();
+      });
+      // Close on click outside
+      this._smOutsideClickHandler = (e) => {
+        if (this.els.sessionManagerOverlay && !this.els.sessionManagerOverlay.hidden &&
+            !this.els.sessionManagerOverlay.contains(e.target) &&
+            !e.target.closest('.stat-chip')) {
+          this.closeSessionManager();
+        }
+      };
+    }
+
     // Update button
     if (this.els.updateBtn) {
       this.els.updateBtn.addEventListener('click', () => this.showUpdateModal());
@@ -646,7 +698,9 @@ class CWMApp {
       }
       // Escape
       if (e.key === 'Escape') {
-        if (this.els.searchOverlay && !this.els.searchOverlay.hidden) {
+        if (this.els.sessionManagerOverlay && !this.els.sessionManagerOverlay.hidden) {
+          this.closeSessionManager();
+        } else if (this.els.searchOverlay && !this.els.searchOverlay.hidden) {
           this.closeGlobalSearch();
         } else if (this.els.actionSheetOverlay && !this.els.actionSheetOverlay.hidden) {
           this.hideActionSheet();
@@ -3575,23 +3629,23 @@ class CWMApp {
     switch (data.type) {
       case 'session:started':
         this.showToast(`Session "${data.name || 'unknown'}" started`, 'success');
-        this.loadSessions();
+        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
         this.loadStats();
         break;
       case 'session:stopped':
         this.showToast(`Session "${data.name || 'unknown'}" stopped`, 'info');
-        this.loadSessions();
+        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
         this.loadStats();
         break;
       case 'session:error':
         this.showToast(`Session "${data.name || 'unknown'}" encountered an error`, 'error');
-        this.loadSessions();
+        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
         this.loadStats();
         break;
       case 'session:created':
       case 'session:deleted':
       case 'session:updated':
-        this.loadSessions();
+        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
         this.loadStats();
         break;
       case 'workspace:created':
@@ -9796,6 +9850,305 @@ class CWMApp {
     } catch (err) {
       this.showToast(err.message || 'Failed to delete feature', 'error');
     }
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     SESSION MANAGER OVERLAY
+     Click stat chips (running/total) to open a session management panel
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Toggle the session manager overlay. Opens with the given filter or closes if already open with same filter.
+   * @param {string} filter - 'all', 'running', or 'stopped'
+   */
+  toggleSessionManager(filter = 'all') {
+    if (this._smOpen && this._smFilter === filter) {
+      this.closeSessionManager();
+      return;
+    }
+    this._smFilter = filter;
+    this._smOpen = true;
+    this._smSelectedIds = new Set();
+
+    // Set active filter button
+    if (this.els.sessionManagerOverlay) {
+      this.els.sessionManagerOverlay.querySelectorAll('.sm-filter').forEach(f => {
+        f.classList.toggle('active', f.dataset.filter === filter);
+      });
+      this.els.sessionManagerOverlay.hidden = false;
+    }
+
+    // Attach outside-click listener
+    setTimeout(() => document.addEventListener('click', this._smOutsideClickHandler), 0);
+
+    this.renderSessionManager();
+  }
+
+  /**
+   * Close the session manager overlay and clean up listeners.
+   */
+  closeSessionManager() {
+    this._smOpen = false;
+    this._smSelectedIds = new Set();
+    if (this.els.sessionManagerOverlay) {
+      this.els.sessionManagerOverlay.hidden = true;
+    }
+    document.removeEventListener('click', this._smOutsideClickHandler);
+  }
+
+  /**
+   * Render the session list inside the session manager overlay based on current filter.
+   */
+  renderSessionManager() {
+    const list = this.els.sessionManagerList;
+    if (!list) return;
+
+    const allSessions = this.state.allSessions || [];
+    let filtered = allSessions;
+
+    // Apply filter
+    if (this._smFilter === 'running') {
+      filtered = allSessions.filter(s => s.status === 'running');
+    } else if (this._smFilter === 'stopped') {
+      filtered = allSessions.filter(s => s.status !== 'running');
+    }
+
+    // Build workspace name lookup
+    const wsMap = {};
+    (this.state.workspaces || []).forEach(w => { wsMap[w.id] = w.name; });
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="sm-empty">No sessions found</div>';
+      this._updateSmButtons();
+      return;
+    }
+
+    // Sort: running first, then by name
+    filtered.sort((a, b) => {
+      if (a.status === 'running' && b.status !== 'running') return -1;
+      if (a.status !== 'running' && b.status === 'running') return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    list.innerHTML = filtered.map(s => {
+      const statusClass = s.status === 'running' ? 'running' : (s.status === 'error' ? 'error' : 'stopped');
+      const wsName = wsMap[s.workspaceId] || '';
+      const checked = this._smSelectedIds && this._smSelectedIds.has(s.id) ? 'checked' : '';
+      const selectedClass = checked ? ' selected' : '';
+      const isRunning = s.status === 'running';
+
+      return `
+        <div class="sm-session-row${selectedClass}" data-session-id="${s.id}">
+          <input type="checkbox" class="sm-session-checkbox" data-id="${s.id}" ${checked}>
+          <span class="sm-status-dot ${statusClass}"></span>
+          <div class="sm-session-info">
+            <span class="sm-session-name">${this.escapeHtml(s.name || s.id)}</span>
+            <span class="sm-session-meta">${this.escapeHtml(s.workingDir || '')}</span>
+          </div>
+          ${wsName ? `<span class="sm-workspace-badge">${this.escapeHtml(wsName)}</span>` : ''}
+          <div class="sm-session-actions">
+            <button class="sm-action-btn terminal-btn" data-action="terminal" data-id="${s.id}" title="Open in terminal">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 4.5l3 2.5-3 2.5M7.5 10H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            ${isRunning
+              ? `<button class="sm-action-btn stop-btn" data-action="stop" data-id="${s.id}" title="Stop session">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="3.5" y="3.5" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>
+                </button>`
+              : `<button class="sm-action-btn start-btn" data-action="start" data-id="${s.id}" title="Start session">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 2.5l8 4.5-8 4.5V2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                </button>`
+            }
+          </div>
+        </div>`;
+    }).join('');
+
+    // Wire up event listeners on the rendered rows
+    list.querySelectorAll('.sm-session-checkbox').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const id = cb.dataset.id;
+        if (cb.checked) {
+          this._smSelectedIds.add(id);
+        } else {
+          this._smSelectedIds.delete(id);
+        }
+        cb.closest('.sm-session-row').classList.toggle('selected', cb.checked);
+        this._updateSmButtons();
+      });
+    });
+
+    list.querySelectorAll('.sm-action-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (action === 'terminal') {
+          this._smFindOrOpenTerminal(id);
+        } else if (action === 'stop') {
+          this.stopSession(id);
+        } else if (action === 'start') {
+          this.startSession(id);
+        }
+      });
+    });
+
+    // Click row to open in terminal
+    list.querySelectorAll('.sm-session-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        // Don't trigger on checkbox or action button clicks
+        if (e.target.closest('.sm-session-checkbox') || e.target.closest('.sm-action-btn')) return;
+        this._smFindOrOpenTerminal(row.dataset.sessionId);
+      });
+    });
+
+    this._updateSmButtons();
+  }
+
+  /**
+   * Update the state of the "Select All" and "Stop Selected" buttons.
+   */
+  _updateSmButtons() {
+    if (!this.els.smStopSelectedBtn || !this.els.smSelectAllBtn) return;
+
+    const selectedCount = this._smSelectedIds ? this._smSelectedIds.size : 0;
+    const allSessions = this.state.allSessions || [];
+
+    // Check if any selected sessions are running
+    const hasRunningSelected = selectedCount > 0 && allSessions.some(s =>
+      this._smSelectedIds.has(s.id) && s.status === 'running'
+    );
+
+    this.els.smStopSelectedBtn.disabled = !hasRunningSelected;
+    this.els.smStopSelectedBtn.textContent = selectedCount > 0
+      ? `Stop Selected (${selectedCount})`
+      : 'Stop Selected';
+
+    // Update "Select All" text
+    const list = this.els.sessionManagerList;
+    const visibleCount = list ? list.querySelectorAll('.sm-session-row').length : 0;
+    this.els.smSelectAllBtn.textContent = selectedCount >= visibleCount && visibleCount > 0
+      ? 'Deselect All'
+      : 'Select All';
+  }
+
+  /**
+   * Toggle select all / deselect all visible sessions.
+   */
+  smToggleSelectAll() {
+    const list = this.els.sessionManagerList;
+    if (!list) return;
+
+    const checkboxes = list.querySelectorAll('.sm-session-checkbox');
+    const allChecked = this._smSelectedIds && this._smSelectedIds.size >= checkboxes.length && checkboxes.length > 0;
+
+    if (allChecked) {
+      // Deselect all
+      this._smSelectedIds = new Set();
+      checkboxes.forEach(cb => {
+        cb.checked = false;
+        cb.closest('.sm-session-row').classList.remove('selected');
+      });
+    } else {
+      // Select all visible
+      this._smSelectedIds = new Set();
+      checkboxes.forEach(cb => {
+        cb.checked = true;
+        this._smSelectedIds.add(cb.dataset.id);
+        cb.closest('.sm-session-row').classList.add('selected');
+      });
+    }
+    this._updateSmButtons();
+  }
+
+  /**
+   * Stop all selected running sessions.
+   */
+  async smStopSelected() {
+    if (!this._smSelectedIds || this._smSelectedIds.size === 0) return;
+
+    const allSessions = this.state.allSessions || [];
+    const toStop = allSessions.filter(s => this._smSelectedIds.has(s.id) && s.status === 'running');
+
+    if (toStop.length === 0) {
+      this.showToast('No running sessions selected', 'info');
+      return;
+    }
+
+    // Stop all selected running sessions in parallel
+    const results = await Promise.allSettled(
+      toStop.map(s => this.api('POST', `/api/sessions/${s.id}/stop`))
+    );
+
+    const succeeded = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    if (failed > 0) {
+      this.showToast(`Stopped ${succeeded}, failed ${failed}`, 'warning');
+    } else {
+      this.showToast(`Stopped ${succeeded} session${succeeded !== 1 ? 's' : ''}`, 'success');
+    }
+
+    // Clear selection and refresh
+    this._smSelectedIds = new Set();
+    await this.loadSessions();
+    await this.loadStats();
+    this.renderSessionManager();
+  }
+
+  /**
+   * Find an existing terminal pane with this session or open a new one.
+   * @param {string} sessionId - The session ID to open
+   */
+  _smFindOrOpenTerminal(sessionId) {
+    // Check if session is already open in a terminal pane
+    for (let i = 0; i < this.terminalPanes.length; i++) {
+      const pane = this.terminalPanes[i];
+      if (pane && pane.sessionId === sessionId) {
+        // Already open — switch to terminal view and activate that pane
+        this.setViewMode('terminal');
+        this._activeTerminalSlot = i;
+        this._syncTerminalTabHighlight();
+        this.closeSessionManager();
+        this.showToast('Switched to existing terminal pane', 'info');
+        return;
+      }
+    }
+
+    // Not open yet — find an empty slot
+    const emptySlot = this.terminalPanes.findIndex(p => p === null);
+    if (emptySlot === -1) {
+      this.showToast('No empty terminal pane — close one first', 'warning');
+      return;
+    }
+
+    // Find session data
+    const session = (this.state.allSessions || []).find(s => s.id === sessionId);
+    if (!session) {
+      this.showToast('Session not found', 'error');
+      return;
+    }
+
+    // Open terminal
+    const spawnOpts = {};
+    if (session.workingDir) spawnOpts.cwd = session.workingDir;
+    if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
+    if (session.agentTeams) spawnOpts.agentTeams = true;
+
+    this.setViewMode('terminal');
+    this.openTerminalInPane(emptySlot, session.id, session.name, spawnOpts);
+    this.closeSessionManager();
+  }
+
+  /**
+   * Sync the terminal tab strip highlight to the active slot.
+   */
+  _syncTerminalTabHighlight() {
+    if (!this.els.terminalTabStrip) return;
+    const tabs = this.els.terminalTabStrip.querySelectorAll('.terminal-tab');
+    tabs.forEach((tab, i) => {
+      tab.classList.toggle('active', i === this._activeTerminalSlot);
+    });
   }
 }
 
