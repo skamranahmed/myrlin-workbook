@@ -2977,28 +2977,95 @@ textarea.input {
    WORKSPACE GROUPS
    ═══════════════════════════════════════════════════════════════ */
 
-.workspace-group { margin-bottom: 4px; }
-.workspace-group-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 16px; cursor: pointer;
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--overlay1);
-  transition: color var(--transition-fast);
+.workspace-group {
+  margin-bottom: 6px;
 }
-.workspace-group-header:hover { color: var(--text-primary); }
+
+.workspace-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 8px 2px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  background: var(--surface0);
+  border: 1px solid var(--surface2);
+  border-left: 3px solid var(--group-color, var(--mauve));
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.workspace-group-header:hover {
+  background: var(--surface1);
+  border-color: var(--overlay0);
+  border-left-color: var(--group-color, var(--mauve));
+}
+
+.workspace-group-header:active {
+  background: var(--surface0);
+  transform: scale(0.99);
+}
+
 .workspace-group-header .group-chevron {
-  transition: transform var(--transition-fast);
+  transition: transform 0.15s ease;
   font-size: 10px;
   display: inline-block;
+  color: var(--overlay1);
+  flex-shrink: 0;
 }
-.workspace-group-header .group-chevron.open { transform: rotate(180deg); }
+
+.workspace-group-header .group-chevron.open {
+  transform: rotate(180deg);
+}
+
 .workspace-group-header .group-color-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--group-color, var(--mauve)) 40%, transparent);
 }
-.workspace-group .workspace-group-items { padding-left: 8px; }
+
+.workspace-group-header .group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-group-header .group-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--overlay0);
+  background: var(--surface1);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.workspace-group .workspace-group-items {
+  padding-left: 8px;
+}
+
+.workspace-group-empty {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: var(--overlay0);
+}
+
 .workspace-group-header.group-drop-target {
-  background: rgba(203, 166, 247, 0.1);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--group-color, var(--mauve)) 12%, var(--surface0));
+  border-color: var(--group-color, var(--mauve));
+  border-left-color: var(--group-color, var(--mauve));
+  color: var(--text);
 }
 
 

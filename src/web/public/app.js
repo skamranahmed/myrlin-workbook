@@ -117,6 +117,9 @@ class CWMApp {
       gitStatusCache: {},
     };
 
+    // Load persisted workspace group collapse state
+    try { this._groupCollapseState = JSON.parse(localStorage.getItem('cwm_groupCollapseState') || '{}'); } catch (_) { this._groupCollapseState = {}; }
+
     // ─── Terminal panes ──────────────────────────────────────────
     this.terminalPanes = [null, null, null, null];
     this._activeTerminalSlot = null;
@@ -3803,10 +3806,7 @@ class CWMApp {
 
     let html = '';
 
-    // Render ungrouped top-level workspaces first (children render nested via renderWorkspaceItem)
-    html += ungrouped.map(ws => renderWorkspaceItem(ws)).join('');
-
-    // Render groups
+    // Render groups FIRST at the top so they're prominent
     groups.forEach(group => {
       const groupColor = colorMap[group.color] || colorMap.mauve;
       const groupWorkspaces = (group.workspaceIds || [])
@@ -3815,25 +3815,28 @@ class CWMApp {
         .filter(ws => !ws.parentId); // Child workspaces render under their parent, not separately in groups
 
       // Show empty groups too so user can drag workspaces into them
-
       const groupCount = groupWorkspaces.length;
+      const isCollapsed = this._groupCollapseState && this._groupCollapseState[group.id] === true;
       const groupItemsHtml = groupCount > 0
         ? groupWorkspaces.map(ws => renderWorkspaceItem(ws)).join('')
-        : '<div style="padding: 6px 16px; font-size: 11px; color: var(--overlay0);">Drag workspaces here</div>';
+        : '<div class="workspace-group-empty">Drag workspaces here</div>';
 
       html += `
         <div class="workspace-group" data-group-id="${group.id}">
-          <div class="workspace-group-header" data-group-id="${group.id}">
-            <span class="group-chevron open">&#9662;</span>
+          <div class="workspace-group-header" data-group-id="${group.id}" style="--group-color: ${groupColor}">
+            <span class="group-chevron${isCollapsed ? '' : ' open'}">&#9662;</span>
             <span class="group-color-dot" style="background: ${groupColor}"></span>
-            <span>${this.escapeHtml(group.name)}</span>
-            <span style="margin-left:auto;font-size:10px;color:var(--overlay0);font-family:var(--font-mono)">${groupCount}</span>
+            <span class="group-name">${this.escapeHtml(group.name)}</span>
+            <span class="group-count">${groupCount}</span>
           </div>
-          <div class="workspace-group-items">
+          <div class="workspace-group-items"${isCollapsed ? ' hidden' : ''}>
             ${groupItemsHtml}
           </div>
         </div>`;
     });
+
+    // Render ungrouped top-level workspaces below groups (children render nested via renderWorkspaceItem)
+    html += ungrouped.map(ws => renderWorkspaceItem(ws)).join('');
 
     list.innerHTML = html;
 
@@ -3991,6 +3994,11 @@ class CWMApp {
         const chevron = header.querySelector('.group-chevron');
         if (items) items.hidden = !items.hidden;
         if (chevron) chevron.classList.toggle('open', items && !items.hidden);
+        // Persist collapse state
+        if (!this._groupCollapseState) this._groupCollapseState = {};
+        const gid = header.dataset.groupId;
+        this._groupCollapseState[gid] = items ? items.hidden : false;
+        try { localStorage.setItem('cwm_groupCollapseState', JSON.stringify(this._groupCollapseState)); } catch (_) {}
       });
 
       // Right-click context menu
