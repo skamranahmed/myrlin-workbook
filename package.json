@@ -14,12 +14,8 @@
     "gui": "node src/gui.js",
     "gui:demo": "node src/gui.js --demo",
     "test": "node test/run.js",
-    "marketing": "node scripts/marketing/capture.js && node scripts/marketing/gifify.js && node scripts/marketing/composite.js",
-    "marketing:screenshots": "node scripts/marketing/capture.js --screenshots-only && node scripts/marketing/composite.js",
-    "marketing:gifs": "node scripts/marketing/capture.js --gifs-only && node scripts/marketing/gifify.js",
     "mcp:visual-qa": "node src/mcp/visual-qa.js",
-    "gui:cdp": "node src/gui.js --cdp",
-    "marketing:setup": "npx playwright install chromium"
+    "gui:cdp": "node src/gui.js --cdp"
   },
   "repository": {
     "type": "git",

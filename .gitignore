@@ -24,7 +24,7 @@ node_modules/
 Thumbs.db
 nul
 
-# Internal planning docs (not for public repo)
+# Internal planning & strategy docs (not for public repo)
 IDEAS.md
 TODO.md
 TASK.md
@@ -33,16 +33,20 @@ ROADMAP.md
 DOCS_PLAN.md
 SESSION_LOG.md
 RELEASING.md
+CLAUDE_WORKFLOW.md
+GROWTH_STRATEGY.md
 reddit-launch-post.md
 
 # Generated output
 screenshots/
 dist/
 
-# Marketing pipeline (generated output)
-marketing/raw/
-marketing/screenshots/
-marketing/gifs/
+# Marketing pipeline (scripts + generated output)
+scripts/marketing/
+marketing/
+
+# Local setup scripts (hardcoded paths)
+scripts/setup-autostart.ps1
 
 # Frontend backup snapshots
 src/web/public/.backup/
