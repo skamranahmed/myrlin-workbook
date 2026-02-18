@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.png" alt="Myrlin's Workbook" width="250">
+  <img src="docs/images/logo-animated.svg" alt="Myrlin's Workbook" width="250">
 </p>
 <h1 align="center">Myrlin's Workbook</h1>
 <p align="center">
