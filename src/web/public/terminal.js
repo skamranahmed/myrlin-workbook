@@ -371,16 +371,17 @@ class TerminalPane {
         }
       });
 
-      this._resizeObserver = new ResizeObserver(() => {
+      this._resizeObserver = new ResizeObserver((entries) => {
+        // Guard: skip fit when container is hidden (e.g., tab switch sets display:none).
+        // A 0×0 contentRect causes fitAddon to calculate 1×1 cols/rows, which sends a
+        // resize to the PTY server and permanently garbles the terminal's buffered output.
+        const entry = entries[0];
+        if (entry && (entry.contentRect.width === 0 || entry.contentRect.height === 0)) return;
+
         // Debounce resize to prevent layout thrashing during mobile tab switches
         clearTimeout(this._fitTimer);
         this._fitTimer = setTimeout(() => {
-          if (this.fitAddon) {
-            try { this.fitAddon.fit(); } catch (_) {}
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-              this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
-            }
-          }
+          this.safeFit();
         }, 100);
       });
       this._resizeObserver.observe(container);
@@ -571,6 +572,25 @@ class TerminalPane {
   sendCommand(cmd) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'input', data: cmd }));
+    }
+  }
+
+  /**
+   * Visibility-safe fit: only calls fitAddon.fit() when the container is visible.
+   * Hidden panes (display:none from tab switching) report 0×0 dimensions, which
+   * causes fitAddon to resize the PTY to 1×1 — permanently garbling scrollback.
+   * All external callers should use safeFit() instead of fitAddon.fit() directly.
+   */
+  safeFit() {
+    if (!this.fitAddon || !this.term) return;
+    const container = document.getElementById(this.containerId);
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    try { this.fitAddon.fit(); } catch (_) { return; }
+    // Notify server of new dimensions
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
     }
   }
 

@@ -822,9 +822,7 @@ class CWMApp {
           // Refit terminal panes
           if (this.state.viewMode === 'terminal') {
             this.terminalPanes.forEach(tp => {
-              if (tp && tp.fitAddon) {
-                try { tp.fitAddon.fit(); } catch (_) {}
-              }
+              if (tp) tp.safeFit();
             });
           }
         }, 150);
@@ -1714,9 +1712,16 @@ class CWMApp {
      CONTEXT MENU
      ═══════════════════════════════════════════════════════════ */
 
-  showContextMenu(sessionId, x, y) {
+  /**
+   * Build the shared session management context menu items.
+   * Used by both the sidebar context menu and the terminal pane context menu
+   * so that all session actions are available from either location.
+   * @param {string} sessionId - The session to build items for
+   * @returns {Array|null} Array of menu items, or null if session not found
+   */
+  _buildSessionContextItems(sessionId) {
     const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
-    if (!session) return;
+    if (!session) return null;
 
     const isRunning = session.status === 'running' || session.status === 'idle';
     const isBypassed = !!session.bypassPermissions;
@@ -1731,36 +1736,7 @@ class CWMApp {
 
     const items = [];
 
-    // View details (shows full session info in detail panel)
-    items.push({
-      label: 'View Details', icon: '&#128269;', action: () => {
-        this.selectSession(sessionId);
-      },
-    });
-
-    // Open in terminal (quick action) - pass all session flags as spawnOpts
-    items.push({
-      label: 'Open in Terminal', icon: '&#9654;', action: () => {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
-        if (emptySlot !== -1) {
-          this.setViewMode('terminal');
-          const spawnOpts = {};
-          if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
-          if (session.workingDir) spawnOpts.cwd = session.workingDir;
-          if (session.command) spawnOpts.command = session.command;
-          if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
-          if (session.verbose) spawnOpts.verbose = true;
-          if (session.model) spawnOpts.model = session.model;
-          if (session.agentTeams) spawnOpts.agentTeams = true;
-          this.openTerminalInPane(emptySlot, sessionId, session.name, spawnOpts);
-        } else {
-          this.showToast('All terminal panes full. Close one first.', 'warning');
-        }
-      },
-    });
-
-    items.push({ type: 'sep' });
-
+    // Start / Stop / Restart
     if (!isRunning) {
       items.push(
         { label: 'Start', icon: '&#9654;', action: () => this.startSession(sessionId) },
@@ -1852,6 +1828,49 @@ class CWMApp {
 
     // Remove from workspace (actually deletes the session record)
     items.push({ label: 'Remove from Workspace', icon: '&#10005;', danger: true, action: () => this.removeSessionFromWorkspace(sessionId) });
+
+    return items;
+  }
+
+  showContextMenu(sessionId, x, y) {
+    const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+    if (!session) return;
+
+    const items = [];
+
+    // Sidebar-specific: View details
+    items.push({
+      label: 'View Details', icon: '&#128269;', action: () => {
+        this.selectSession(sessionId);
+      },
+    });
+
+    // Sidebar-specific: Open in terminal
+    items.push({
+      label: 'Open in Terminal', icon: '&#9654;', action: () => {
+        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        if (emptySlot !== -1) {
+          this.setViewMode('terminal');
+          const spawnOpts = {};
+          if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
+          if (session.workingDir) spawnOpts.cwd = session.workingDir;
+          if (session.command) spawnOpts.command = session.command;
+          if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
+          if (session.verbose) spawnOpts.verbose = true;
+          if (session.model) spawnOpts.model = session.model;
+          if (session.agentTeams) spawnOpts.agentTeams = true;
+          this.openTerminalInPane(emptySlot, sessionId, session.name, spawnOpts);
+        } else {
+          this.showToast('All terminal panes full. Close one first.', 'warning');
+        }
+      },
+    });
+
+    items.push({ type: 'sep' });
+
+    // Shared session management items
+    const sessionItems = this._buildSessionContextItems(sessionId);
+    if (sessionItems) items.push(...sessionItems);
 
     this._renderContextItems(session.name, items, x, y);
   }
@@ -2360,7 +2379,7 @@ class CWMApp {
     // Refit all terminal panes after a brief delay for zoom to take effect
     setTimeout(() => {
       this.terminalPanes.forEach(tp => {
-        if (tp && tp.fit) tp.fit();
+        if (tp) tp.safeFit();
       });
     }, 100);
   }
@@ -2839,9 +2858,7 @@ class CWMApp {
       // Refit all terminal panes after view switch (viewport size may differ)
       requestAnimationFrame(() => {
         this.terminalPanes.forEach(tp => {
-          if (tp && tp.fitAddon) {
-            try { tp.fitAddon.fit(); } catch (_) {}
-          }
+          if (tp) tp.safeFit();
         });
       });
     } else {
@@ -2890,7 +2907,7 @@ class CWMApp {
     // Trigger resize on terminal panes after animation
     setTimeout(() => {
       this.terminalPanes.forEach(tp => {
-        if (tp && tp.fitAddon) tp.fitAddon.fit();
+        if (tp) tp.safeFit();
       });
     }, 250);
   }
@@ -2943,7 +2960,7 @@ class CWMApp {
 
       // Refit terminal panes
       this.terminalPanes.forEach(tp => {
-        if (tp && tp.fitAddon) tp.fitAddon.fit();
+        if (tp) tp.safeFit();
       });
 
       document.removeEventListener('mousemove', onMouseMove);
@@ -5723,6 +5740,8 @@ class CWMApp {
 
     const items = [];
 
+    // ── Terminal-specific actions ──────────────────────────────
+
     // Copy selected text (only show when there's a selection)
     if (tp.term && tp.term.hasSelection()) {
       items.push({
@@ -5767,15 +5786,15 @@ class CWMApp {
       },
     });
 
-    items.push({ type: 'sep' });
+    // ── Shared session management items ───────────────────────
+    const sessionItems = this._buildSessionContextItems(tp.sessionId);
+    if (sessionItems) {
+      items.push({ type: 'sep' });
+      items.push(...sessionItems);
+    }
 
-    // Copy session ID
-    items.push({
-      label: 'Copy Session ID', icon: '&#128203;', action: () => {
-        navigator.clipboard.writeText(tp.sessionId);
-        this.showToast('Session ID copied', 'success');
-      },
-    });
+    // ── Pane management ───────────────────────────────────────
+    items.push({ type: 'sep' });
 
     // Close pane
     items.push({
@@ -5784,15 +5803,10 @@ class CWMApp {
       },
     });
 
-    items.push({ type: 'sep' });
-
     // Inspect - open browser DevTools console
     items.push({
       label: 'Inspect', icon: '&#128269;', action: () => {
-        // Try to open DevTools programmatically (only works in Electron/NW.js)
-        // For regular browsers, show a hint about the keyboard shortcut
         if (window.__TAURI__ || (window.process && window.process.versions && window.process.versions.electron)) {
-          // Electron / Tauri - can open devtools directly
           try { require('electron').remote.getCurrentWindow().webContents.openDevTools(); } catch (_) {}
         } else {
           this.showToast('Press F12 or Ctrl+Shift+I to open DevTools', 'info');
@@ -5915,9 +5929,7 @@ class CWMApp {
     requestAnimationFrame(() => {
       [srcSlot, dstSlot].forEach(slot => {
         const tp = this.terminalPanes[slot];
-        if (tp && tp.fitAddon) {
-          try { tp.fitAddon.fit(); } catch (_) {}
-        }
+        if (tp) tp.safeFit();
       });
     });
   }
@@ -5958,7 +5970,7 @@ class CWMApp {
     // Double-rAF ensures browser has fully laid out the grid before fitting.
     requestAnimationFrame(() => { requestAnimationFrame(() => {
       this.terminalPanes.forEach(tp => {
-        if (tp && tp.fitAddon) try { tp.fitAddon.fit(); } catch (_) {}
+        if (tp) tp.safeFit();
       });
     }); });
   }
@@ -6247,14 +6259,9 @@ class CWMApp {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         // Refit all terminals after resize completes
+        // safeFit() handles both the fit and sending resize to the server
         this.terminalPanes.forEach(tp => {
-          if (tp && tp.fitAddon) {
-            try { tp.fitAddon.fit(); } catch (_) {}
-            // Notify server of new dimensions
-            if (tp.ws && tp.ws.readyState === WebSocket.OPEN && tp.term) {
-              tp.ws.send(JSON.stringify({ type: 'resize', cols: tp.term.cols, rows: tp.term.rows }));
-            }
-          }
+          if (tp) tp.safeFit();
         });
       };
 
@@ -6675,11 +6682,11 @@ class CWMApp {
     // Set as active pane and focus it
     this.setActiveTerminalPane(slotIdx);
 
-    // Refit the terminal after switching
+    // Refit the terminal after switching (safeFit guards against hidden panes)
     const tp = this.terminalPanes[slotIdx];
-    if (tp && tp.fitAddon) {
+    if (tp) {
       requestAnimationFrame(() => {
-        try { tp.fitAddon.fit(); } catch (_) {}
+        tp.safeFit();
       });
     }
 
