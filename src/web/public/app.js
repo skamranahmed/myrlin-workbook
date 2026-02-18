@@ -1578,6 +1578,19 @@ class CWMApp {
         this.state.selectedSession = updated;
         this.renderSessionDetail();
       }
+      // Sync terminal pane titles — if this session is open in a terminal,
+      // update the TerminalPane instance and the DOM tab header.
+      if (result.name) {
+        for (let i = 0; i < this.terminalPanes.length; i++) {
+          const tp = this.terminalPanes[i];
+          if (tp && tp.sessionId === id) {
+            tp.sessionName = result.name;
+            const paneEl = document.getElementById(`term-pane-${i}`);
+            const titleEl = paneEl && paneEl.querySelector('.terminal-pane-title');
+            if (titleEl) titleEl.textContent = result.name;
+          }
+        }
+      }
     } catch (err) {
       this.showToast(err.message || 'Failed to update session', 'error');
     }
@@ -2228,6 +2241,16 @@ class CWMApp {
           this.state.selectedSession = this.state.sessions.find(s => s.id === sessionId);
           this.renderSessionDetail();
         }
+        // Sync terminal pane titles
+        for (let i = 0; i < this.terminalPanes.length; i++) {
+          const tp = this.terminalPanes[i];
+          if (tp && tp.sessionId === sessionId) {
+            tp.sessionName = data.title;
+            const paneEl = document.getElementById(`term-pane-${i}`);
+            const titleEl = paneEl && paneEl.querySelector('.terminal-pane-title');
+            if (titleEl) titleEl.textContent = data.title;
+          }
+        }
       }
     } catch (err) {
       this.showToast(err.message || 'Failed to auto-title', 'error');
@@ -2248,6 +2271,16 @@ class CWMApp {
         this.showToast(`Titled: "${data.title}"`, 'success');
         this.renderProjects();
         this.renderWorkspaces();
+        // Sync terminal pane titles (project sessions use Claude UUID as sessionId)
+        for (let i = 0; i < this.terminalPanes.length; i++) {
+          const tp = this.terminalPanes[i];
+          if (tp && tp.sessionId === claudeSessionId) {
+            tp.sessionName = data.title;
+            const paneEl = document.getElementById(`term-pane-${i}`);
+            const titleEl = paneEl && paneEl.querySelector('.terminal-pane-title');
+            if (titleEl) titleEl.textContent = data.title;
+          }
+        }
       }
     } catch (err) {
       this.showToast(err.message || 'Failed to auto-title', 'error');
@@ -7092,6 +7125,16 @@ class CWMApp {
             // Project session - sync everywhere (localStorage + any linked workspace sessions)
             this.syncSessionTitle(sessionId, newName);
           }
+          // Sync terminal pane titles if this session is open in a terminal
+          for (let i = 0; i < this.terminalPanes.length; i++) {
+            const tp = this.terminalPanes[i];
+            if (tp && tp.sessionId === sessionId) {
+              tp.sessionName = newName;
+              const paneEl = document.getElementById(`term-pane-${i}`);
+              const titleEl = paneEl && paneEl.querySelector('.terminal-pane-title');
+              if (titleEl) titleEl.textContent = newName;
+            }
+          }
           nameEl.textContent = newName;
           nameEl.classList.add('rename-flash');
           setTimeout(() => nameEl.classList.remove('rename-flash'), 600);
@@ -7175,8 +7218,9 @@ class CWMApp {
           nameEl.classList.add('rename-flash');
           setTimeout(() => nameEl.classList.remove('rename-flash'), 600);
 
-          // Refresh sidebar
+          // Refresh sidebar and project sessions view
           this.renderWorkspaces();
+          this.renderProjects();
         } catch (err) {
           nameEl.textContent = currentName;
           this.showToast('Rename failed: ' + (err.message || ''), 'error');
