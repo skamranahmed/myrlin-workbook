@@ -1795,6 +1795,15 @@ class CWMApp {
       { label: 'Summarize to Docs', icon: '&#128221;', action: () => this.summarizeSessionToDocs(sessionId) },
     );
 
+    // Refocus submenu — distill conversation + reset or compact
+    items.push({
+      label: 'Refocus', icon: '&#128260;',
+      submenu: [
+        { label: 'Reset & Refocus', action: () => this.refocusSession(sessionId, 'reset') },
+        { label: 'Compact & Refocus', action: () => this.refocusSession(sessionId, 'compact') },
+      ],
+    });
+
     // If the session has a working directory, add git worktree option
     if (session.workingDir) {
       items.push({
@@ -9613,6 +9622,62 @@ class CWMApp {
       }
     } catch (err) {
       this.showToast(err.message || 'Failed to export context', 'error');
+    }
+  }
+
+  /**
+   * Refocus a session by distilling the conversation into a structured context
+   * document, then sending /clear (reset) or /compact to the terminal and
+   * injecting the document back in for Claude to ingest.
+   *
+   * @param {string} sessionId - The session ID to refocus
+   * @param {'reset'|'compact'} mode - Whether to clear or compact the conversation
+   */
+  async refocusSession(sessionId, mode) {
+    // Find the terminal pane for this session
+    const tp = this.terminalPanes.find(p => p && p.sessionId === sessionId);
+    if (!tp || !tp.ws || tp.ws.readyState !== WebSocket.OPEN) {
+      this.showToast('Session must be open in a terminal pane to refocus', 'warning');
+      return;
+    }
+
+    this.showToast('Generating refocus document...', 'info');
+
+    try {
+      // Generate the refocus document on the server
+      const data = await this.api('POST', `/api/sessions/${sessionId}/refocus`, { mode });
+
+      if (!data || !data.success) {
+        this.showToast(data?.error || 'Failed to generate refocus document', 'error');
+        return;
+      }
+
+      const filePath = data.filePath;
+
+      // Send /clear or /compact to the terminal
+      const command = mode === 'reset' ? '/clear' : '/compact';
+      tp.sendCommand(command + '\r');
+
+      // Wait for Claude to process the command, then inject the refocus prompt
+      setTimeout(() => {
+        const refocusPrompt = 'Read the file .refocus-context.md in this directory. It contains a comprehensive summary of our previous conversation including what was accomplished, key decisions, open issues, and next steps. Use this to fully orient yourself on the project state. After reading, briefly confirm what you understand and ask what I\'d like to work on next.';
+        tp.sendCommand(refocusPrompt + '\r');
+
+        this.showToast(`Session refocused (${mode}) — context document injected`, 'success');
+      }, 3000);
+
+      // Clean up the refocus file after a delay
+      const cleanupDelay = mode === 'reset' ? 60000 : 120000;
+      setTimeout(async () => {
+        try {
+          await this.api('DELETE', `/api/refocus-cleanup?filePath=${encodeURIComponent(filePath)}`);
+        } catch (_) {
+          // Non-critical — file may already be gone
+        }
+      }, cleanupDelay);
+
+    } catch (err) {
+      this.showToast(err.message || 'Failed to refocus session', 'error');
     }
   }
 

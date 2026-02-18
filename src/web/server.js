@@ -2604,6 +2604,278 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
+//  SESSION REFOCUS (DISTILL + RESET/COMPACT)
+// ──────────────────────────────────────────────────────────
+
+/**
+ * POST /api/sessions/:id/refocus
+ * Generates a comprehensive refocus document from the session's conversation,
+ * writes it to the session's working directory as .refocus-context.md, and
+ * returns the file path + content. The frontend then sends /clear or /compact
+ * to the terminal and injects the document back into the session.
+ *
+ * Request body: { mode: 'reset' | 'compact' }
+ * Response: { success, filePath, content, sessionName }
+ */
+app.post('/api/sessions/:id/refocus', requireAuth, (req, res) => {
+  const store = getStore();
+  const session = store.getSession(req.params.id);
+  const mode = req.body.mode;
+
+  if (!mode || (mode !== 'reset' && mode !== 'compact')) {
+    return res.status(400).json({ error: 'Invalid mode. Must be "reset" or "compact".' });
+  }
+
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  const claudeSessionId = session.resumeSessionId || req.params.id;
+  const sessionName = session.name || claudeSessionId || 'Unknown Session';
+
+  if (!claudeSessionId) {
+    return res.status(400).json({ error: 'No Claude session ID available' });
+  }
+
+  // Need a working directory to write the refocus file
+  const workingDir = session.workingDir;
+  if (!workingDir || !fs.existsSync(workingDir)) {
+    return res.status(400).json({ error: 'Session has no valid working directory' });
+  }
+
+  // Find the JSONL conversation file
+  const jsonlPath = findJsonlFile(claudeSessionId);
+  if (!jsonlPath) {
+    return res.status(404).json({ error: 'No conversation data found for this session' });
+  }
+
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const fileSize = stat.size;
+
+    // Read more of the conversation than export-context for comprehensive coverage
+    // Head: first 50KB for early messages, Tail: last 200KB for recent context
+    const headSize = Math.min(50 * 1024, fileSize);
+    const tailSize = Math.min(200 * 1024, fileSize);
+    const tailOffset = Math.max(0, fileSize - tailSize);
+
+    const fd = fs.openSync(jsonlPath, 'r');
+
+    const headBuf = Buffer.alloc(headSize);
+    fs.readSync(fd, headBuf, 0, headSize, 0);
+
+    const tailBuf = Buffer.alloc(tailSize);
+    fs.readSync(fd, tailBuf, 0, tailSize, tailOffset);
+
+    fs.closeSync(fd);
+
+    // Parse head messages — collect first 10 user messages
+    const headContent = headBuf.toString('utf-8');
+    const headLines = headContent.split('\n').filter(l => l.trim());
+    const firstUserMessages = [];
+    for (const line of headLines) {
+      if (firstUserMessages.length >= 10) break;
+      const parsed = extractExportMessageText(line);
+      if (parsed && parsed.role === 'user') {
+        firstUserMessages.push(parsed.text);
+      }
+    }
+
+    // Parse tail messages — collect last 15 user + last 15 assistant messages
+    const tailContent = tailBuf.toString('utf-8');
+    const tailLines = tailContent.split('\n').filter(l => l.trim());
+    // Drop partial first line if we started mid-file
+    if (tailOffset > 0 && tailLines.length > 0) tailLines.shift();
+
+    const lastUserMessages = [];
+    const lastAssistantMessages = [];
+    for (let i = tailLines.length - 1; i >= 0; i--) {
+      const parsed = extractExportMessageText(tailLines[i]);
+      if (!parsed) continue;
+      if (parsed.role === 'user' && lastUserMessages.length < 15) {
+        lastUserMessages.unshift(parsed);
+      }
+      if (parsed.role === 'assistant' && lastAssistantMessages.length < 15) {
+        lastAssistantMessages.unshift(parsed);
+      }
+      if (lastUserMessages.length >= 15 && lastAssistantMessages.length >= 15) break;
+    }
+
+    // Extract file paths from the full conversation (combine head + tail text)
+    const allText = [];
+    for (const line of headLines) {
+      const parsed = extractExportMessageText(line);
+      if (parsed) allText.push(parsed.text.substring(0, 2000));
+    }
+    for (const line of tailLines) {
+      const parsed = extractExportMessageText(line);
+      if (parsed) allText.push(parsed.text.substring(0, 2000));
+    }
+    const filesTouched = extractFilePaths(allText.join('\n'));
+
+    // ── Build the structured refocus document ──
+    const timestamp = new Date().toISOString();
+    const mdParts = [];
+
+    mdParts.push(`# Session Refocus: ${sessionName}`);
+    mdParts.push(`_Generated: ${timestamp} | This file will be auto-deleted after ingestion._`);
+    mdParts.push('');
+
+    // Project Overview — the original request/goal
+    mdParts.push('## Project Overview');
+    if (firstUserMessages.length > 0) {
+      const overview = firstUserMessages[0].length > 3000
+        ? firstUserMessages[0].substring(0, 3000) + '...'
+        : firstUserMessages[0];
+      mdParts.push(overview);
+    } else {
+      mdParts.push('_No initial user message found._');
+    }
+    mdParts.push('');
+
+    // What Was Accomplished — last 3-5 assistant messages summarized
+    mdParts.push('## What Was Accomplished');
+    if (lastAssistantMessages.length > 0) {
+      const workMsgs = lastAssistantMessages.slice(-5);
+      for (const msg of workMsgs) {
+        const truncated = msg.text.length > 800
+          ? msg.text.substring(0, 800).replace(/\s+\S*$/, '') + '...'
+          : msg.text;
+        mdParts.push(`- ${truncated}`);
+      }
+    } else {
+      mdParts.push('_No assistant messages found._');
+    }
+    mdParts.push('');
+
+    // Key Decisions & Context — early user follow-ups (decisions, clarifications)
+    mdParts.push('## Key Decisions & Context');
+    if (firstUserMessages.length > 1) {
+      const decisions = firstUserMessages.slice(1, 8);
+      for (const msg of decisions) {
+        const truncated = msg.length > 600
+          ? msg.substring(0, 600).replace(/\s+\S*$/, '') + '...'
+          : msg;
+        mdParts.push(`- ${truncated}`);
+      }
+    } else {
+      mdParts.push('_No additional context decisions found._');
+    }
+    mdParts.push('');
+
+    // Files Modified
+    mdParts.push('## Files Modified');
+    if (filesTouched.length > 0) {
+      for (const fp of filesTouched) {
+        mdParts.push(`- \`${fp}\``);
+      }
+    } else {
+      mdParts.push('_No file paths detected in conversation._');
+    }
+    mdParts.push('');
+
+    // Current State — last assistant message
+    mdParts.push('## Current State');
+    if (lastAssistantMessages.length > 0) {
+      const lastMsg = lastAssistantMessages[lastAssistantMessages.length - 1];
+      const truncated = lastMsg.text.length > 3000
+        ? lastMsg.text.substring(0, 3000).replace(/\s+\S*$/, '') + '...'
+        : lastMsg.text;
+      mdParts.push(truncated);
+    } else {
+      mdParts.push('_No assistant messages found._');
+    }
+    mdParts.push('');
+
+    // Open Issues — scan recent messages for TODO/FIXME/error/issue/bug patterns
+    mdParts.push('## Open Issues');
+    const issuePatterns = /\b(?:TODO|FIXME|HACK|BUG|ERROR|ISSUE|PROBLEM|BROKEN|FAILING|BLOCKED)\b/i;
+    const issues = [];
+    for (const msg of [...lastUserMessages, ...lastAssistantMessages].slice(-10)) {
+      if (issuePatterns.test(msg.text)) {
+        const truncated = msg.text.length > 400
+          ? msg.text.substring(0, 400).replace(/\s+\S*$/, '') + '...'
+          : msg.text;
+        issues.push(`- [${msg.role}] ${truncated}`);
+      }
+    }
+    if (issues.length > 0) {
+      mdParts.push(...issues);
+    } else {
+      mdParts.push('_No explicit issues/TODOs detected in recent messages._');
+    }
+    mdParts.push('');
+
+    // Next Steps — derived from recent user messages
+    mdParts.push('## Next Steps');
+    if (lastUserMessages.length > 0) {
+      const recentUserMsgs = lastUserMessages.slice(-3);
+      for (const msg of recentUserMsgs) {
+        const truncated = msg.text.length > 600
+          ? msg.text.substring(0, 600).replace(/\s+\S*$/, '') + '...'
+          : msg.text;
+        mdParts.push(`- ${truncated}`);
+      }
+    } else {
+      mdParts.push('_No recent user instructions found._');
+    }
+    mdParts.push('');
+
+    // Important Notes — environment info from the session
+    mdParts.push('## Important Notes');
+    mdParts.push(`- Working directory: \`${workingDir}\``);
+    if (session.model) mdParts.push(`- Model: ${session.model}`);
+    if (session.command) mdParts.push(`- Command: ${session.command}`);
+    mdParts.push(`- Mode used: ${mode === 'reset' ? 'Reset & Refocus' : 'Compact & Refocus'}`);
+    mdParts.push('');
+
+    const content = mdParts.join('\n');
+    const filePath = path.join(workingDir, '.refocus-context.md');
+
+    // Write the refocus document to the session's working directory
+    fs.writeFileSync(filePath, content, 'utf-8');
+
+    return res.json({
+      success: true,
+      filePath,
+      content,
+      sessionName,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to generate refocus document: ' + err.message });
+  }
+});
+
+/**
+ * DELETE /api/refocus-cleanup
+ * Cleans up a .refocus-context.md file after ingestion.
+ * Only deletes files that end with '.refocus-context.md' for safety.
+ *
+ * Query param: filePath - absolute path to the file to delete
+ */
+app.delete('/api/refocus-cleanup', requireAuth, (req, res) => {
+  const filePath = req.query.filePath;
+
+  if (!filePath || typeof filePath !== 'string') {
+    return res.status(400).json({ error: 'Missing filePath query parameter' });
+  }
+
+  // Safety: only allow deleting .refocus-context.md files
+  if (!filePath.endsWith('.refocus-context.md')) {
+    return res.status(403).json({ error: 'Can only delete .refocus-context.md files' });
+  }
+
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to delete refocus file: ' + err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
 //  SUBAGENT TRACKING
 // ──────────────────────────────────────────────────────────
 
@@ -3574,7 +3846,7 @@ app.post('/api/resources/kill-process', requireAuth, (req, res) => {
 
 function gitExec(args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout: 5000 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, timeout: 5000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
       if (err) {
         const msg = (stderr || err.message || '').trim();
         return reject(new Error(msg || 'git command failed'));
@@ -3583,6 +3855,22 @@ function gitExec(args, cwd) {
     });
   });
 }
+
+// ─── Server-side git status cache ─────────────────────────
+// Prevents OOM from excessive child process spawning when the
+// frontend polls git status for every visible session.
+const GIT_STATUS_CACHE_TTL = 15000; // 15 seconds
+const gitStatusCache = new Map();
+
+// Evict stale entries every 60 seconds to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of gitStatusCache) {
+    if (now - entry.ts > GIT_STATUS_CACHE_TTL * 2) {
+      gitStatusCache.delete(key);
+    }
+  }
+}, 60000).unref();
 
 async function gitRepoRoot(dir) {
   try {
@@ -3596,9 +3884,20 @@ async function gitRepoRoot(dir) {
 app.get('/api/git/status', requireAuth, async (req, res) => {
   const dir = req.query.dir;
   if (!dir) return res.status(400).json({ error: 'dir query parameter required' });
+
+  // Return cached result if fresh enough
+  const cached = gitStatusCache.get(dir);
+  if (cached && Date.now() - cached.ts < GIT_STATUS_CACHE_TTL) {
+    return res.json(cached.data);
+  }
+
   try {
     const root = await gitRepoRoot(dir);
-    if (!root) return res.json({ isGitRepo: false });
+    if (!root) {
+      const result = { isGitRepo: false };
+      gitStatusCache.set(dir, { data: result, ts: Date.now() });
+      return res.json(result);
+    }
     const branch = (await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], dir)).trim();
     let dirty = false;
     try {
@@ -3618,7 +3917,9 @@ app.get('/api/git/status', requireAuth, async (req, res) => {
         behind = b || 0;
       } catch {}
     }
-    res.json({ isGitRepo: true, repoRoot: root, branch, dirty, remote, ahead, behind });
+    const result = { isGitRepo: true, repoRoot: root, branch, dirty, remote, ahead, behind };
+    gitStatusCache.set(dir, { data: result, ts: Date.now() });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
