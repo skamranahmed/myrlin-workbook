@@ -115,6 +115,14 @@ class CWMApp {
       showHidden: false,
       resourceData: null,
       gitStatusCache: {},
+      settings: Object.assign({
+        paneColorHighlights: true,
+        activityIndicators: true,
+        completionNotifications: true,
+        sessionCountInHeader: true,
+        confirmBeforeClose: true,
+        autoOpenTerminal: true,
+      }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
     // Load persisted workspace group collapse state
@@ -123,6 +131,7 @@ class CWMApp {
     // ─── Terminal panes ──────────────────────────────────────────
     this.terminalPanes = [null, null, null, null];
     this._activeTerminalSlot = null;
+    this.PANE_SLOT_COLORS = ['mauve', 'blue', 'green', 'peach'];
     this._gridColSizes = [1, 1];  // fr ratios for column widths
     this._gridRowSizes = [1, 1];  // fr ratios for row heights
 
@@ -376,6 +385,13 @@ class CWMApp {
       conflictCenterSummary: document.getElementById('conflict-center-summary'),
       conflictRefreshBtn: document.getElementById('conflict-refresh-btn'),
       conflictCloseBtn: document.getElementById('conflict-close-btn'),
+
+      // Settings
+      settingsOverlay: document.getElementById('settings-overlay'),
+      settingsBody: document.getElementById('settings-body'),
+      settingsSearchInput: document.getElementById('settings-search-input'),
+      settingsBtn: document.getElementById('settings-btn'),
+      settingsCloseBtn: document.getElementById('settings-close-btn'),
 
       // Session Manager
       sessionManagerOverlay: document.getElementById('session-manager-overlay'),
@@ -696,6 +712,22 @@ class CWMApp {
       };
     }
 
+    // Settings
+    if (this.els.settingsBtn) {
+      this.els.settingsBtn.addEventListener('click', () => this.openSettings());
+    }
+    if (this.els.settingsCloseBtn) {
+      this.els.settingsCloseBtn.addEventListener('click', () => this.closeSettings());
+    }
+    if (this.els.settingsOverlay) {
+      this.els.settingsOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.settingsOverlay) this.closeSettings();
+      });
+    }
+    if (this.els.settingsSearchInput) {
+      this.els.settingsSearchInput.addEventListener('input', () => this.filterSettings());
+    }
+
     // Update button
     if (this.els.updateBtn) {
       this.els.updateBtn.addEventListener('click', () => this.showUpdateModal());
@@ -722,9 +754,16 @@ class CWMApp {
         e.preventDefault();
         if (this.state.token) this.openGlobalSearch();
       }
+      // Ctrl+, / Cmd+, - Settings
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault();
+        if (this.state.token) this.openSettings();
+      }
       // Escape
       if (e.key === 'Escape') {
-        if (this.els.conflictCenterOverlay && !this.els.conflictCenterOverlay.hidden) {
+        if (this.els.settingsOverlay && !this.els.settingsOverlay.hidden) {
+          this.closeSettings();
+        } else if (this.els.conflictCenterOverlay && !this.els.conflictCenterOverlay.hidden) {
           this.closeConflictCenter();
         } else if (this.els.sessionManagerOverlay && !this.els.sessionManagerOverlay.hidden) {
           this.closeSessionManager();
@@ -1113,6 +1152,9 @@ class CWMApp {
     }
 
     await this.loadSessions();
+
+    // Apply settings (CSS classes, visibility) after initial data is loaded
+    this.applySettings();
   }
 
   async loadWorkspaces() {
@@ -2424,6 +2466,148 @@ class CWMApp {
         if (tp) tp.safeFit();
       });
     }, 100);
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     SETTINGS
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Persist settings to localStorage */
+  saveSettings() {
+    localStorage.setItem('cwm_settings', JSON.stringify(this.state.settings));
+  }
+
+  /** Get a single setting value */
+  getSetting(key) {
+    return this.state.settings[key];
+  }
+
+  /** Returns the full settings registry with metadata for rendering */
+  getSettingsRegistry() {
+    return [
+      { key: 'paneColorHighlights', label: 'Pane Color Highlights', description: 'Color-coded left border on terminal pane headers, with matching pips in sidebar', category: 'Terminal' },
+      { key: 'activityIndicators', label: 'Activity Indicators', description: 'Show real-time activity labels (Reading, Writing, etc.) on pane headers', category: 'Terminal' },
+      { key: 'autoOpenTerminal', label: 'Auto-open Terminal on Start', description: 'Automatically open a terminal when starting a session', category: 'Terminal' },
+      { key: 'completionNotifications', label: 'Completion Notifications', description: 'Sound and toast when a background terminal finishes', category: 'Notifications' },
+      { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
+      { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
+    ];
+  }
+
+  /** Find which pane slot (0-3) a session is open in, or -1 if not found */
+  getSlotForSession(sessionId) {
+    for (let i = 0; i < this.terminalPanes.length; i++) {
+      if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** Open the settings overlay */
+  openSettings() {
+    if (!this.els.settingsOverlay) return;
+    this.els.settingsOverlay.hidden = false;
+    if (this.els.settingsSearchInput) {
+      this.els.settingsSearchInput.value = '';
+      this.els.settingsSearchInput.focus();
+    }
+    this.renderSettingsBody('');
+  }
+
+  /** Close the settings overlay */
+  closeSettings() {
+    if (this.els.settingsOverlay) this.els.settingsOverlay.hidden = true;
+  }
+
+  /** Render settings body, optionally filtered by search string */
+  renderSettingsBody(filter) {
+    if (!this.els.settingsBody) return;
+    const registry = this.getSettingsRegistry();
+    const lowerFilter = (filter || '').toLowerCase();
+
+    // Filter entries
+    const filtered = lowerFilter
+      ? registry.filter(s =>
+          s.label.toLowerCase().includes(lowerFilter) ||
+          s.description.toLowerCase().includes(lowerFilter) ||
+          s.category.toLowerCase().includes(lowerFilter))
+      : registry;
+
+    if (filtered.length === 0) {
+      this.els.settingsBody.innerHTML = '<div class="settings-empty">No matching settings</div>';
+      return;
+    }
+
+    // Group by category
+    const groups = {};
+    for (const s of filtered) {
+      if (!groups[s.category]) groups[s.category] = [];
+      groups[s.category].push(s);
+    }
+
+    let html = '';
+    for (const [category, items] of Object.entries(groups)) {
+      html += `<div class="settings-category">`;
+      html += `<div class="settings-category-label">${this.escapeHtml(category)}</div>`;
+      for (const item of items) {
+        const checked = this.state.settings[item.key] ? 'checked' : '';
+        html += `
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+              <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+            </div>
+            <label class="settings-toggle">
+              <input type="checkbox" data-setting="${item.key}" ${checked} />
+              <span class="settings-toggle-track"></span>
+              <span class="settings-toggle-thumb"></span>
+            </label>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+
+    this.els.settingsBody.innerHTML = html;
+
+    // Bind toggle change events
+    this.els.settingsBody.querySelectorAll('input[data-setting]').forEach(input => {
+      input.addEventListener('change', (e) => {
+        const key = e.target.dataset.setting;
+        this.state.settings[key] = e.target.checked;
+        this.saveSettings();
+        this.applySettings();
+      });
+    });
+  }
+
+  /** Filter settings from search input */
+  filterSettings() {
+    const val = this.els.settingsSearchInput ? this.els.settingsSearchInput.value : '';
+    this.renderSettingsBody(val);
+  }
+
+  /** Apply current settings to the UI (CSS classes, visibility toggles) */
+  applySettings() {
+    const html = document.documentElement;
+
+    // Pane color highlights
+    html.classList.toggle('pane-colors-enabled', !!this.state.settings.paneColorHighlights);
+
+    // Activity indicators
+    html.classList.toggle('activity-indicators-disabled', !this.state.settings.activityIndicators);
+
+    // Session count in header
+    const headerStats = document.getElementById('header-stats');
+    if (headerStats) {
+      headerStats.style.display = this.state.settings.sessionCountInHeader ? '' : 'none';
+    }
+
+    // Re-render sidebar to update pane color pips
+    if (typeof this.renderWorkspaces === 'function') {
+      this.renderWorkspaces();
+    }
   }
 
 
@@ -3864,8 +4048,14 @@ class CWMApp {
           badges += `<span class="session-badge session-badge-agents">${cachedSubagents}</span>`;
         }
 
+        // Pane color pip — show matching dot if session is open in a terminal slot
+        const slotIdx = this.getSlotForSession(s.id);
+        const pip = (slotIdx !== -1 && this.state.settings.paneColorHighlights)
+          ? `<span class="pane-color-pip" style="background:var(--${this.PANE_SLOT_COLORS[slotIdx]})"></span>`
+          : '';
+
         return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
-          <span class="ws-session-dot" style="background: ${statusDot}"></span>
+          <span class="ws-session-dot" style="background: ${statusDot}"></span>${pip}
           <span class="ws-session-name">${this.escapeHtml(name.length > 22 ? name.substring(0, 22) + '...' : name)}</span>
           ${badges}
           ${sizeStr ? `<span class="ws-session-size">${sizeStr}</span>` : ''}
@@ -5736,6 +5926,11 @@ class CWMApp {
       this.updateTerminalTabs();
       this.switchTerminalTab(slotIdx);
     }
+
+    // Re-render sidebar to show pane color pips
+    if (this.state.settings.paneColorHighlights) {
+      this.renderWorkspaces();
+    }
   }
 
   /**
@@ -5902,6 +6097,11 @@ class CWMApp {
       this.updateTerminalTabs();
     }
 
+    // Re-render sidebar to remove pane color pips
+    if (this.state.settings.paneColorHighlights) {
+      this.renderWorkspaces();
+    }
+
     if (sessionName) {
       this.showToast(`"${sessionName}" moved to background - drag it back to reconnect`, 'info');
     }
@@ -6033,6 +6233,9 @@ class CWMApp {
    * when they're already looking at the terminal that finished.
    */
   onTerminalIdle({ sessionId, sessionName }) {
+    // Respect completion notifications setting
+    if (!this.getSetting('completionNotifications')) return;
+
     // Don't notify for the currently focused/active pane
     const activeIdx = this.terminalPanes.findIndex(tp => tp && tp.sessionId === sessionId);
     if (activeIdx === this._activeTerminalSlot) return;
