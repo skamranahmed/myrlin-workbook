@@ -443,14 +443,6 @@ class CWMApp {
       });
     }
 
-    // UI Scale controls
-    if (this.els.scaleDownBtn) {
-      this.els.scaleDownBtn.addEventListener('click', () => this.scaleUI('down'));
-    }
-    if (this.els.scaleUpBtn) {
-      this.els.scaleUpBtn.addEventListener('click', () => this.scaleUI('up'));
-    }
-
     // Sidebar toggle (mobile)
     this.els.sidebarToggle.addEventListener('click', () => this.toggleSidebar());
 
@@ -2492,6 +2484,7 @@ class CWMApp {
       { key: 'completionNotifications', label: 'Completion Notifications', description: 'Sound and toast when a background terminal finishes', category: 'Notifications' },
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
+      { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
     ];
   }
 
@@ -2552,19 +2545,37 @@ class CWMApp {
       html += `<div class="settings-category">`;
       html += `<div class="settings-category-label">${this.escapeHtml(category)}</div>`;
       for (const item of items) {
-        const checked = this.state.settings[item.key] ? 'checked' : '';
-        html += `
-          <div class="settings-row">
-            <div class="settings-row-info">
-              <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
-              <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
-            </div>
-            <label class="settings-toggle">
-              <input type="checkbox" data-setting="${item.key}" ${checked} />
-              <span class="settings-toggle-track"></span>
-              <span class="settings-toggle-thumb"></span>
-            </label>
-          </div>`;
+        if (item.type === 'scale') {
+          // Custom UI scale control with - / value / + buttons
+          const currentScale = parseFloat(localStorage.getItem('cwm_ui_scale')) || 1.0;
+          const pct = Math.round(currentScale * 100);
+          html += `
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <div class="settings-scale-control">
+                <button class="settings-scale-btn" data-scale-dir="down" title="Decrease">-</button>
+                <span class="settings-scale-value">${pct}%</span>
+                <button class="settings-scale-btn" data-scale-dir="up" title="Increase">+</button>
+              </div>
+            </div>`;
+        } else {
+          const checked = this.state.settings[item.key] ? 'checked' : '';
+          html += `
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <label class="settings-toggle">
+                <input type="checkbox" data-setting="${item.key}" ${checked} />
+                <span class="settings-toggle-track"></span>
+                <span class="settings-toggle-thumb"></span>
+              </label>
+            </div>`;
+        }
       }
       html += `</div>`;
     }
@@ -2578,6 +2589,16 @@ class CWMApp {
         this.state.settings[key] = e.target.checked;
         this.saveSettings();
         this.applySettings();
+      });
+    });
+
+    // Bind UI scale buttons
+    this.els.settingsBody.querySelectorAll('.settings-scale-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.scaleUI(btn.dataset.scaleDir);
+        // Re-render to update the percentage display
+        const filter = this.els.settingsSearchInput ? this.els.settingsSearchInput.value : '';
+        this.renderSettingsBody(filter);
       });
     });
   }
