@@ -835,8 +835,7 @@ app.get('/api/discover', requireAuth, (req, res) => {
       if (!entry.isDirectory()) continue;
 
       const projectDir = path.join(claudeDir, entry.name);
-      // Decode directory name to real path: C--Users-Jane-Desktop-foo → C:\Users\Jane\Desktop\foo
-      const realPath = decodeClaudePath(entry.name);
+      const realPath = resolveProjectPath(projectDir, entry.name);
 
       // Count .jsonl session files and compute total size
       let sessionFiles = [];
@@ -970,6 +969,26 @@ function decodeClaudePath(encoded) {
   }
 
   return resolved;
+}
+
+/**
+ * Resolve the real filesystem path for a Claude projects directory.
+ * Reads originalPath from sessions-index.json when available (reliable on
+ * all platforms), falling back to decodeClaudePath for legacy/Windows dirs.
+ *
+ * @param {string} projectDir - Absolute path to the project dir under ~/.claude/projects/
+ * @param {string} encodedName - The encoded directory name (e.g. "-Users-jane-project")
+ * @returns {string} The resolved real filesystem path
+ */
+function resolveProjectPath(projectDir, encodedName) {
+  try {
+    const indexPath = path.join(projectDir, 'sessions-index.json');
+    if (fs.existsSync(indexPath)) {
+      const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      if (index.originalPath) return index.originalPath;
+    }
+  } catch (_) {}
+  return decodeClaudePath(encodedName);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -1423,7 +1442,7 @@ app.post('/api/search-conversations', requireAuth, async (req, res) => {
       if (results.length >= MAX_RESULTS) break;
 
       const projectDir = path.join(claudeProjectsDir, dir.name);
-      const realPath = decodeClaudePath(dir.name);
+      const realPath = resolveProjectPath(projectDir, dir.name);
       const projectName = realPath.split('\\').pop() || realPath.split('/').pop() || dir.name;
 
       let jsonlFiles;
@@ -3792,7 +3811,7 @@ app.get('/api/resources', requireAuth, async (req, res) => {
           getProcessPorts(s.pid),
         ]);
         // Find workspace name for this session
-        const workspaces = store.getState().workspaces || [];
+        const workspaces = store.getAllWorkspacesList();
         const workspace = workspaces.find(w => w.id === s.workspaceId);
         return {
           sessionId: s.id,
@@ -4306,7 +4325,7 @@ function getSearchableFiles() {
       if (!entry.isDirectory()) continue;
 
       const projectDir = path.join(claudeDir, entry.name);
-      const realPath = decodeClaudePath(entry.name);
+      const realPath = resolveProjectPath(projectDir, entry.name);
       const projectName = realPath.split('\\').pop() || realPath.split('/').pop() || entry.name;
 
       try {

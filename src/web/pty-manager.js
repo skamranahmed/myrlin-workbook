@@ -170,7 +170,7 @@ class PtySessionManager {
     }
 
     // Validate cwd exists. If the provided path is invalid (e.g. an encoded
-    // directory name like "-Users-guybr-project"), resolve the real cwd from
+    // directory name like "-Users-jane-project"), resolve the real cwd from
     // the session's JSONL file before falling back to home.
     let resolvedCwd = cwd || process.cwd();
     const cwdIsValid = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch (_) { return false; } };
