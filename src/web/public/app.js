@@ -10195,18 +10195,36 @@ class CWMApp {
       return;
     }
 
+    // Collect session IDs currently open in terminal panes to protect them
+    const activePaneSessionIds = new Set(
+      this.terminalPanes.filter(p => p !== null).map(p => p.sessionId)
+    );
+
     list.innerHTML = conflicts.map(c => {
       const filePath = c.file || c.path || 'unknown';
       const sessions = c.sessions || [];
+      // Sessions that can be killed: not in any active terminal pane
+      const killableSessions = sessions.filter(s => !activePaneSessionIds.has(s.id));
+      const killableIds = killableSessions.map(s => s.id).join(',');
 
       return `
         <div class="conflict-file-card">
-          <div class="conflict-file-path">${this.escapeHtml(filePath)}</div>
+          <div class="conflict-file-header">
+            <div class="conflict-file-path">${this.escapeHtml(filePath)}</div>
+            ${killableSessions.length > 0 ? `
+              <button class="conflict-auto-resolve-btn" data-kill-ids="${killableIds}" title="Stop ${killableSessions.length} session${killableSessions.length > 1 ? 's' : ''} not in active panes">
+                Auto-resolve
+              </button>
+            ` : `
+              <span class="conflict-auto-resolve-protected" title="All conflicting sessions are in active panes">Protected</span>
+            `}
+          </div>
           <div class="conflict-sessions">
             ${sessions.map(s => `
-              <button class="conflict-session-chip" data-session-id="${s.id}" title="Open in terminal">
+              <button class="conflict-session-chip${activePaneSessionIds.has(s.id) ? ' conflict-session-protected' : ''}" data-session-id="${s.id}" title="${activePaneSessionIds.has(s.id) ? 'Active pane (protected)' : 'Open in terminal'}">
                 <span class="conflict-session-dot"></span>
                 ${this.escapeHtml(s.name || s.id)}
+                ${activePaneSessionIds.has(s.id) ? '<span class="conflict-protected-icon" title="In active pane">&#128274;</span>' : ''}
               </button>
             `).join('')}
           </div>
@@ -10222,6 +10240,34 @@ class CWMApp {
           this._smFindOrOpenTerminal(sessionId);
           this.closeConflictCenter();
         }
+      });
+    });
+
+    // Wire up auto-resolve buttons - stop sessions not in active panes
+    list.querySelectorAll('.conflict-auto-resolve-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const killIds = (btn.dataset.killIds || '').split(',').filter(Boolean);
+        if (killIds.length === 0) return;
+
+        btn.disabled = true;
+        btn.textContent = 'Stopping...';
+
+        let stopped = 0;
+        for (const id of killIds) {
+          try {
+            await this.api('POST', `/api/sessions/${id}/stop`);
+            stopped++;
+          } catch (_) {
+            // Continue stopping others even if one fails
+          }
+        }
+
+        this.showToast(`Auto-resolved: stopped ${stopped} session${stopped > 1 ? 's' : ''}`, 'success');
+        await this.loadSessions();
+        await this.loadStats();
+        await this.checkForConflicts();
+        this.renderConflictCenter();
       });
     });
   }

@@ -6437,13 +6437,61 @@ html {
   margin-bottom: 6px;
 }
 
+.conflict-file-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .conflict-file-path {
   font-size: 13px;
   font-weight: 500;
   color: var(--yellow);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   word-break: break-all;
-  margin-bottom: 6px;
+}
+
+.conflict-auto-resolve-btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--red);
+  color: var(--base);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+
+.conflict-auto-resolve-btn:hover {
+  filter: brightness(1.15);
+}
+
+.conflict-auto-resolve-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.conflict-auto-resolve-protected {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: var(--subtext0);
+  font-style: italic;
+}
+
+.conflict-session-protected {
+  border: 1px solid var(--green) !important;
+  opacity: 0.8;
+}
+
+.conflict-protected-icon {
+  font-size: 10px;
+  margin-left: 2px;
 }
 
 .conflict-sessions {
