@@ -17,6 +17,60 @@ const os = require('os');
 const path = require('path');
 const { getStore } = require('../state/store');
 
+/**
+ * Resolve the real working directory for a Claude session.
+ * Scans ~/.claude/projects/ for the session's JSONL file, then:
+ *   1. Reads sessions-index.json originalPath (applies to all sessions in that project)
+ *   2. Checks sessions-index.json entries for a per-session projectPath
+ *   3. Falls back to scanning the JSONL for a line with a cwd field
+ */
+function cwdFromJsonl(sessionId) {
+  try {
+    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+    if (!fs.existsSync(claudeDir)) return null;
+    const dirs = fs.readdirSync(claudeDir, { withFileTypes: true }).filter(d => d.isDirectory());
+    for (const dir of dirs) {
+      const jsonlPath = path.join(claudeDir, dir.name, sessionId + '.jsonl');
+      if (!fs.existsSync(jsonlPath)) continue;
+
+      // Try sessions-index.json — originalPath is the project-wide cwd,
+      // entries[].projectPath is per-session
+      try {
+        const indexPath = path.join(claudeDir, dir.name, 'sessions-index.json');
+        if (fs.existsSync(indexPath)) {
+          const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+          // Per-session projectPath takes priority
+          const entries = index.entries || [];
+          const entry = entries.find(s => s.sessionId === sessionId);
+          if (entry && entry.projectPath) return entry.projectPath;
+          // Fall back to project-wide originalPath
+          if (index.originalPath) return index.originalPath;
+        }
+      } catch (_) {}
+
+      // Last resort: scan JSONL for a line with a cwd field
+      try {
+        const fd = fs.openSync(jsonlPath, 'r');
+        try {
+          const buf = Buffer.alloc(16384);
+          const bytesRead = fs.readSync(fd, buf, 0, 16384, 0);
+          const lines = buf.toString('utf-8', 0, bytesRead).split('\n');
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.cwd) return parsed.cwd;
+            } catch (_) {}
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return null;
+}
+
 // Maximum scrollback buffer size in total characters
 const MAX_SCROLLBACK_CHARS = 100 * 1024; // 100KB
 
@@ -115,16 +169,21 @@ class PtySessionManager {
       fullCommand += ' --model ' + model;
     }
 
-    // Validate cwd exists - fall back to home directory if not
+    // Validate cwd exists. If the provided path is invalid (e.g. an encoded
+    // directory name like "-Users-jane-project"), resolve the real cwd from
+    // the session's JSONL file before falling back to home.
     let resolvedCwd = cwd || process.cwd();
-    try {
-      if (!fs.existsSync(resolvedCwd) || !fs.statSync(resolvedCwd).isDirectory()) {
-        console.log(`[PTY] cwd "${resolvedCwd}" does not exist or is not a directory, falling back to home`);
+    const cwdIsValid = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch (_) { return false; } };
+    if (!cwdIsValid(resolvedCwd)) {
+      const resumeId = resumeSessionId || sessionId;
+      const jsonlCwd = cwdFromJsonl(resumeId);
+      if (jsonlCwd && cwdIsValid(jsonlCwd)) {
+        console.log(`[PTY] cwd "${resolvedCwd}" invalid, resolved from JSONL: ${jsonlCwd}`);
+        resolvedCwd = jsonlCwd;
+      } else {
+        console.log(`[PTY] cwd "${resolvedCwd}" invalid, no JSONL cwd found, falling back to home`);
         resolvedCwd = os.homedir();
       }
-    } catch (e) {
-      console.log(`[PTY] cwd check failed for "${resolvedCwd}": ${e.message}, falling back to home`);
-      resolvedCwd = os.homedir();
     }
 
     // Inject workspace documentation env vars so AI sessions can read/write docs
