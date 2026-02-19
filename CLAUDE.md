@@ -37,6 +37,44 @@ This project has agent teams enabled. Use teammates for:
 - Take screenshots of the working UI using Playwright or similar
 - Store screenshots in `./screenshots/`
 
+## Feature Session Workflow (NON-NEGOTIABLE)
+
+**Every non-trivial feature MUST be built in a dedicated Claude Code session on its own git branch/worktree.**
+
+### Process
+
+1. **Create a git worktree** for the feature: `git worktree add -b feat/<feature-name> ../cwm-feat-<feature-name>`
+2. **Spawn a new Claude Code session** pointed at the worktree directory
+3. **Feed it ALL relevant context** — point it at every file and folder it needs:
+   - This CLAUDE.md
+   - Relevant source files it will read/modify
+   - API contracts, data shapes, shared types
+   - What the feature should do (requirements)
+   - What it should NOT touch (constraints)
+4. **Mark the session** in TODO.md or the Myrlin Workbook UI with:
+   - What the session was created for (feature name)
+   - When it was created (ISO timestamp)
+   - Status (in-progress / completed / failed)
+   - When it finished
+5. **Feature session does NOT merge** — it commits to its branch and closes
+6. **Orchestrator (main session) merges** — review the branch, resolve conflicts, merge to dev/main
+7. **Clean up** — remove the worktree after merge: `git worktree remove ../cwm-feat-<feature-name>`
+
+### Why
+
+- Fresh context per feature = fewer hallucinations and drift
+- Isolated branches = safe to experiment, easy to revert
+- Orchestrator controls integration = no blind merges
+- Audit trail = every feature has a clear lifecycle
+
+### Task Tracking
+
+**ALWAYS use the Todo tool proactively.** Every feature, bug fix, and task should be tracked:
+- Create tasks at the start of work (TaskCreate)
+- Mark in_progress when starting (TaskUpdate)
+- Mark completed when done (TaskUpdate)
+- Clean up stale tasks regularly (TaskList → TaskUpdate with deleted status)
+
 ## File Structure
 ```
 claude-workspace-manager/
