@@ -765,6 +765,16 @@ class CWMApp {
         e.preventDefault();
         if (this.state.token) this.openGlobalSearch();
       }
+      // ? key - Help / Feature Discovery (only when no input is focused)
+      if (e.key === '?' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        if (this.state.token) this.openQuickSwitcher('help');
+      }
+      // F1 - Help / Feature Discovery
+      if (e.key === 'F1') {
+        e.preventDefault();
+        if (this.state.token) this.openQuickSwitcher('help');
+      }
       // Ctrl+, / Cmd+, - Settings
       if ((e.ctrlKey || e.metaKey) && e.key === ',') {
         e.preventDefault();
@@ -2513,7 +2523,404 @@ class CWMApp {
       { key: 'quotaDailyLimit', label: 'Daily Message Limit', description: 'Max messages per day (0 = no limit)', category: 'Usage', type: 'number' },
       { key: 'quotaWeeklyLimit', label: 'Weekly Message Limit', description: 'Max messages per week (0 = no limit)', category: 'Usage', type: 'number' },
       { key: 'quotaMonthlyLimit', label: 'Monthly Message Limit', description: 'Max messages per month (0 = no limit)', category: 'Usage', type: 'number' },
+      { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
     ];
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     FEATURE CATALOG (Command Palette Discovery)
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Returns the full feature catalog for the command palette.
+   * Each entry describes a discoverable feature, action, or help topic.
+   * When adding new features, add a catalog entry here so users can find it via Ctrl+K.
+   * @returns {Array<{id:string, name:string, description:string, detail?:string, category:string, tags:string[], shortcut?:string, icon:string, action?:Function, navigateTo?:string, isAvailable?:Function}>}
+   */
+  getFeatureCatalog() {
+    return [
+      // ── Actions ──────────────────────────────────────
+      {
+        id: 'new-session',
+        name: 'New Session',
+        description: 'Create a new Claude Code session in a workspace',
+        category: 'action',
+        tags: ['create', 'session', 'start', 'launch', 'claude', 'add'],
+        shortcut: 'Ctrl+N',
+        icon: '&#43;',
+        action: () => this.createSession(),
+      },
+      {
+        id: 'new-workspace',
+        name: 'New Workspace',
+        description: 'Create a new workspace to organize sessions',
+        category: 'action',
+        tags: ['create', 'workspace', 'group', 'organize', 'add'],
+        icon: '&#43;',
+        action: () => this.createWorkspace(),
+      },
+      {
+        id: 'open-settings',
+        name: 'Open Settings',
+        description: 'Configure UI scale, notifications, terminal behavior, and more',
+        category: 'action',
+        tags: ['preferences', 'config', 'options', 'scale', 'zoom', 'settings'],
+        shortcut: 'Ctrl+,',
+        icon: '&#9881;',
+        action: () => this.openSettings(),
+      },
+      {
+        id: 'open-global-search',
+        name: 'Search Session History',
+        description: 'Full-text search across all session conversation history',
+        category: 'action',
+        tags: ['search', 'find', 'history', 'content', 'grep', 'global'],
+        shortcut: 'Ctrl+Shift+F',
+        icon: '&#128269;',
+        action: () => this.openGlobalSearch(),
+      },
+      {
+        id: 'discover-sessions',
+        name: 'Discover Local Sessions',
+        description: 'Scan this PC for existing Claude Code sessions not yet in a workspace',
+        category: 'action',
+        tags: ['discover', 'import', 'scan', 'local', 'projects', 'find'],
+        icon: '&#128269;',
+        action: () => this.discoverSessions(),
+      },
+      {
+        id: 'toggle-theme',
+        name: 'Toggle Theme',
+        description: 'Cycle through available color themes',
+        category: 'action',
+        tags: ['theme', 'dark', 'light', 'color', 'appearance', 'switch'],
+        icon: '&#127912;',
+        action: () => { if (typeof this.toggleTheme === 'function') this.toggleTheme(); },
+      },
+      {
+        id: 'view-terminal',
+        name: 'Switch to Terminal View',
+        description: 'Open the terminal grid with split panes',
+        category: 'action',
+        tags: ['terminal', 'pane', 'view', 'switch'],
+        icon: '&#9641;',
+        action: () => this.setViewMode('terminal'),
+      },
+      {
+        id: 'view-costs',
+        name: 'Switch to Costs View',
+        description: 'Open the cost tracking dashboard',
+        category: 'action',
+        tags: ['cost', 'spend', 'view', 'switch', 'money'],
+        icon: '&#36;',
+        action: () => this.setViewMode('costs'),
+      },
+
+      // ── Features ─────────────────────────────────────
+      {
+        id: 'workspaces',
+        name: 'Workspaces',
+        description: 'Organize sessions into named, color-coded groups',
+        detail: 'Workspaces let you group related Claude sessions. Create, rename, color-code, archive, and delete workspaces. Sessions belong to exactly one workspace. Right-click a workspace for all options.',
+        category: 'feature',
+        tags: ['workspace', 'group', 'organize', 'color', 'archive', 'rename'],
+        icon: '&#9638;',
+        navigateTo: 'workspace',
+      },
+      {
+        id: 'terminal-panes',
+        name: 'Terminal Panes',
+        description: 'Up to 4 split terminal panes with drag-and-drop layout',
+        detail: 'The Terminal view supports up to 4 panes. Drag sessions from the sidebar into panes. Panes show real-time activity indicators. Double-click a pane header to maximize.',
+        category: 'feature',
+        tags: ['terminal', 'pane', 'split', 'layout', 'drag', 'drop', 'resize', 'maximize', 'grid'],
+        icon: '&#9641;',
+        navigateTo: 'terminal',
+      },
+      {
+        id: 'templates',
+        name: 'Session Templates',
+        description: 'Save session configurations as reusable templates for quick launch',
+        detail: 'Right-click any session and choose "Save as Template" to capture its directory, model, flags, and command. When creating a new session, templates appear as quick-launch chips.',
+        category: 'feature',
+        tags: ['template', 'quick launch', 'save', 'reuse', 'preset', 'config'],
+        icon: '&#9889;',
+      },
+      {
+        id: 'cost-tracking',
+        name: 'Cost Tracking',
+        description: 'Per-session and aggregate token usage and cost analysis with model breakdown',
+        detail: 'The Costs tab shows estimated spend broken down by model, with per-session detail. Filter by day/week/month/all. Cost data is parsed from Claude JSONL logs.',
+        category: 'feature',
+        tags: ['cost', 'token', 'usage', 'spend', 'money', 'price', 'model', 'budget', 'analytics'],
+        icon: '&#36;',
+        navigateTo: 'costs',
+      },
+      {
+        id: 'feature-board',
+        name: 'Feature Board',
+        description: 'Kanban board to track planned/active/review/done features per workspace',
+        detail: 'Available in the Docs tab under the Board sub-tab. Create feature cards, set priority and tags, drag between columns.',
+        category: 'feature',
+        tags: ['board', 'kanban', 'track', 'feature', 'plan', 'roadmap', 'project'],
+        icon: '&#128203;',
+        navigateTo: 'docs',
+      },
+      {
+        id: 'workspace-docs',
+        name: 'Workspace Docs',
+        description: 'Per-workspace Notes, Goals, Tasks, Roadmap, and Rules in markdown',
+        detail: 'Each workspace has its own documentation sections. Edit inline or toggle raw markdown mode. Available in the Docs tab.',
+        category: 'feature',
+        tags: ['docs', 'documentation', 'notes', 'goals', 'tasks', 'rules', 'roadmap', 'markdown'],
+        icon: '&#128221;',
+        navigateTo: 'docs',
+      },
+      {
+        id: 'conflict-detection',
+        name: 'Conflict Detection',
+        description: 'Detect when multiple sessions edit the same files, with auto-resolve option',
+        detail: 'When two or more sessions modify the same file, a warning badge appears in the header. Click to open the Conflict Center. Auto-resolve can stop non-active sessions.',
+        category: 'feature',
+        tags: ['conflict', 'collision', 'file', 'edit', 'multi-agent', 'resolve', 'auto-kill'],
+        icon: '&#9888;',
+      },
+      {
+        id: 'themes',
+        name: 'Themes',
+        description: '13 themes including Catppuccin, Nord, Dracula, Tokyo Night, and 3 light themes',
+        detail: 'Click the theme icon in the header to pick from 10 dark and 3 light themes. Your preference is saved across sessions.',
+        category: 'feature',
+        tags: ['theme', 'dark', 'light', 'catppuccin', 'nord', 'dracula', 'tokyo', 'rose', 'gruvbox', 'color', 'appearance'],
+        icon: '&#127912;',
+        action: () => { const btn = document.getElementById('theme-toggle-btn'); if (btn) btn.click(); },
+      },
+      {
+        id: 'session-flags',
+        name: 'Session Flags',
+        description: 'Set model (Opus/Sonnet/Haiku), bypass permissions, verbose, agent teams',
+        detail: 'Right-click any session to access the Flags/Permissions submenu. Toggle bypass permissions, verbose mode, or agent teams. Select the AI model. Changes take effect on restart.',
+        category: 'feature',
+        tags: ['flag', 'model', 'opus', 'sonnet', 'haiku', 'bypass', 'permissions', 'verbose', 'agent', 'teams'],
+        icon: '&#9873;',
+      },
+      {
+        id: 'drag-and-drop',
+        name: 'Drag & Drop',
+        description: 'Reorder sessions, move between workspaces, arrange terminal panes by dragging',
+        detail: 'Drag session cards to reorder or move to different workspaces. Drag sessions into terminal pane slots for split view.',
+        category: 'feature',
+        tags: ['drag', 'drop', 'reorder', 'move', 'arrange', 'layout'],
+        icon: '&#8597;',
+      },
+      {
+        id: 'process-recovery',
+        name: 'Process Recovery',
+        description: 'Automatically recover sessions after crash or restart',
+        detail: 'On startup, PIDs of sessions marked running are checked. Live sessions stay running, dead ones are marked stopped. This happens transparently.',
+        category: 'feature',
+        tags: ['recovery', 'crash', 'restart', 'auto', 'resilient', 'pid'],
+        icon: '&#8635;',
+      },
+      {
+        id: 'resources-monitor',
+        name: 'System Resources',
+        description: 'Monitor CPU, memory, and process status of running sessions',
+        detail: 'The Resources tab shows real-time system metrics per session. Kill or restart processes directly. Auto-refreshes every 10 seconds.',
+        category: 'feature',
+        tags: ['resources', 'cpu', 'memory', 'process', 'monitor', 'system', 'kill', 'performance'],
+        icon: '&#128200;',
+        navigateTo: 'resources',
+      },
+      {
+        id: 'quota-tracking',
+        name: 'Usage Quota Tracking',
+        description: 'Track message usage against 5-hour, daily, weekly, monthly limits',
+        detail: 'The sidebar shows a usage widget with configurable limits. Set limits in Settings. Shows progress bars for each quota period.',
+        category: 'feature',
+        tags: ['quota', 'usage', 'limit', 'message', 'rate', 'throttle'],
+        icon: '&#128200;',
+      },
+      {
+        id: 'worktrees',
+        name: 'Git Worktrees',
+        description: 'Create and manage git worktrees for parallel branch work',
+        detail: 'Right-click a workspace to "Create Worktree". Worktrees let you have multiple branches checked out simultaneously, each in its own directory with its own session.',
+        category: 'feature',
+        tags: ['worktree', 'git', 'branch', 'parallel', 'checkout', 'repository', 'isolation'],
+        icon: '&#128268;',
+      },
+      {
+        id: 'import-export',
+        name: 'Import / Export',
+        description: 'Export session context for portability and handoff',
+        detail: 'Right-click a session and choose "Export Context" to save the conversation as a portable file for backup or sharing.',
+        category: 'feature',
+        tags: ['import', 'export', 'backup', 'context', 'handoff', 'portable', 'share'],
+        icon: '&#128230;',
+      },
+      {
+        id: 'completion-notifications',
+        name: 'Completion Notifications',
+        description: 'Sound and toast when a background terminal finishes its task',
+        detail: 'Enable in Settings > Notifications. When a terminal pane detects Claude returning to idle, a notification sound plays and a toast appears.',
+        category: 'feature',
+        tags: ['notification', 'sound', 'alert', 'complete', 'finish', 'idle', 'background'],
+        icon: '&#128276;',
+      },
+      {
+        id: 'refocus-session',
+        name: 'Refocus Session',
+        description: 'Distill and compact a conversation to reduce context length',
+        detail: 'Right-click a session > Refocus > Reset & Refocus or Compact & Refocus. Summarizes the conversation so far and starts fresh with reduced token usage.',
+        category: 'feature',
+        tags: ['refocus', 'reset', 'compact', 'context', 'distill', 'summary', 'tokens'],
+        icon: '&#128260;',
+      },
+      {
+        id: 'image-upload',
+        name: 'Image Upload',
+        description: 'Upload images to Claude directly in terminal panes',
+        detail: 'Each terminal pane has an upload button. Click it or drag an image onto the pane to send it to Claude for analysis.',
+        category: 'feature',
+        tags: ['image', 'upload', 'screenshot', 'picture', 'photo', 'visual', 'drag'],
+        icon: '&#128247;',
+      },
+      {
+        id: 'saved-layouts',
+        name: 'Saved Layouts',
+        description: 'Save and restore terminal pane arrangements',
+        detail: 'Save your current pane layout (which sessions in which slots) and restore it later. Access via the Terminal view toolbar.',
+        category: 'feature',
+        tags: ['layout', 'save', 'restore', 'pane', 'arrangement', 'terminal'],
+        icon: '&#128190;',
+        navigateTo: 'terminal',
+      },
+      {
+        id: 'activity-feed',
+        name: 'Activity Feed',
+        description: 'Real-time status labels per terminal pane (Reading, Writing, etc.)',
+        detail: 'Terminal pane headers show live activity indicators when enabled. Toggle in Settings > Terminal > Activity Indicators.',
+        category: 'feature',
+        tags: ['activity', 'status', 'indicator', 'reading', 'writing', 'live', 'real-time'],
+        icon: '&#128161;',
+      },
+      {
+        id: 'feature-sessions',
+        name: 'Feature Sessions',
+        description: 'Dedicated sessions on isolated git branches for building features',
+        detail: 'Right-click a workspace > "New Feature Session". Creates a worktree branch and session in one step. The session works in isolation on that branch.',
+        category: 'feature',
+        tags: ['feature', 'session', 'branch', 'worktree', 'isolation', 'git'],
+        icon: '&#9733;',
+      },
+
+      // ── Keyboard Shortcuts ───────────────────────────
+      {
+        id: 'shortcut-quick-switcher',
+        name: 'Command Palette',
+        description: 'Search sessions, workspaces, features, actions, and settings',
+        category: 'shortcut',
+        tags: ['shortcut', 'command', 'palette', 'search', 'quick', 'switcher'],
+        shortcut: 'Ctrl+K',
+        icon: '&#9000;',
+      },
+      {
+        id: 'shortcut-new-session',
+        name: 'New Session',
+        description: 'Create a new Claude Code session',
+        category: 'shortcut',
+        tags: ['shortcut', 'new', 'session', 'create'],
+        shortcut: 'Ctrl+N',
+        icon: '&#9000;',
+        action: () => this.createSession(),
+      },
+      {
+        id: 'shortcut-global-search',
+        name: 'Global Search',
+        description: 'Search across all session conversation history',
+        category: 'shortcut',
+        tags: ['shortcut', 'search', 'global', 'history', 'find'],
+        shortcut: 'Ctrl+Shift+F',
+        icon: '&#9000;',
+        action: () => this.openGlobalSearch(),
+      },
+      {
+        id: 'shortcut-settings',
+        name: 'Settings',
+        description: 'Open the settings panel',
+        category: 'shortcut',
+        tags: ['shortcut', 'settings', 'preferences', 'config'],
+        shortcut: 'Ctrl+,',
+        icon: '&#9000;',
+        action: () => this.openSettings(),
+      },
+      {
+        id: 'shortcut-help',
+        name: 'Help / Feature Discovery',
+        description: 'Browse all features, actions, and keyboard shortcuts',
+        category: 'shortcut',
+        tags: ['shortcut', 'help', 'features', 'discover', 'docs'],
+        shortcut: '?',
+        icon: '&#9000;',
+        action: () => this.openQuickSwitcher('help'),
+      },
+    ];
+  }
+
+  /**
+   * Score a feature catalog entry against a search query.
+   * Higher score = better match. 0 = no match.
+   * @param {Object} entry - Feature catalog entry
+   * @param {string} query - Lowercase trimmed search query
+   * @returns {number} Match score (0 = no match)
+   */
+  scoreFeatureMatch(entry, query) {
+    let score = 0;
+    const nameLower = entry.name.toLowerCase();
+
+    // Exact name match (highest weight)
+    if (nameLower === query) return 100;
+
+    // Name starts with query
+    if (nameLower.startsWith(query)) score += 50;
+    // Name contains query
+    else if (nameLower.includes(query)) score += 30;
+
+    // Shortcut matches
+    if (entry.shortcut && entry.shortcut.toLowerCase().includes(query)) score += 25;
+
+    // Description contains query
+    if (entry.description.toLowerCase().includes(query)) score += 20;
+
+    // Tags contain query (partial match OK)
+    for (const tag of (entry.tags || [])) {
+      if (tag.includes(query)) { score += 15; break; }
+    }
+
+    // Detail text contains query (lower weight, for deep discovery)
+    if (entry.detail && entry.detail.toLowerCase().includes(query)) score += 5;
+
+    return score;
+  }
+
+  /**
+   * Open the settings panel scrolled to a specific setting key.
+   * Used by the command palette when selecting a setting result.
+   * @param {string} key - The setting key to scroll to
+   */
+  scrollToSetting(key) {
+    this.openSettings();
+    // Small delay to let settings panel render, then scroll to the setting
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-setting-key="${key}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.outline = '2px solid var(--mauve)';
+        el.style.borderRadius = 'var(--radius-sm)';
+        setTimeout(() => { el.style.outline = ''; }, 2000);
+      }
+    });
   }
 
   /** Find which pane slot (0-3) a session is open in, or -1 if not found */
@@ -2578,7 +2985,7 @@ class CWMApp {
           const currentScale = parseFloat(localStorage.getItem('cwm_ui_scale')) || 1.0;
           const pct = Math.round(currentScale * 100);
           html += `
-            <div class="settings-row">
+            <div class="settings-row" data-setting-key="${item.key}">
               <div class="settings-row-info">
                 <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
                 <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
@@ -2592,7 +2999,7 @@ class CWMApp {
         } else if (item.type === 'number') {
           const val = this.state.settings[item.key] || 0;
           html += `
-            <div class="settings-row">
+            <div class="settings-row" data-setting-key="${item.key}">
               <div class="settings-row-info">
                 <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
                 <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
@@ -2602,7 +3009,7 @@ class CWMApp {
         } else {
           const checked = this.state.settings[item.key] ? 'checked' : '';
           html += `
-            <div class="settings-row">
+            <div class="settings-row" data-setting-key="${item.key}">
               <div class="settings-row-info">
                 <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
                 <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
@@ -3517,10 +3924,15 @@ class CWMApp {
      QUICK SWITCHER
      ═══════════════════════════════════════════════════════════ */
 
-  openQuickSwitcher() {
+  /**
+   * Open the command palette / quick switcher.
+   * @param {string} [mode] - Optional mode: 'help' shows feature catalog first
+   */
+  openQuickSwitcher(mode) {
     this.els.qsOverlay.hidden = false;
     this.els.qsInput.value = '';
-    this.qsHighlightIndex = -1;
+    this.qsHighlightIndex = mode === 'help' ? 0 : -1;
+    this.qsMode = mode || 'default';
     this.renderQuickSwitcherResults('');
     // Small delay so animation plays before focus
     requestAnimationFrame(() => this.els.qsInput.focus());
@@ -3555,39 +3967,117 @@ class CWMApp {
     }
   }
 
+  /**
+   * Render command palette results with mixed-type search.
+   * Searches sessions, workspaces, feature catalog, and settings.
+   * Supports '>' prefix for command mode and 'help' mode for feature browsing.
+   * @param {string} query - Search query (lowercase trimmed by caller)
+   */
   renderQuickSwitcherResults(query) {
     this.qsResults = [];
     const container = this.els.qsResultsContainer;
+    const mode = this.qsMode || 'default';
+    const catalog = this.getFeatureCatalog().filter(e => !e.isAvailable || e.isAvailable());
 
-    if (!query) {
-      // Show recent workspaces and sessions
+    // Command mode: '>' prefix filters to actions only
+    if (query.startsWith('>')) {
+      const actionQuery = query.slice(1).trim();
+      const actions = catalog.filter(e => e.category === 'action');
+      if (actionQuery) {
+        this.qsResults = actions
+          .map(e => ({ type: 'action', item: e, score: this.scoreFeatureMatch(e, actionQuery) }))
+          .filter(r => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 10);
+      } else {
+        this.qsResults = actions.map(e => ({ type: 'action', item: e, score: 50 }));
+      }
+    }
+    // Help mode with no query: show feature catalog grouped by category
+    else if (!query && mode === 'help') {
+      const actions = catalog.filter(e => e.category === 'action').slice(0, 5);
+      const features = catalog.filter(e => e.category === 'feature');
+      const shortcuts = catalog.filter(e => e.category === 'shortcut');
+      this.qsResults = [
+        ...actions.map(e => ({ type: 'action', item: e, score: 50 })),
+        ...features.map(e => ({ type: 'feature', item: e, score: 40 })),
+        ...shortcuts.map(e => ({ type: 'shortcut', item: e, score: 30 })),
+      ];
+    }
+    // Default mode, empty query: recent sessions + workspaces (original behavior)
+    else if (!query) {
       const recentWorkspaces = [...this.state.workspaces].sort((a, b) =>
         new Date(b.lastActive || b.createdAt) - new Date(a.lastActive || a.createdAt)
       ).slice(0, 3);
       const recentSessions = [...this.state.sessions].sort((a, b) =>
         new Date(b.lastActive || b.createdAt) - new Date(a.lastActive || a.createdAt)
       ).slice(0, 5);
-
       this.qsResults = [
-        ...recentWorkspaces.map(w => ({ type: 'workspace', item: w })),
-        ...recentSessions.map(s => ({ type: 'session', item: s })),
+        ...recentWorkspaces.map(w => ({ type: 'workspace', item: w, score: 50 })),
+        ...recentSessions.map(s => ({ type: 'session', item: s, score: 40 })),
       ];
-    } else {
-      // Search
-      const matchingWorkspaces = this.state.workspaces.filter(w =>
-        w.name.toLowerCase().includes(query) ||
-        (w.description && w.description.toLowerCase().includes(query))
-      );
-      const matchingSessions = this.state.sessions.filter(s =>
-        s.name.toLowerCase().includes(query) ||
-        (s.topic && s.topic.toLowerCase().includes(query)) ||
-        (s.workingDir && s.workingDir.toLowerCase().includes(query))
-      );
+    }
+    // Search mode: search everything
+    else {
+      const q = query.toLowerCase();
 
+      // Match sessions
+      const sessionResults = this.state.sessions
+        .filter(s =>
+          s.name.toLowerCase().includes(q) ||
+          (s.topic && s.topic.toLowerCase().includes(q)) ||
+          (s.workingDir && s.workingDir.toLowerCase().includes(q))
+        )
+        .map(s => {
+          let score = 0;
+          if (s.name.toLowerCase().startsWith(q)) score = 50;
+          else if (s.name.toLowerCase().includes(q)) score = 30;
+          if (s.topic && s.topic.toLowerCase().includes(q)) score += 10;
+          if (s.workingDir && s.workingDir.toLowerCase().includes(q)) score += 5;
+          return { type: 'session', item: s, score };
+        });
+
+      // Match workspaces
+      const workspaceResults = this.state.workspaces
+        .filter(w =>
+          w.name.toLowerCase().includes(q) ||
+          (w.description && w.description.toLowerCase().includes(q))
+        )
+        .map(w => {
+          let score = 0;
+          if (w.name.toLowerCase().startsWith(q)) score = 50;
+          else if (w.name.toLowerCase().includes(q)) score = 30;
+          if (w.description && w.description.toLowerCase().includes(q)) score += 10;
+          return { type: 'workspace', item: w, score };
+        });
+
+      // Match feature catalog entries
+      const featureResults = catalog
+        .map(e => ({ type: e.category, item: e, score: this.scoreFeatureMatch(e, q) }))
+        .filter(r => r.score > 0);
+
+      // Match settings entries (auto-generated from registry)
+      const settingResults = this.getSettingsRegistry()
+        .filter(s =>
+          s.label.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q) ||
+          s.category.toLowerCase().includes(q)
+        )
+        .map(s => {
+          let score = 0;
+          if (s.label.toLowerCase().startsWith(q)) score = 40;
+          else if (s.label.toLowerCase().includes(q)) score = 25;
+          if (s.description.toLowerCase().includes(q)) score += 10;
+          return { type: 'setting', item: s, score };
+        });
+
+      // Merge, sort by score, cap at 15
       this.qsResults = [
-        ...matchingWorkspaces.map(w => ({ type: 'workspace', item: w })),
-        ...matchingSessions.map(s => ({ type: 'session', item: s })),
-      ];
+        ...sessionResults,
+        ...workspaceResults,
+        ...featureResults,
+        ...settingResults,
+      ].sort((a, b) => b.score - a.score).slice(0, 15);
     }
 
     if (this.qsResults.length === 0) {
@@ -3595,14 +4085,21 @@ class CWMApp {
       return;
     }
 
+    // Group labels for display
+    const groupLabels = {
+      workspace: 'Workspaces', session: 'Sessions', action: 'Actions',
+      feature: 'Features', shortcut: 'Shortcuts', setting: 'Settings',
+    };
+
     let html = '';
     let lastType = '';
     this.qsResults.forEach((r, i) => {
       if (r.type !== lastType) {
-        html += `<div class="qs-result-group">${r.type === 'workspace' ? 'Workspaces' : 'Sessions'}</div>`;
+        html += `<div class="qs-result-group">${groupLabels[r.type] || r.type}</div>`;
         lastType = r.type;
       }
       const highlighted = i === this.qsHighlightIndex ? ' highlighted' : '';
+
       if (r.type === 'workspace') {
         html += `
           <div class="qs-result${highlighted}" data-index="${i}">
@@ -3618,9 +4115,9 @@ class CWMApp {
               <div class="qs-result-name">${this.escapeHtml(r.item.name)}</div>
               <div class="qs-result-detail">${r.item.sessions ? r.item.sessions.length : 0} sessions</div>
             </div>
-            <span class="qs-result-type">workspace</span>
+            <span class="qs-result-type qs-result-type-workspace">workspace</span>
           </div>`;
-      } else {
+      } else if (r.type === 'session') {
         html += `
           <div class="qs-result${highlighted}" data-index="${i}">
             <div class="qs-result-icon">
@@ -3633,7 +4130,26 @@ class CWMApp {
               <div class="qs-result-name">${this.escapeHtml(r.item.name)}</div>
               <div class="qs-result-detail">${r.item.topic ? this.escapeHtml(r.item.topic) : (r.item.workingDir || '')}</div>
             </div>
-            <span class="qs-result-type">${r.item.status || 'session'}</span>
+            <span class="qs-result-type qs-result-type-session">${r.item.status || 'session'}</span>
+          </div>`;
+      } else {
+        // Feature catalog entry (action, feature, shortcut, setting)
+        const item = r.item;
+        const shortcutHtml = item.shortcut ? `<kbd class="qs-result-shortcut">${this.escapeHtml(item.shortcut)}</kbd>` : '';
+        const typeClass = `qs-result-type-${r.type}`;
+        const iconHtml = item.icon || '';
+        const name = item.name || item.label || '';
+        const desc = item.description || '';
+
+        html += `
+          <div class="qs-result${highlighted}" data-index="${i}">
+            <div class="qs-result-icon qs-result-icon-${r.type}">${iconHtml}</div>
+            <div class="qs-result-info">
+              <div class="qs-result-name">${this.escapeHtml(name)}</div>
+              <div class="qs-result-detail">${this.escapeHtml(desc)}</div>
+            </div>
+            ${shortcutHtml}
+            <span class="qs-result-type ${typeClass}">${r.type}</span>
           </div>`;
       }
     });
@@ -3662,13 +4178,34 @@ class CWMApp {
     }
   }
 
+  /**
+   * Handle selection of a command palette result.
+   * Routes to the appropriate action based on result type.
+   * @param {Object} result - The selected result { type, item, score }
+   */
   onQuickSwitcherSelect(result) {
     this.closeQuickSwitcher();
+
     if (result.type === 'workspace') {
       this.setViewMode('workspace');
       this.selectWorkspace(result.item.id);
-    } else {
+    } else if (result.type === 'session') {
       this.selectSession(result.item.id);
+    } else if (result.type === 'setting') {
+      // Navigate to settings panel, scroll to specific setting
+      this.scrollToSetting(result.item.key);
+    } else {
+      // Catalog entry (action, feature, shortcut)
+      const entry = result.item;
+      if (typeof entry.action === 'function') {
+        entry.action();
+      } else if (entry.navigateTo) {
+        this.setViewMode(entry.navigateTo);
+      }
+      // Info-only entries with detail text: show toast with detail
+      else if (entry.detail) {
+        this.showToast(entry.detail, 'info', 5000);
+      }
     }
   }
 
@@ -4792,6 +5329,9 @@ class CWMApp {
       }},
       { label: 'New Feature Session', icon: '&#9733;', action: () => this.startFeatureSession(workspaceId) },
       { label: 'Create Worktree', icon: '&#128268;', action: () => this.createWorktree(workspaceId) },
+      ...(this.getSetting('enableWorktreeTasks') ? [
+        { label: 'New Worktree Task', icon: '&#128736;', action: () => this.startWorktreeTask(workspaceId) },
+      ] : []),
       { type: 'sep' },
       { label: 'Edit', icon: '&#9998;', action: () => this.renameWorkspace(workspaceId) },
       { label: ws.autoSummary !== false ? 'Auto-Docs \u2713' : 'Auto-Docs',
@@ -5200,6 +5740,9 @@ class CWMApp {
 
     // Subagent tracking - fetch async
     this.loadSessionSubagents(session.id);
+
+    // Worktree task review banner (only when feature is enabled)
+    this.renderWorktreeTaskBanner(session);
 
     // Workspace analytics - show when session belongs to a workspace
     if (session.workspaceId) {
@@ -9795,6 +10338,229 @@ class CWMApp {
     }
   }
 
+
+  /* ═══════════════════════════════════════════════════════════
+     WORKTREE TASKS
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Launch the "New Worktree Task" creation flow.
+   * Creates a worktree branch, spawns a session, and tracks the task.
+   * @param {string} workspaceId - Workspace to create the task in
+   */
+  async startWorktreeTask(workspaceId) {
+    const ws = this.state.workspaces.find(w => w.id === workspaceId);
+    if (!ws) return;
+
+    // Pre-fill repo dir from the first session in workspace
+    const wsSessions = (this.state.allSessions || this.state.sessions).filter(s => s.workspaceId === workspaceId);
+    const defaultDir = wsSessions.length > 0 ? wsSessions[0].workingDir : '';
+
+    // Get feature board items for linking
+    const features = (this.state.features || []).filter(f => f.workspaceId === workspaceId && f.status !== 'done');
+    const featureOptions = features.length > 0
+      ? [{ value: '', label: 'None' }, ...features.map(f => ({ value: f.id, label: f.name }))]
+      : [];
+
+    const fields = [
+      { key: 'description', label: 'What should Claude build?', type: 'textarea', placeholder: 'Implement OAuth login flow with Google provider...', required: true },
+      { key: 'repoDir', label: 'Repository Path', value: defaultDir, required: true },
+      { key: 'baseBranch', label: 'Base Branch', value: 'main', required: true },
+      { key: 'branch', label: 'Branch Name', placeholder: 'Auto-generated from description' },
+    ];
+
+    // Add feature board link if features exist
+    if (featureOptions.length > 0) {
+      fields.push({ key: 'featureId', label: 'Link to Feature', type: 'select', options: featureOptions });
+    }
+
+    // Add model selector
+    fields.push({ key: 'model', label: 'Model', type: 'select', options: [
+      { value: '', label: 'Default' },
+      { value: 'claude-opus-4-6', label: 'Opus' },
+      { value: 'claude-sonnet-4-6', label: 'Sonnet' },
+      { value: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+    ]});
+
+    const result = await this.showPromptModal({
+      title: 'New Worktree Task',
+      fields,
+      confirmText: 'Start Task',
+    });
+    if (!result) return;
+
+    // Auto-generate branch name from description if not provided
+    const branch = result.branch || ('wt/' + result.description
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 40));
+
+    try {
+      const data = await this.api('POST', '/api/worktree-tasks', {
+        workspaceId,
+        repoDir: result.repoDir,
+        branch,
+        description: result.description,
+        baseBranch: result.baseBranch || 'main',
+        featureId: result.featureId || undefined,
+        model: result.model || undefined,
+      });
+
+      await this.loadSessions();
+
+      // Open session in terminal pane if available
+      if (data.session) {
+        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        if (emptySlot !== -1) {
+          this.setViewMode('terminal');
+          this.openTerminalInPane(emptySlot, data.session.id, branch, { cwd: data.task.worktreePath });
+        }
+      }
+
+      this.showToast(`Worktree task started on ${branch}`, 'success');
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create worktree task', 'error');
+    }
+  }
+
+  /**
+   * Render the worktree task review banner in session detail panel.
+   * Shows when the selected session is linked to a worktree task in "review" status.
+   * @param {Object} session - The selected session
+   */
+  async renderWorktreeTaskBanner(session) {
+    // Find or create the banner container
+    let banner = document.getElementById('wt-review-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'wt-review-banner';
+      banner.className = 'wt-review-banner';
+      // Insert at the top of the detail body
+      const detailBody = this.els.detailPanel?.querySelector('.detail-body');
+      if (detailBody) detailBody.prepend(banner);
+    }
+
+    // Check if worktree tasks are enabled
+    if (!this.getSetting('enableWorktreeTasks')) {
+      banner.hidden = true;
+      return;
+    }
+
+    // Fetch worktree tasks for this session's workspace
+    try {
+      const data = await this.api('GET', `/api/worktree-tasks?workspaceId=${session.workspaceId}`);
+      const task = (data.tasks || []).find(t => t.sessionId === session.id);
+
+      if (!task) {
+        banner.hidden = true;
+        return;
+      }
+
+      banner.hidden = false;
+
+      const statusColors = {
+        running: 'var(--blue)',
+        review: 'var(--yellow)',
+        merged: 'var(--green)',
+        rejected: 'var(--red)',
+      };
+      const statusColor = statusColors[task.status] || 'var(--overlay0)';
+
+      let actionsHtml = '';
+      if (task.status === 'review') {
+        actionsHtml = `
+          <div class="wt-review-actions">
+            <button class="wt-review-btn wt-review-btn-diff" data-task-id="${task.id}" title="View changes">View Diff</button>
+            <button class="wt-review-btn wt-review-btn-merge" data-task-id="${task.id}" title="Merge branch and cleanup">Merge</button>
+            <button class="wt-review-btn wt-review-btn-reject" data-task-id="${task.id}" title="Reject and delete worktree">Reject</button>
+            <button class="wt-review-btn wt-review-btn-resume" data-task-id="${task.id}" title="Resume working">Resume</button>
+          </div>`;
+      } else if (task.status === 'running') {
+        actionsHtml = `<div class="wt-review-status" style="color:${statusColor}">Task running on ${this.escapeHtml(task.branch)}</div>`;
+      } else {
+        actionsHtml = `<div class="wt-review-status" style="color:${statusColor}">${task.status.charAt(0).toUpperCase() + task.status.slice(1)}</div>`;
+      }
+
+      banner.innerHTML = `
+        <div class="wt-review-header">
+          <span class="wt-review-icon" style="color:${statusColor}">&#128268;</span>
+          <span class="wt-review-title">Worktree Task: ${this.escapeHtml(task.description.slice(0, 60))}</span>
+          <span class="wt-review-branch">${this.escapeHtml(task.branch)}</span>
+        </div>
+        ${actionsHtml}`;
+
+      // Bind review action buttons
+      banner.querySelectorAll('.wt-review-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const taskId = btn.dataset.taskId;
+          if (btn.classList.contains('wt-review-btn-diff')) {
+            await this.showWorktreeTaskDiff(taskId);
+          } else if (btn.classList.contains('wt-review-btn-merge')) {
+            const ok = await this.showConfirmModal({
+              title: 'Merge Worktree Task',
+              message: `Merge branch "${task.branch}" into "${task.baseBranch || 'main'}" and clean up the worktree?`,
+              confirmText: 'Merge',
+            });
+            if (ok) {
+              try {
+                await this.api('POST', `/api/worktree-tasks/${taskId}/merge`);
+                this.showToast(`Merged ${task.branch} into ${task.baseBranch || 'main'}`, 'success');
+                this.renderSessionDetail();
+              } catch (err) {
+                this.showToast(err.message || 'Merge failed', 'error');
+              }
+            }
+          } else if (btn.classList.contains('wt-review-btn-reject')) {
+            const ok = await this.showConfirmModal({
+              title: 'Reject Worktree Task',
+              message: `Delete the worktree and branch "${task.branch}"? This cannot be undone.`,
+              confirmText: 'Reject',
+              confirmClass: 'btn-danger',
+            });
+            if (ok) {
+              try {
+                await this.api('POST', `/api/worktree-tasks/${taskId}/reject`);
+                this.showToast(`Rejected and cleaned up ${task.branch}`, 'info');
+                this.renderSessionDetail();
+              } catch (err) {
+                this.showToast(err.message || 'Reject failed', 'error');
+              }
+            }
+          } else if (btn.classList.contains('wt-review-btn-resume')) {
+            try {
+              await this.api('PUT', `/api/worktree-tasks/${taskId}`, { status: 'running', completedAt: null });
+              await this.api('POST', `/api/sessions/${session.id}/restart`);
+              this.showToast('Resumed worktree task', 'success');
+              this.renderSessionDetail();
+            } catch (err) {
+              this.showToast(err.message || 'Resume failed', 'error');
+            }
+          }
+        });
+      });
+    } catch {
+      banner.hidden = true;
+    }
+  }
+
+  /**
+   * Show the diff for a worktree task in a modal.
+   * @param {string} taskId - Worktree task ID
+   */
+  async showWorktreeTaskDiff(taskId) {
+    try {
+      const data = await this.api('POST', `/api/worktree-tasks/${taskId}/diff`);
+      await this.showConfirmModal({
+        title: 'Worktree Task Diff',
+        message: (data.stat || 'No changes') + '\n\n' + (data.diff || '').slice(0, 5000),
+        confirmText: 'OK',
+      });
+    } catch (err) {
+      this.showToast(err.message || 'Failed to load diff', 'error');
+    }
+  }
 
   /* ═══════════════════════════════════════════════════════════
      SELF-UPDATE

@@ -29,6 +29,7 @@ const DEFAULT_STATE = {
   workspaceOrder: [],     // mixed array of workspace IDs and group IDs for sidebar ordering
   templates: {},          // { templateId: { id, name, command, workingDir, ... } }
   features: {},           // { featureId: { id, workspaceId, name, description, status, priority, sessionIds, ... } }
+  worktreeTasks: {},      // { taskId: { id, workspaceId, sessionId, featureId, branch, worktreePath, repoDir, description, baseBranch, status, createdAt, completedAt } }
   settings: {
     autoRecover: true,
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
@@ -808,6 +809,87 @@ class Store extends EventEmitter {
     this._debouncedSave();
     this.emit('feature:updated', feature);
     return feature;
+  }
+
+  // ─── Worktree Tasks ─────────────────────────────────────
+
+  /**
+   * Create a worktree task linking a workspace, session, branch, and optional feature.
+   * @param {Object} params
+   * @param {string} params.workspaceId - Workspace the task belongs to
+   * @param {string} params.sessionId - Spawned Claude session ID
+   * @param {string} params.branch - Git branch name (e.g. feat/auth-flow)
+   * @param {string} params.worktreePath - Filesystem path to the worktree
+   * @param {string} params.repoDir - Path to the main repository
+   * @param {string} params.description - What the task should accomplish
+   * @param {string} [params.baseBranch='main'] - Branch to merge back into
+   * @param {string} [params.featureId] - Linked feature board card ID
+   * @returns {Object} The created worktree task
+   */
+  createWorktreeTask({ workspaceId, sessionId, branch, worktreePath, repoDir, description, baseBranch = 'main', featureId = null }) {
+    if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
+    const id = 'wt_' + crypto.randomUUID().slice(0, 8);
+    const task = {
+      id,
+      workspaceId,
+      sessionId,
+      featureId,
+      branch,
+      worktreePath,
+      repoDir,
+      baseBranch,
+      description,
+      status: 'running',
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+    };
+    this._state.worktreeTasks[id] = task;
+    this._debouncedSave();
+    this.emit('worktreeTask:created', task);
+    return task;
+  }
+
+  /**
+   * Update a worktree task's fields (typically status transitions).
+   * @param {string} id - Worktree task ID
+   * @param {Object} updates - Fields to update
+   * @returns {Object|null} Updated task or null if not found
+   */
+  updateWorktreeTask(id, updates) {
+    if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
+    const task = this._state.worktreeTasks[id];
+    if (!task) return null;
+    Object.assign(task, updates);
+    this._debouncedSave();
+    this.emit('worktreeTask:updated', task);
+    return task;
+  }
+
+  /**
+   * Get all worktree tasks, optionally filtered by workspace.
+   * @param {string} [workspaceId] - Filter by workspace ID
+   * @returns {Array<Object>} Array of worktree tasks
+   */
+  getWorktreeTasks(workspaceId) {
+    if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
+    const all = Object.values(this._state.worktreeTasks);
+    if (workspaceId) return all.filter(t => t.workspaceId === workspaceId);
+    return all;
+  }
+
+  /**
+   * Delete a worktree task record.
+   * @param {string} id - Worktree task ID
+   * @returns {boolean} True if deleted
+   */
+  deleteWorktreeTask(id) {
+    if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
+    const task = this._state.worktreeTasks[id];
+    if (!task) return false;
+    delete this._state.worktreeTasks[id];
+    this._debouncedSave();
+    this.emit('worktreeTask:deleted', { id });
+    return true;
   }
 
   // ─── Settings ────────────────────────────────────────────

@@ -679,6 +679,15 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
     return res.status(404).json({ error: 'Session not found.' });
   }
 
+  // Auto-transition worktree tasks to "review" when their session stops
+  if (updates.status === 'stopped' && previousStatus === 'running') {
+    const wtTask = store.getWorktreeTasks().find(t => t.sessionId === req.params.id && t.status === 'running');
+    if (wtTask) {
+      store.updateWorktreeTask(wtTask.id, { status: 'review', completedAt: new Date().toISOString() });
+      broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === wtTask.id) });
+    }
+  }
+
   // Auto-generate summary when a session transitions from running to stopped
   // and the workspace has autoSummary enabled (defaults to true).
   if (updates.status === 'stopped' && previousStatus === 'running') {
@@ -4228,6 +4237,188 @@ app.delete('/api/git/worktrees', requireAuth, async (req, res) => {
     if (!root) return res.status(400).json({ error: 'Not a git worktree' });
     await gitExec(['worktree', 'remove', wtPath], root);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
+//  WORKTREE TASKS
+// ──────────────────────────────────────────────────────────
+
+/**
+ * GET /api/worktree-tasks
+ * List all worktree tasks, optionally filtered by workspaceId.
+ */
+app.get('/api/worktree-tasks', requireAuth, (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks(req.query.workspaceId || undefined);
+  res.json({ tasks });
+});
+
+/**
+ * POST /api/worktree-tasks
+ * Create a worktree task: creates git worktree, session, and task record.
+ */
+app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
+  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model } = req.body || {};
+  if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
+  if (!repoDir) return res.status(400).json({ error: 'repoDir is required' });
+  if (!branch) return res.status(400).json({ error: 'branch is required' });
+  if (!description) return res.status(400).json({ error: 'description is required' });
+
+  const store = getStore();
+  try {
+    // 1. Create the git worktree
+    const root = await gitRepoRoot(repoDir);
+    if (!root) return res.status(400).json({ error: 'Not a git repository' });
+    const repoName = path.basename(root);
+    const worktreePath = path.join(path.dirname(root), `${repoName}-wt`, branch.replace(/\//g, '-'));
+
+    let branchExists = false;
+    try {
+      await gitExec(['rev-parse', '--verify', branch], root);
+      branchExists = true;
+    } catch {}
+
+    const args = ['worktree', 'add'];
+    if (!branchExists) args.push('-b', branch);
+    args.push(worktreePath);
+    if (branchExists) args.push(branch);
+    await gitExec(args, root);
+
+    // 2. Create a session in this workspace pointing at the worktree
+    const sessionName = branch.replace(/^feat\//, '') + ' (worktree task)';
+    const session = store.createSession(workspaceId, {
+      name: sessionName,
+      workingDir: worktreePath,
+      command: 'claude',
+      model: model || undefined,
+    });
+    if (!session) {
+      return res.status(500).json({ error: 'Failed to create session' });
+    }
+
+    // 3. Create the worktree task record
+    const task = store.createWorktreeTask({
+      workspaceId,
+      sessionId: session.id,
+      branch,
+      worktreePath,
+      repoDir: root,
+      description,
+      baseBranch: baseBranch || 'main',
+      featureId: featureId || null,
+    });
+
+    broadcastSSE('worktreeTask:created', { task });
+    res.status(201).json({ task, session });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/worktree-tasks/:id
+ * Update a worktree task's status or other fields.
+ */
+app.put('/api/worktree-tasks/:id', requireAuth, (req, res) => {
+  const store = getStore();
+  const task = store.updateWorktreeTask(req.params.id, req.body);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+  broadcastSSE('worktreeTask:updated', { task });
+  res.json({ task });
+});
+
+/**
+ * POST /api/worktree-tasks/:id/merge
+ * Merge the worktree branch back to the base branch, cleanup worktree and branch.
+ */
+app.post('/api/worktree-tasks/:id/merge', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+  if (task.status !== 'review') return res.status(400).json({ error: 'Task must be in review status to merge' });
+
+  try {
+    const repoDir = task.repoDir;
+    const baseBranch = task.baseBranch || 'main';
+
+    // Checkout base branch
+    await gitExec(['checkout', baseBranch], repoDir);
+    // Merge with no-ff for clean history
+    await gitExec(['merge', '--no-ff', '-m', `Merge worktree task: ${task.description}`, task.branch], repoDir);
+    // Remove worktree
+    try { await gitExec(['worktree', 'remove', task.worktreePath], repoDir); } catch { /* may already be removed */ }
+    // Delete branch
+    try { await gitExec(['branch', '-d', task.branch], repoDir); } catch { /* branch may not exist */ }
+
+    // Update task status
+    store.updateWorktreeTask(task.id, { status: 'merged', completedAt: new Date().toISOString() });
+
+    // If linked to a feature, mark it done
+    if (task.featureId) {
+      store.updateFeature(task.featureId, { status: 'done' });
+    }
+
+    broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
+    res.json({ success: true, message: `Merged ${task.branch} into ${baseBranch}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/worktree-tasks/:id/reject
+ * Reject the task: delete worktree, mark as rejected.
+ */
+app.post('/api/worktree-tasks/:id/reject', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  try {
+    // Remove worktree
+    try { await gitExec(['worktree', 'remove', '--force', task.worktreePath], task.repoDir); } catch { /* may already be removed */ }
+    // Delete branch
+    try { await gitExec(['branch', '-D', task.branch], task.repoDir); } catch { /* may not exist */ }
+
+    store.updateWorktreeTask(task.id, { status: 'rejected', completedAt: new Date().toISOString() });
+    broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/worktree-tasks/:id
+ * Delete a worktree task record (cleanup only, does not touch git).
+ */
+app.delete('/api/worktree-tasks/:id', requireAuth, (req, res) => {
+  const store = getStore();
+  const deleted = store.deleteWorktreeTask(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Worktree task not found' });
+  broadcastSSE('worktreeTask:deleted', { id: req.params.id });
+  res.json({ success: true });
+});
+
+/**
+ * POST /api/worktree-tasks/:id/diff
+ * Get the diff between the worktree branch and its base branch.
+ */
+app.post('/api/worktree-tasks/:id/diff', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  try {
+    const diff = await gitExec(['diff', `${task.baseBranch || 'main'}...${task.branch}`, '--stat'], task.repoDir);
+    const fullDiff = await gitExec(['diff', `${task.baseBranch || 'main'}...${task.branch}`], task.repoDir);
+    res.json({ stat: diff.trim(), diff: fullDiff.trim() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
