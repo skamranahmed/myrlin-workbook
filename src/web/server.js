@@ -1919,10 +1919,42 @@ let _usageQuotaCache = { timestamp: 0, result: null };
 const USAGE_QUOTA_CACHE_TTL = 30000; // 30 seconds
 
 /**
- * Scan all JSONL files and count assistant messages per time period.
- * Returns message counts bucketed by hour, day, week, and month,
- * plus total tokens consumed in each period.
- * @returns {object} Usage stats by time period
+ * Classify a model ID into a tier: 'opus', 'sonnet', or 'haiku'.
+ * Matches Anthropic's dashboard grouping for rate limits.
+ * @param {string} model - Model ID (e.g. 'claude-sonnet-4-6', 'claude-opus-4-6')
+ * @returns {'opus'|'sonnet'|'haiku'} Model tier
+ */
+function classifyModelTier(model) {
+  if (!model) return 'sonnet'; // default
+  const m = model.toLowerCase();
+  if (m.includes('opus'))  return 'opus';
+  if (m.includes('haiku')) return 'haiku';
+  return 'sonnet';
+}
+
+/**
+ * Calculate the next Thursday at a given hour (Anthropic-style weekly reset).
+ * If the current time is past that hour on Thursday, returns next week's Thursday.
+ * @param {Date} now - Current date/time
+ * @param {number} hour - Hour of reset (0-23)
+ * @returns {Date} Next Thursday reset time
+ */
+function nextThursdayAt(now, hour) {
+  const d = new Date(now);
+  const day = d.getDay(); // 0=Sun..6=Sat; Thu=4
+  let daysUntilThu = (4 - day + 7) % 7;
+  if (daysUntilThu === 0 && d.getHours() >= hour) daysUntilThu = 7; // past reset, go to next
+  d.setDate(d.getDate() + daysUntilThu);
+  d.setHours(hour, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Scan all JSONL files and count assistant messages per time period and model tier.
+ * Returns message counts bucketed by 5h/daily/weekly/monthly,
+ * plus tier breakdowns (all models, sonnet-only) for session and weekly windows.
+ * Matches Anthropic's dashboard structure.
+ * @returns {object} Usage stats by time period and model tier
  */
 function calculateUsageQuota() {
   const now = Date.now();
@@ -1934,19 +1966,18 @@ function calculateUsageQuota() {
 
   const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
   if (!fs.existsSync(claudeProjectsDir)) {
-    return { periods: {}, totalMessages: 0, totalTokens: 0 };
+    return { periods: {}, tiers: {}, totalMessages: 0, totalTokens: 0 };
   }
 
   // Time boundaries
   const nowDate = new Date();
-  const hourAgo = new Date(nowDate.getTime() - 60 * 60 * 1000);
   const fiveHoursAgo = new Date(nowDate.getTime() - 5 * 60 * 60 * 1000);
   const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
   const weekStart = new Date(todayStart);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Sunday start
   const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
 
-  // Counters
+  // Counters per period
   const buckets = {
     fiveHour: { messages: 0, tokens: 0, cost: 0 },
     daily:    { messages: 0, tokens: 0, cost: 0 },
@@ -1954,7 +1985,13 @@ function calculateUsageQuota() {
     monthly:  { messages: 0, tokens: 0, cost: 0 },
   };
 
-  // Model usage breakdown for the 5-hour window (most relevant for rate limits)
+  // Tier counters for Anthropic-style dashboard
+  const tierCounts = {
+    session:       { all: 0, sonnet: 0, opus: 0, haiku: 0 }, // 5h window
+    weekly:        { all: 0, sonnet: 0, opus: 0, haiku: 0 }, // weekly window
+  };
+
+  // Model usage breakdown for the 5-hour window
   const modelUsage5h = {};
 
   try {
@@ -1996,6 +2033,7 @@ function calculateUsageQuota() {
 
             const totalTok = (msg.usage.input_tokens || 0) + (msg.usage.output_tokens || 0);
             const model = msg.model || 'unknown';
+            const tier = classifyModelTier(model);
             const pricing = TOKEN_PRICING[model] || DEFAULT_PRICING;
             const msgCost =
               ((msg.usage.input_tokens || 0) / 1_000_000) * pricing.input +
@@ -2011,6 +2049,9 @@ function calculateUsageQuota() {
               // Track model usage in 5h window
               if (!modelUsage5h[model]) modelUsage5h[model] = 0;
               modelUsage5h[model]++;
+              // Tier counts for session (5h) window
+              tierCounts.session.all++;
+              tierCounts.session[tier]++;
             }
             if (ts >= todayStart) {
               buckets.daily.messages++;
@@ -2021,6 +2062,9 @@ function calculateUsageQuota() {
               buckets.weekly.messages++;
               buckets.weekly.tokens += totalTok;
               buckets.weekly.cost += msgCost;
+              // Tier counts for weekly window
+              tierCounts.weekly.all++;
+              tierCounts.weekly[tier]++;
             }
             if (ts >= monthStart) {
               buckets.monthly.messages++;
@@ -2038,19 +2082,16 @@ function calculateUsageQuota() {
   }
 
   // Calculate reset times
-  const nextHour = new Date(nowDate);
-  nextHour.setMinutes(0, 0, 0);
-  nextHour.setHours(nextHour.getHours() + 1);
-
-  const fiveHourReset = new Date(fiveHoursAgo.getTime() + 5 * 60 * 60 * 1000);
-
+  const fiveHourReset = new Date(nowDate.getTime() + (5 * 60 * 60 * 1000 - (nowDate.getTime() - fiveHoursAgo.getTime())));
   const tomorrow = new Date(todayStart);
   tomorrow.setDate(tomorrow.getDate() + 1);
-
   const nextWeek = new Date(weekStart);
   nextWeek.setDate(nextWeek.getDate() + 7);
-
   const nextMonth = new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 1);
+
+  // Anthropic-style weekly reset times (Thursday)
+  const weeklyAllReset = nextThursdayAt(nowDate, 17);   // Thu 5:00 PM
+  const weeklySonnetReset = nextThursdayAt(nowDate, 23); // Thu 11:00 PM
 
   // Round costs
   for (const b of Object.values(buckets)) {
@@ -2079,6 +2120,21 @@ function calculateUsageQuota() {
         ...buckets.monthly,
         label: 'This Month',
         resetAt: nextMonth.toISOString(),
+      },
+    },
+    // Anthropic-style tier breakdown
+    tiers: {
+      session: {
+        ...tierCounts.session,
+        resetAt: fiveHourReset.toISOString(),
+      },
+      weeklyAll: {
+        count: tierCounts.weekly.all,
+        resetAt: weeklyAllReset.toISOString(),
+      },
+      weeklySonnet: {
+        count: tierCounts.weekly.sonnet,
+        resetAt: weeklySonnetReset.toISOString(),
       },
     },
     modelUsage5h,

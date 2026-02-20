@@ -796,31 +796,74 @@ textarea.input {
   overflow: hidden;
 }
 
-/* ── Primary usage bar (always visible, Anthropic-style) ── */
+/* ── Primary usage area (Anthropic dashboard-style sections) ── */
 .quota-primary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
-.quota-primary-header {
+/* Section container (Current session / Weekly limits) */
+.quota-section {
+  padding-bottom: 8px;
+}
+
+.quota-section-weekly {
+  padding-top: 6px;
+  border-top: 1px solid var(--surface0);
+}
+
+.quota-section-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  margin-bottom: 6px;
 }
 
-.quota-primary-label {
-  font-size: 11px;
+.quota-section-title {
+  font-size: 10px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--overlay0);
+}
+
+/* Individual quota row (bar + metadata) */
+.quota-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.quota-row:last-child {
+  margin-bottom: 0;
+}
+
+.quota-row-label {
+  font-size: 11px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
-.quota-primary-meta {
+.quota-row-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   font-size: 10px;
   color: var(--overlay0);
   font-variant-numeric: tabular-nums;
 }
 
+.quota-row-reset {
+  color: var(--text-muted);
+}
+
+.quota-row-pct {
+  color: var(--overlay0);
+}
+
+/* Progress bar track + fill (shared by all bars) */
 .quota-primary-track {
   height: 6px;
   background: var(--surface0);
@@ -851,19 +894,6 @@ textarea.input {
 @keyframes quota-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
-}
-
-.quota-primary-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 10px;
-  color: var(--overlay0);
-  font-variant-numeric: tabular-nums;
-}
-
-.quota-primary-cost {
-  color: var(--text-muted);
 }
 
 /* ── Detailed Usage accordion ── */

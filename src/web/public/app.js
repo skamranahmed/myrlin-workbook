@@ -124,6 +124,9 @@ class CWMApp {
         autoOpenTerminal: true,
         quotaWidgetVisible: true,
         quotaApiKeyMode: false,
+        quotaSessionLimit: 0,
+        quotaWeeklyAllLimit: 0,
+        quotaWeeklySonnetLimit: 0,
         quotaDailyLimit: 0,
         quotaWeeklyLimit: 0,
         quotaMonthlyLimit: 0,
@@ -2517,12 +2520,11 @@ class CWMApp {
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
-      { key: 'quotaWidgetVisible', label: 'Usage Quota Widget', description: 'Show message usage tracker in the sidebar', category: 'Usage' },
+      { key: 'quotaWidgetVisible', label: 'Usage Quota Widget', description: 'Show plan usage tracker in the sidebar', category: 'Usage' },
       { key: 'quotaApiKeyMode', label: 'API Key Mode', description: 'Blur the quota widget and show "API Key In Use" overlay', category: 'Usage' },
-      { key: 'quotaFiveHourLimit', label: '5-Hour Message Limit', description: 'Max messages per 5-hour rolling window (0 = no limit)', category: 'Usage', type: 'number' },
-      { key: 'quotaDailyLimit', label: 'Daily Message Limit', description: 'Max messages per day (0 = no limit)', category: 'Usage', type: 'number' },
-      { key: 'quotaWeeklyLimit', label: 'Weekly Message Limit', description: 'Max messages per week (0 = no limit)', category: 'Usage', type: 'number' },
-      { key: 'quotaMonthlyLimit', label: 'Monthly Message Limit', description: 'Max messages per month (0 = no limit)', category: 'Usage', type: 'number' },
+      { key: 'quotaSessionLimit', label: 'Session Limit (5h)', description: 'Max messages per 5-hour session window (0 = no limit shown)', category: 'Usage', type: 'number' },
+      { key: 'quotaWeeklyAllLimit', label: 'Weekly All Models Limit', description: 'Weekly rate limit for all models combined (0 = no limit shown)', category: 'Usage', type: 'number' },
+      { key: 'quotaWeeklySonnetLimit', label: 'Weekly Sonnet Limit', description: 'Weekly rate limit for Sonnet-only usage (0 = no limit shown)', category: 'Usage', type: 'number' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
     ];
   }
@@ -3144,78 +3146,150 @@ class CWMApp {
   }
 
   /**
+   * Format a millisecond duration into a human-readable reset countdown.
+   * Matches Anthropic dashboard format: "Resets in 2 hr 32 min", "Resets Thu 5:00 PM"
+   * @param {string} resetAt - ISO timestamp of reset
+   * @param {boolean} [absolute] - Show absolute day/time instead of countdown
+   * @returns {string} Formatted reset text
+   */
+  _formatResetText(resetAt, absolute) {
+    if (!resetAt) return '';
+    const diffMs = new Date(resetAt).getTime() - Date.now();
+    if (diffMs <= 0) return 'Resetting...';
+
+    if (absolute) {
+      const d = new Date(resetAt);
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const hr = d.getHours();
+      const ampm = hr >= 12 ? 'PM' : 'AM';
+      const h12 = hr % 12 || 12;
+      const min = d.getMinutes().toString().padStart(2, '0');
+      return `Resets ${days[d.getDay()]} ${h12}:${min} ${ampm}`;
+    }
+
+    const hrs = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    if (hrs > 0) return `Resets in ${hrs} hr ${mins} min`;
+    return `Resets in ${mins} min`;
+  }
+
+  /**
+   * Get a CSS tier class based on usage percentage.
+   * @param {number} pct - Usage percentage (0-100)
+   * @param {boolean} hasLimit - Whether a limit is configured
+   * @returns {string} tier class name
+   */
+  _usageTier(pct, hasLimit) {
+    if (!hasLimit) return 'nomax';
+    if (pct >= 90) return 'crit';
+    if (pct >= 70) return 'high';
+    if (pct >= 40) return 'mid';
+    return 'low';
+  }
+
+  /**
    * Render the quota usage widget from API data.
-   * Primary bar: single Anthropic-style usage bar (5-hour window by default).
-   * Detailed bars: per-period breakdown in collapsible accordion.
+   * Matches Anthropic's dashboard: "Current session" + "Weekly limits" sections.
+   * Detailed per-period breakdown in collapsible accordion below.
    * @param {object} data - Response from /api/usage/quota
    */
   renderQuotaWidget(data) {
     if (!this.els.quotaPrimary || !data || !data.periods) return;
 
     const settings = this.state.settings;
-    const limitMap = {
-      fiveHour: settings.quotaFiveHourLimit || 0,
-      daily:    settings.quotaDailyLimit || 0,
-      weekly:   settings.quotaWeeklyLimit || 0,
-      monthly:  settings.quotaMonthlyLimit || 0,
-    };
+    const tiers = data.tiers || {};
 
-    // ── Primary bar: use 5-hour window (most relevant for rate limits) ──
-    const primary = data.periods.fiveHour;
-    if (primary) {
-      const limit = limitMap.fiveHour;
-      const msgs = primary.messages;
-      const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
-      const tier = limit <= 0 ? 'nomax' : pct >= 90 ? 'crit' : pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
-      const widthPct = limit > 0 ? pct : Math.min(msgs, 100);
+    // ── Anthropic-style: Current session + Weekly limits ──
+    let primaryHtml = '';
 
-      // Label text
-      const labelText = limit > 0
-        ? `${msgs} / ${limit} messages`
-        : `${msgs} messages`;
+    // ─ Current session (5h rolling window) ─
+    const sessionData = tiers.session || {};
+    const sessionCount = sessionData.all || 0;
+    const sessionLimit = settings.quotaSessionLimit || 0;
+    const sessionPct = sessionLimit > 0 ? Math.min((sessionCount / sessionLimit) * 100, 100) : 0;
+    const sessionTier = this._usageTier(sessionPct, sessionLimit > 0);
+    const sessionWidthPct = sessionLimit > 0 ? sessionPct : Math.min(sessionCount, 100);
+    const sessionResetText = this._formatResetText(sessionData.resetAt);
 
-      // Reset countdown
-      let resetText = '';
-      if (primary.resetAt) {
-        const diffMs = new Date(primary.resetAt).getTime() - Date.now();
-        if (diffMs > 0) {
-          const hrs = Math.floor(diffMs / 3600000);
-          const mins = Math.floor((diffMs % 3600000) / 60000);
-          resetText = hrs > 0 ? `Resets in ${hrs}h ${mins}m` : `Resets in ${mins}m`;
-        }
-      }
-
-      // Cost text (today's cost for context)
-      const dailyCost = data.periods.daily ? data.periods.daily.cost : 0;
-      const costText = dailyCost > 0 ? `$${dailyCost.toFixed(2)} today` : '';
-
-      this.els.quotaPrimary.innerHTML = `
-        <div class="quota-primary-header">
-          <span class="quota-primary-label">${labelText}</span>
-          <span class="quota-primary-meta">${resetText}</span>
+    primaryHtml += `
+      <div class="quota-section">
+        <div class="quota-section-header">
+          <span class="quota-section-title">Current session</span>
         </div>
-        <div class="quota-primary-track">
-          <div class="quota-primary-fill tier-${tier}" style="width:${widthPct}%"></div>
+        <div class="quota-row">
+          <div class="quota-row-meta">
+            <span class="quota-row-reset">${sessionResetText}</span>
+            <span class="quota-row-pct">${sessionLimit > 0 ? Math.round(sessionPct) + '% used' : sessionCount + ' msgs'}</span>
+          </div>
+          <div class="quota-primary-track">
+            <div class="quota-primary-fill tier-${sessionTier}" style="width:${sessionWidthPct}%"></div>
+          </div>
         </div>
-        <div class="quota-primary-footer">
-          <span class="quota-primary-cost">${costText}</span>
-          <span>${limit > 0 ? Math.round(pct) + '% used' : '5h window'}</span>
-        </div>`;
-    }
+      </div>`;
 
-    // ── Detail bars: all 4 periods in the accordion ──
+    // ─ Weekly limits ─
+    const weeklyAll = tiers.weeklyAll || {};
+    const weeklySonnet = tiers.weeklySonnet || {};
+    const weeklyAllCount = weeklyAll.count || 0;
+    const weeklySonnetCount = weeklySonnet.count || 0;
+    const weeklyAllLimit = settings.quotaWeeklyAllLimit || 0;
+    const weeklySonnetLimit = settings.quotaWeeklySonnetLimit || 0;
+
+    const weeklyAllPct = weeklyAllLimit > 0 ? Math.min((weeklyAllCount / weeklyAllLimit) * 100, 100) : 0;
+    const weeklySonnetPct = weeklySonnetLimit > 0 ? Math.min((weeklySonnetCount / weeklySonnetLimit) * 100, 100) : 0;
+    const weeklyAllTier = this._usageTier(weeklyAllPct, weeklyAllLimit > 0);
+    const weeklySonnetTier = this._usageTier(weeklySonnetPct, weeklySonnetLimit > 0);
+    const weeklyAllWidthPct = weeklyAllLimit > 0 ? weeklyAllPct : Math.min(weeklyAllCount, 100);
+    const weeklySonnetWidthPct = weeklySonnetLimit > 0 ? weeklySonnetPct : Math.min(weeklySonnetCount, 100);
+
+    primaryHtml += `
+      <div class="quota-section quota-section-weekly">
+        <div class="quota-section-header">
+          <span class="quota-section-title">Weekly limits</span>
+        </div>
+        <div class="quota-row">
+          <div class="quota-row-label">All models</div>
+          <div class="quota-row-meta">
+            <span class="quota-row-reset">${this._formatResetText(weeklyAll.resetAt, true)}</span>
+            <span class="quota-row-pct">${weeklyAllLimit > 0 ? Math.round(weeklyAllPct) + '% used' : weeklyAllCount + ' msgs'}</span>
+          </div>
+          <div class="quota-primary-track">
+            <div class="quota-primary-fill tier-${weeklyAllTier}" style="width:${weeklyAllWidthPct}%"></div>
+          </div>
+        </div>
+        <div class="quota-row">
+          <div class="quota-row-label">Sonnet only</div>
+          <div class="quota-row-meta">
+            <span class="quota-row-reset">${this._formatResetText(weeklySonnet.resetAt, true)}</span>
+            <span class="quota-row-pct">${weeklySonnetLimit > 0 ? Math.round(weeklySonnetPct) + '% used' : weeklySonnetCount + ' msgs'}</span>
+          </div>
+          <div class="quota-primary-track">
+            <div class="quota-primary-fill tier-${weeklySonnetTier}" style="width:${weeklySonnetWidthPct}%"></div>
+          </div>
+        </div>
+      </div>`;
+
+    this.els.quotaPrimary.innerHTML = primaryHtml;
+
+    // ── Detail bars: all 4 periods + cost in the accordion ──
     if (this.els.quotaBars) {
       const periodKeys = ['fiveHour', 'daily', 'weekly', 'monthly'];
+      const periodLimits = {
+        fiveHour: settings.quotaFiveHourLimit || 0,
+        daily:    settings.quotaDailyLimit || 0,
+        weekly:   settings.quotaWeeklyLimit || 0,
+        monthly:  settings.quotaMonthlyLimit || 0,
+      };
       let detailHtml = '';
 
       for (const key of periodKeys) {
         const p = data.periods[key];
         if (!p) continue;
 
-        const limit = limitMap[key];
+        const limit = periodLimits[key];
         const msgs = p.messages;
         const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
-        const tier = limit <= 0 ? 'nomax' : pct >= 90 ? 'crit' : pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
+        const tier = this._usageTier(pct, limit > 0);
         const widthPct = limit > 0 ? pct : Math.min(msgs * 2, 100);
 
         const valueText = limit > 0
