@@ -971,7 +971,469 @@ class CWMApp {
         }
       });
     });
+
+    // Set up event delegation on persistent containers (replaces per-render addEventListener)
+    this._setupEventDelegation();
   }
+
+  /* ═══════════════════════════════════════════════════════════
+     EVENT DELEGATION
+     One-time setup on persistent container elements.
+     Replaces per-render addEventListener in render methods.
+     ═══════════════════════════════════════════════════════════ */
+
+  _setupEventDelegation() {
+
+    // ── WORKSPACE SIDEBAR LIST ───────────────────────────────
+    const wsList = this.els.workspaceList;
+    let wsLPTimer = null;
+
+    // Click delegation
+    wsList.addEventListener('click', (e) => {
+      if (e.target.closest('#sidebar-create-ws')) { this.createWorkspace(); return; }
+
+      const renameBtn = e.target.closest('.ws-rename-btn');
+      if (renameBtn) { e.stopPropagation(); this.renameWorkspace(renameBtn.dataset.id); return; }
+
+      const deleteBtn = e.target.closest('.ws-delete-btn');
+      if (deleteBtn) { e.stopPropagation(); this.deleteWorkspace(deleteBtn.dataset.id); return; }
+
+      const wsSessionItem = e.target.closest('.ws-session-item');
+      if (wsSessionItem) {
+        e.stopPropagation();
+        const sessionId = wsSessionItem.dataset.sessionId;
+        const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+        if (!session) return;
+        if (this.state.viewMode === 'terminal') {
+          const emptySlot = this.terminalPanes.findIndex(p => p === null);
+          if (emptySlot !== -1) {
+            if (!session.resumeSessionId) this.showToast('Starting new Claude session (no previous conversation to resume)', 'info');
+            const spawnOpts = {};
+            if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
+            if (session.workingDir) spawnOpts.cwd = session.workingDir;
+            if (session.command) spawnOpts.command = session.command;
+            if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
+            if (session.verbose) spawnOpts.verbose = true;
+            if (session.model) spawnOpts.model = session.model;
+            if (session.agentTeams) spawnOpts.agentTeams = true;
+            this.openTerminalInPane(emptySlot, sessionId, session.name, spawnOpts);
+          } else {
+            this.showToast('All terminal panes are full. Close one first.', 'warning');
+          }
+        } else {
+          this.selectSession(sessionId);
+        }
+        return;
+      }
+
+      const projectGroupHeader = e.target.closest('.ws-project-group-header');
+      if (projectGroupHeader) {
+        e.stopPropagation();
+        const group = projectGroupHeader.closest('.ws-project-group');
+        const body = group.querySelector('.ws-project-group-body');
+        const chevron = projectGroupHeader.querySelector('.ws-project-group-chevron');
+        const key = group.dataset.groupKey;
+        const isCollapsed = body.classList.toggle('collapsed');
+        chevron.classList.toggle('collapsed', isCollapsed);
+        const st = JSON.parse(localStorage.getItem('cwm_projectGroupState') || '{}');
+        st[key] = !isCollapsed;
+        localStorage.setItem('cwm_projectGroupState', JSON.stringify(st));
+        return;
+      }
+
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) {
+        const group = groupHeader.closest('.workspace-group');
+        if (!group) return;
+        const items = group.querySelector('.workspace-group-items');
+        const chevron = groupHeader.querySelector('.group-chevron');
+        if (items) items.hidden = !items.hidden;
+        if (chevron) chevron.classList.toggle('open', items && !items.hidden);
+        if (!this._groupCollapseState) this._groupCollapseState = {};
+        const gid = groupHeader.dataset.groupId;
+        this._groupCollapseState[gid] = items ? items.hidden : false;
+        try { localStorage.setItem('cwm_groupCollapseState', JSON.stringify(this._groupCollapseState)); } catch (_) {}
+        return;
+      }
+
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        const wsId = workspaceItem.dataset.id;
+        const isAlreadyActive = this.state.activeWorkspace && this.state.activeWorkspace.id === wsId;
+        if (isAlreadyActive) {
+          const accordion = workspaceItem.closest('.workspace-accordion');
+          if (accordion) {
+            const body = accordion.querySelector('.workspace-accordion-body');
+            const chevron = workspaceItem.querySelector('.ws-chevron');
+            if (body) body.hidden = !body.hidden;
+            if (chevron) chevron.classList.toggle('open', body && !body.hidden);
+          }
+        } else {
+          wsList.querySelectorAll('.workspace-accordion-body').forEach(b => b.hidden = true);
+          wsList.querySelectorAll('.ws-chevron').forEach(c => c.classList.remove('open'));
+          this.selectWorkspace(wsId);
+        }
+        return;
+      }
+    });
+
+    // Context menu delegation
+    wsList.addEventListener('contextmenu', (e) => {
+      const wsSessionItem = e.target.closest('.ws-session-item');
+      if (wsSessionItem) {
+        e.preventDefault(); e.stopPropagation();
+        this.showContextMenu(wsSessionItem.dataset.sessionId, e.clientX, e.clientY);
+        return;
+      }
+      const projectGroupHeader = e.target.closest('.ws-project-group-header');
+      if (projectGroupHeader) {
+        e.preventDefault(); e.stopPropagation();
+        const dir = projectGroupHeader.dataset.dir;
+        const wsId = projectGroupHeader.dataset.wsId;
+        if (!dir || !wsId) return;
+        const parts = dir.replace(/\\/g, '/').split('/');
+        const shortDir = parts.slice(-2).join('/');
+        this._renderContextItems(shortDir, [
+          { label: 'New Session Here', icon: '&#9654;', action: () => this.createSessionInDir(wsId, dir) },
+          { label: 'New Session (Bypass)', icon: '&#9888;', action: () => this.createSessionInDir(wsId, dir, { bypassPermissions: true }) },
+        ], e.clientX, e.clientY);
+        return;
+      }
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) {
+        e.preventDefault(); e.stopPropagation();
+        this.showGroupContextMenu(groupHeader.dataset.groupId, e.clientX, e.clientY);
+        return;
+      }
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        e.preventDefault(); e.stopPropagation();
+        this.showWorkspaceContextMenu(workspaceItem.dataset.id, e.clientX, e.clientY);
+        return;
+      }
+    });
+
+    // Touch long-press delegation
+    wsList.addEventListener('touchstart', (e) => {
+      clearTimeout(wsLPTimer);
+      const wsSessionItem = e.target.closest('.ws-session-item');
+      if (wsSessionItem) {
+        wsLPTimer = setTimeout(() => {
+          const touch = e.touches[0];
+          if (touch) this.showContextMenu(wsSessionItem.dataset.sessionId, touch.clientX, touch.clientY);
+        }, 500);
+        return;
+      }
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        wsLPTimer = setTimeout(() => {
+          const touch = e.touches[0];
+          if (touch) this.showWorkspaceContextMenu(workspaceItem.dataset.id, touch.clientX, touch.clientY);
+        }, 500);
+        return;
+      }
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) {
+        wsLPTimer = setTimeout(() => {
+          const touch = e.touches[0];
+          if (touch) this.showGroupContextMenu(groupHeader.dataset.groupId, touch.clientX, touch.clientY);
+        }, 500);
+        return;
+      }
+    }, { passive: false });
+    wsList.addEventListener('touchend', () => clearTimeout(wsLPTimer));
+    wsList.addEventListener('touchmove', () => clearTimeout(wsLPTimer));
+
+    // Double-click for inline rename
+    wsList.addEventListener('dblclick', (e) => {
+      const nameEl = e.target.closest('.ws-session-name');
+      if (nameEl) {
+        e.stopPropagation();
+        const sessionItem = nameEl.closest('.ws-session-item');
+        if (sessionItem) this.startInlineRename(nameEl, sessionItem.dataset.sessionId, true);
+      }
+    });
+
+    // Drag start/end delegation
+    wsList.addEventListener('dragstart', (e) => {
+      const wsSessionItem = e.target.closest('.ws-session-item');
+      if (wsSessionItem) {
+        e.stopPropagation();
+        console.log('[DnD] Drag started: ws-session-item', wsSessionItem.dataset.sessionId);
+        e.dataTransfer.setData('cwm/session', wsSessionItem.dataset.sessionId);
+        e.dataTransfer.effectAllowed = 'move';
+        wsSessionItem.classList.add('dragging');
+        return;
+      }
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        e.dataTransfer.setData('cwm/workspace', workspaceItem.dataset.id);
+        e.dataTransfer.effectAllowed = 'move';
+        workspaceItem.classList.add('dragging');
+        return;
+      }
+    });
+
+    wsList.addEventListener('dragend', (e) => {
+      const el = e.target.closest('.ws-session-item, .workspace-item');
+      if (el) el.classList.remove('dragging');
+    });
+
+    // Drag over/leave/drop delegation (handles session move, workspace reorder,
+    // project drop, project-session drop, group drop, and ungroup)
+    wsList.addEventListener('dragover', (e) => {
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        if (e.dataTransfer.types.includes('cwm/session')) {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          workspaceItem.classList.add('workspace-drop-target');
+        } else if (e.dataTransfer.types.includes('cwm/workspace')) {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          const rect = workspaceItem.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          workspaceItem.classList.remove('ws-drop-before', 'ws-drop-after');
+          workspaceItem.classList.add(e.clientY < midY ? 'ws-drop-before' : 'ws-drop-after');
+        } else if (e.dataTransfer.types.includes('cwm/project') || e.dataTransfer.types.includes('cwm/project-session')) {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+          workspaceItem.classList.add('drag-over');
+        }
+        return;
+      }
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) {
+        if (e.dataTransfer.types.includes('cwm/workspace')) {
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          groupHeader.classList.add('group-drop-target');
+        }
+        return;
+      }
+      // List background drop (for ungrouping workspace)
+      if (!e.dataTransfer.types.includes('cwm/workspace')) return;
+      if (e.target.closest('.workspace-item') || e.target.closest('.workspace-group-header')) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      wsList.classList.add('workspace-list-drop-target');
+    });
+
+    wsList.addEventListener('dragleave', (e) => {
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) workspaceItem.classList.remove('workspace-drop-target', 'ws-drop-before', 'ws-drop-after', 'drag-over');
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) groupHeader.classList.remove('group-drop-target');
+      if (!wsList.contains(e.relatedTarget)) wsList.classList.remove('workspace-list-drop-target');
+    });
+
+    wsList.addEventListener('drop', async (e) => {
+      const workspaceItem = e.target.closest('.workspace-item');
+      if (workspaceItem) {
+        const dropBefore = workspaceItem.classList.contains('ws-drop-before');
+        workspaceItem.classList.remove('workspace-drop-target', 'ws-drop-before', 'ws-drop-after', 'drag-over');
+        const targetWsId = workspaceItem.dataset.id;
+
+        // Session move to workspace
+        const sessionId = e.dataTransfer.getData('cwm/session');
+        if (sessionId) {
+          e.preventDefault(); e.stopPropagation();
+          const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+          if (session && session.workspaceId !== targetWsId) this.moveSessionToWorkspace(sessionId, targetWsId);
+          return;
+        }
+        // Project-session drop (create session from individual .jsonl)
+        const projSessJson = e.dataTransfer.getData('cwm/project-session');
+        if (projSessJson) {
+          e.preventDefault(); e.stopPropagation();
+          try {
+            const ps = JSON.parse(projSessJson);
+            const claudeSessionId = ps.sessionName;
+            const projectName = ps.projectPath ? (ps.projectPath.split('\\').pop() || ps.projectPath.split('/').pop() || claudeSessionId) : claudeSessionId;
+            const shortId = claudeSessionId.length > 8 ? claudeSessionId.substring(0, 8) : claudeSessionId;
+            const friendlyName = projectName + ' (' + shortId + ')';
+            await this.api('POST', '/api/sessions', {
+              name: friendlyName, workspaceId: targetWsId, workingDir: ps.projectPath,
+              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId,
+            });
+            this.showToast(`Session "${friendlyName}" added`, 'success');
+            await this.loadSessions();
+            await this.loadStats();
+            this.renderWorkspaces();
+          } catch (err) {
+            this.showToast(err.message || 'Failed to create session', 'error');
+          }
+          return;
+        }
+        // Project drop (create session from entire project)
+        const projectJson = e.dataTransfer.getData('cwm/project');
+        if (projectJson) {
+          e.preventDefault(); e.stopPropagation();
+          try {
+            const project = JSON.parse(projectJson);
+            await this.api('POST', '/api/sessions', {
+              name: project.name, workspaceId: targetWsId, workingDir: project.path,
+              topic: '', command: 'claude',
+            });
+            this.showToast(`Session "${project.name}" created`, 'success');
+            await this.loadSessions();
+            await this.loadStats();
+          } catch (err) {
+            this.showToast(err.message || 'Failed to create session from project', 'error');
+          }
+          return;
+        }
+        // Workspace reorder
+        const draggedWsId = e.dataTransfer.getData('cwm/workspace');
+        if (draggedWsId && draggedWsId !== targetWsId) {
+          e.preventDefault(); e.stopPropagation();
+          this.reorderWorkspace(draggedWsId, targetWsId, dropBefore ? 'before' : 'after');
+        }
+        return;
+      }
+
+      const groupHeader = e.target.closest('.workspace-group-header');
+      if (groupHeader) {
+        groupHeader.classList.remove('group-drop-target');
+        const workspaceId = e.dataTransfer.getData('cwm/workspace');
+        if (workspaceId) { e.preventDefault(); this.moveWorkspaceToGroup(workspaceId, groupHeader.dataset.groupId); }
+        return;
+      }
+
+      // List background drop (ungroup workspace)
+      wsList.classList.remove('workspace-list-drop-target');
+      const workspaceId = e.dataTransfer.getData('cwm/workspace');
+      if (!workspaceId) return;
+      const groups = this.state.groups || [];
+      const inGroup = groups.find(g => (g.workspaceIds || []).includes(workspaceId));
+      if (inGroup) { e.preventDefault(); e.stopPropagation(); this.removeWorkspaceFromGroup(workspaceId); }
+    });
+
+    // ── SESSION LIST (main panel) ────────────────────────────
+    const sessList = this.els.sessionList;
+    let sessLPTimer = null;
+
+    sessList.addEventListener('click', (e) => {
+      const item = e.target.closest('.session-item');
+      if (item) this.selectSession(item.dataset.id);
+    });
+
+    sessList.addEventListener('contextmenu', (e) => {
+      const item = e.target.closest('.session-item');
+      if (item) { e.preventDefault(); e.stopPropagation(); this.showContextMenu(item.dataset.id, e.clientX, e.clientY); }
+    });
+
+    sessList.addEventListener('touchstart', (e) => {
+      clearTimeout(sessLPTimer);
+      const item = e.target.closest('.session-item');
+      if (item) {
+        sessLPTimer = setTimeout(() => {
+          const touch = e.touches[0];
+          if (touch) this.showContextMenu(item.dataset.id, touch.clientX, touch.clientY);
+        }, 500);
+      }
+    }, { passive: false });
+    sessList.addEventListener('touchend', () => clearTimeout(sessLPTimer));
+    sessList.addEventListener('touchmove', () => clearTimeout(sessLPTimer));
+
+    // Session list drag (moved from initDragAndDrop)
+    sessList.addEventListener('dragstart', (e) => {
+      const item = e.target.closest('.session-item');
+      if (!item) return;
+      console.log('[DnD] Drag started: session-item', item.dataset.id);
+      e.dataTransfer.setData('cwm/session', item.dataset.id);
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    });
+    sessList.addEventListener('dragend', (e) => {
+      const item = e.target.closest('.session-item');
+      if (item) item.classList.remove('dragging');
+    });
+
+    // ── PROJECTS LIST ────────────────────────────────────────
+    const projList = this.els.projectsList;
+    if (projList) {
+      let projLPTimer = null;
+
+      projList.addEventListener('click', (e) => {
+        const header = e.target.closest('.project-accordion-header');
+        if (header) {
+          if (e.target.closest('.project-session-item')) return;
+          const accordion = header.closest('.project-accordion');
+          const body = accordion.querySelector('.project-accordion-body');
+          const chevron = header.querySelector('.project-accordion-chevron');
+          body.hidden = !body.hidden;
+          chevron.classList.toggle('open', !body.hidden);
+        }
+      });
+
+      projList.addEventListener('contextmenu', (e) => {
+        const sessionItem = e.target.closest('.project-session-item');
+        if (sessionItem) {
+          e.preventDefault(); e.stopPropagation();
+          this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, e.clientX, e.clientY);
+          return;
+        }
+        const header = e.target.closest('.project-accordion-header');
+        if (header) {
+          e.preventDefault(); e.stopPropagation();
+          const accordion = header.closest('.project-accordion');
+          this.showProjectContextMenu(accordion.dataset.encoded, header.querySelector('.project-name').textContent, accordion.dataset.path, e.clientX, e.clientY);
+        }
+      });
+
+      projList.addEventListener('dragstart', (e) => {
+        const sessionItem = e.target.closest('.project-session-item');
+        if (sessionItem) {
+          e.stopPropagation();
+          e.dataTransfer.setData('cwm/project-session', JSON.stringify({
+            sessionName: sessionItem.dataset.sessionName,
+            projectPath: sessionItem.dataset.projectPath,
+            projectEncoded: sessionItem.dataset.projectEncoded,
+          }));
+          e.dataTransfer.effectAllowed = 'copy';
+          sessionItem.classList.add('dragging');
+          return;
+        }
+        const header = e.target.closest('.project-accordion-header');
+        if (header) {
+          const accordion = header.closest('.project-accordion');
+          e.dataTransfer.setData('cwm/project', JSON.stringify({
+            encoded: accordion.dataset.encoded,
+            path: accordion.dataset.path,
+            name: header.querySelector('.project-name').textContent,
+          }));
+          e.dataTransfer.effectAllowed = 'copy';
+          header.classList.add('dragging');
+        }
+      });
+      projList.addEventListener('dragend', (e) => {
+        const el = e.target.closest('.project-session-item, .project-accordion-header');
+        if (el) el.classList.remove('dragging');
+      });
+
+      projList.addEventListener('touchstart', (e) => {
+        clearTimeout(projLPTimer);
+        const sessionItem = e.target.closest('.project-session-item');
+        if (sessionItem) {
+          projLPTimer = setTimeout(() => {
+            const touch = e.touches[0];
+            if (touch) this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, touch.clientX, touch.clientY);
+          }, 500);
+          return;
+        }
+        const header = e.target.closest('.project-accordion-header');
+        if (header) {
+          projLPTimer = setTimeout(() => {
+            const touch = e.touches[0];
+            if (touch) {
+              const accordion = header.closest('.project-accordion');
+              this.showProjectContextMenu(accordion.dataset.encoded, header.querySelector('.project-name').textContent, accordion.dataset.path, touch.clientX, touch.clientY);
+            }
+          }, 500);
+        }
+      }, { passive: false });
+      projList.addEventListener('touchend', () => clearTimeout(projLPTimer));
+      projList.addEventListener('touchmove', () => clearTimeout(projLPTimer));
+    }
+  }
+
+
 
   async init() {
     // Restore sidebar width & collapse state from localStorage
@@ -4864,328 +5326,6 @@ class CWMApp {
       this._fetchSessionCostsAsync(visibleSessionIds);
     }
 
-    // Bind workspace item events
-    list.querySelectorAll('.workspace-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.ws-rename-btn') || e.target.closest('.ws-delete-btn')) return;
-        const wsId = el.dataset.id;
-        const isAlreadyActive = this.state.activeWorkspace && this.state.activeWorkspace.id === wsId;
-
-        if (isAlreadyActive) {
-          // Already the active workspace - just toggle its accordion open/closed
-          const accordion = el.closest('.workspace-accordion');
-          if (accordion) {
-            const body = accordion.querySelector('.workspace-accordion-body');
-            const chevron = el.querySelector('.ws-chevron');
-            if (body) body.hidden = !body.hidden;
-            if (chevron) chevron.classList.toggle('open', body && !body.hidden);
-          }
-        } else {
-          // Different workspace - select it (renderWorkspaces will open its accordion)
-          // Close all accordion bodies first for visual feedback
-          list.querySelectorAll('.workspace-accordion-body').forEach(b => b.hidden = true);
-          list.querySelectorAll('.ws-chevron').forEach(c => c.classList.remove('open'));
-          this.selectWorkspace(wsId);
-        }
-      });
-
-      // Context menu on workspace items
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.showWorkspaceContextMenu(el.dataset.id, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile (500ms hold)
-      let wsLongPress = null;
-      el.addEventListener('touchstart', (e) => {
-        wsLongPress = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          this.showWorkspaceContextMenu(el.dataset.id, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      el.addEventListener('touchend', () => clearTimeout(wsLongPress));
-      el.addEventListener('touchmove', () => clearTimeout(wsLongPress));
-
-      // Drag events for workspace reorder
-      el.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('cwm/workspace', el.dataset.id);
-        e.dataTransfer.effectAllowed = 'move';
-        el.classList.add('dragging');
-      });
-      el.addEventListener('dragend', () => {
-        el.classList.remove('dragging');
-      });
-
-      // Accept session drops (move session to workspace) and workspace drops (reorder)
-      el.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('cwm/session')) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          el.classList.add('workspace-drop-target');
-        } else if (e.dataTransfer.types.includes('cwm/workspace')) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          // Show drop indicator above or below based on mouse position
-          const rect = el.getBoundingClientRect();
-          const midY = rect.top + rect.height / 2;
-          el.classList.remove('ws-drop-before', 'ws-drop-after');
-          if (e.clientY < midY) {
-            el.classList.add('ws-drop-before');
-          } else {
-            el.classList.add('ws-drop-after');
-          }
-        }
-      });
-      el.addEventListener('dragleave', () => {
-        el.classList.remove('workspace-drop-target', 'ws-drop-before', 'ws-drop-after');
-      });
-      el.addEventListener('drop', (e) => {
-        const dropBefore = el.classList.contains('ws-drop-before');
-        el.classList.remove('workspace-drop-target', 'ws-drop-before', 'ws-drop-after');
-
-        // Handle session drop - move session to this workspace
-        const sessionId = e.dataTransfer.getData('cwm/session');
-        if (sessionId) {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetWsId = el.dataset.id;
-          const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
-          if (session && session.workspaceId !== targetWsId) {
-            this.moveSessionToWorkspace(sessionId, targetWsId);
-          }
-          return;
-        }
-
-        // Handle workspace drop - reorder
-        const draggedWsId = e.dataTransfer.getData('cwm/workspace');
-        if (draggedWsId && draggedWsId !== el.dataset.id) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.reorderWorkspace(draggedWsId, el.dataset.id, dropBefore ? 'before' : 'after');
-        }
-      });
-    });
-
-    // Bind project group accordion toggle
-    list.querySelectorAll('.ws-project-group-header').forEach(hdr => {
-      hdr.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const group = hdr.closest('.ws-project-group');
-        const body = group.querySelector('.ws-project-group-body');
-        const chevron = hdr.querySelector('.ws-project-group-chevron');
-        const key = group.dataset.groupKey;
-        const isCollapsed = body.classList.toggle('collapsed');
-        chevron.classList.toggle('collapsed', isCollapsed);
-        // Persist state
-        const state = JSON.parse(localStorage.getItem('cwm_projectGroupState') || '{}');
-        state[key] = !isCollapsed;
-        localStorage.setItem('cwm_projectGroupState', JSON.stringify(state));
-      });
-
-      // Right-click on project directory → context menu with "New Session"
-      hdr.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const dir = hdr.dataset.dir;
-        const wsId = hdr.dataset.wsId;
-        if (!dir || !wsId) return;
-        const parts = dir.replace(/\\/g, '/').split('/');
-        const shortDir = parts.slice(-2).join('/');
-        this._renderContextItems(shortDir, [
-          { label: 'New Session Here', icon: '&#9654;', action: () => this.createSessionInDir(wsId, dir) },
-          { label: 'New Session (Bypass)', icon: '&#9888;', action: () => this.createSessionInDir(wsId, dir, { bypassPermissions: true }) },
-        ], e.clientX, e.clientY);
-      });
-    });
-
-    // Bind group header events (toggle collapse, context menu)
-    list.querySelectorAll('.workspace-group-header').forEach(header => {
-      // Click to collapse/expand
-      header.addEventListener('click', () => {
-        const group = header.closest('.workspace-group');
-        if (!group) return;
-        const items = group.querySelector('.workspace-group-items');
-        const chevron = header.querySelector('.group-chevron');
-        if (items) items.hidden = !items.hidden;
-        if (chevron) chevron.classList.toggle('open', items && !items.hidden);
-        // Persist collapse state
-        if (!this._groupCollapseState) this._groupCollapseState = {};
-        const gid = header.dataset.groupId;
-        this._groupCollapseState[gid] = items ? items.hidden : false;
-        try { localStorage.setItem('cwm_groupCollapseState', JSON.stringify(this._groupCollapseState)); } catch (_) {}
-      });
-
-      // Right-click context menu
-      header.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.showGroupContextMenu(header.dataset.groupId, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile
-      let groupLongPress = null;
-      header.addEventListener('touchstart', (e) => {
-        groupLongPress = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          this.showGroupContextMenu(header.dataset.groupId, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      header.addEventListener('touchend', () => clearTimeout(groupLongPress));
-      header.addEventListener('touchmove', () => clearTimeout(groupLongPress));
-
-      // Drop workspaces onto group header to move them into the group
-      header.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('cwm/workspace')) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          header.classList.add('group-drop-target');
-        }
-      });
-      header.addEventListener('dragleave', () => {
-        header.classList.remove('group-drop-target');
-      });
-      header.addEventListener('drop', (e) => {
-        header.classList.remove('group-drop-target');
-        const workspaceId = e.dataTransfer.getData('cwm/workspace');
-        if (workspaceId) {
-          e.preventDefault();
-          this.moveWorkspaceToGroup(workspaceId, header.dataset.groupId);
-        }
-      });
-    });
-
-    // Bind workspace session item events (drag to terminal, click to select)
-    list.querySelectorAll('.ws-session-item').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const sessionId = el.dataset.sessionId;
-        const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
-        if (!session) return;
-
-        if (this.state.viewMode === 'terminal') {
-          // In terminal view, clicking a session opens it in the next empty terminal pane
-          const emptySlot = this.terminalPanes.findIndex(p => p === null);
-          if (emptySlot !== -1) {
-            if (!session.resumeSessionId) {
-              this.showToast('Starting new Claude session (no previous conversation to resume)', 'info');
-            }
-            // Pass session flags as spawnOpts so bypass/model/verbose carry through
-            const spawnOpts = {};
-            if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
-            if (session.workingDir) spawnOpts.cwd = session.workingDir;
-            if (session.command) spawnOpts.command = session.command;
-            if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
-            if (session.verbose) spawnOpts.verbose = true;
-            if (session.model) spawnOpts.model = session.model;
-            if (session.agentTeams) spawnOpts.agentTeams = true;
-            this.openTerminalInPane(emptySlot, sessionId, session.name, spawnOpts);
-          } else {
-            this.showToast('All terminal panes are full. Close one first.', 'warning');
-          }
-        } else {
-          // Use selectSession for proper detail panel display, session list update, and mobile slide
-          this.selectSession(sessionId);
-        }
-      });
-      // Right-click context menu on sidebar session items
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.showContextMenu(el.dataset.sessionId, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile (500ms hold)
-      let wsSessLongPress = null;
-      el.addEventListener('touchstart', (e) => {
-        wsSessLongPress = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          this.showContextMenu(el.dataset.sessionId, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      el.addEventListener('touchend', () => clearTimeout(wsSessLongPress));
-      el.addEventListener('touchmove', () => clearTimeout(wsSessLongPress));
-
-      // Double-click session name for inline rename
-      const nameEl = el.querySelector('.ws-session-name');
-      if (nameEl) {
-        nameEl.addEventListener('dblclick', (e) => {
-          e.stopPropagation();
-          this.startInlineRename(nameEl, el.dataset.sessionId, true);
-        });
-      }
-
-      el.addEventListener('dragstart', (e) => {
-        e.stopPropagation();
-        console.log('[DnD] Drag started: ws-session-item', el.dataset.sessionId);
-        e.dataTransfer.setData('cwm/session', el.dataset.sessionId);
-        e.dataTransfer.effectAllowed = 'move';
-        el.classList.add('dragging');
-      });
-      el.addEventListener('dragend', () => el.classList.remove('dragging'));
-    });
-
-    list.querySelectorAll('.ws-rename-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.renameWorkspace(btn.dataset.id);
-      });
-    });
-
-    list.querySelectorAll('.ws-delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.deleteWorkspace(btn.dataset.id);
-      });
-    });
-
-    // Bind group collapse toggle
-    list.querySelectorAll('.workspace-group-header').forEach(header => {
-      header.addEventListener('click', () => {
-        const group = header.closest('.workspace-group');
-        const items = group.querySelector('.workspace-group-items');
-        const chevron = header.querySelector('.group-chevron');
-        if (items) items.classList.toggle('collapsed');
-        if (chevron) chevron.classList.toggle('collapsed');
-      });
-    });
-
-    // Drop workspace onto the list background to ungroup it
-    list.addEventListener('dragover', (e) => {
-      // Only accept if dragging a workspace and hovering over the list itself (not a child element)
-      if (!e.dataTransfer.types.includes('cwm/workspace')) return;
-      // Allow drop on the list area, the workspace-group-items, or workspace-group containers
-      // The key is: if the closest drop target is the list or a group container (not a header),
-      // treat it as an "ungroup" drop
-      const overWorkspaceItem = e.target.closest('.workspace-item');
-      const overGroupHeader = e.target.closest('.workspace-group-header');
-      if (overWorkspaceItem || overGroupHeader) return; // let those handle it
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      list.classList.add('workspace-list-drop-target');
-    });
-    list.addEventListener('dragleave', (e) => {
-      // Only remove highlight if leaving the list entirely
-      if (!list.contains(e.relatedTarget)) {
-        list.classList.remove('workspace-list-drop-target');
-      }
-    });
-    list.addEventListener('drop', (e) => {
-      list.classList.remove('workspace-list-drop-target');
-      const workspaceId = e.dataTransfer.getData('cwm/workspace');
-      if (!workspaceId) return;
-      // Check if this workspace is in a group — if so, remove it from the group
-      const groups = this.state.groups || [];
-      const inGroup = groups.find(g => (g.workspaceIds || []).includes(workspaceId));
-      if (inGroup) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.removeWorkspaceFromGroup(workspaceId);
-      }
-    });
 
     this.els.workspaceCount.textContent = `${workspaces.length} workspace${workspaces.length !== 1 ? 's' : ''}`;
   }
@@ -5514,29 +5654,6 @@ class CWMApp {
         </div>`;
     }).join('');
 
-    // Bind events
-    list.querySelectorAll('.session-item').forEach(el => {
-      el.addEventListener('click', () => this.selectSession(el.dataset.id));
-
-      // Right-click context menu
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.showContextMenu(el.dataset.id, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile (500ms hold)
-      let longPressTimer = null;
-      el.addEventListener('touchstart', (e) => {
-        longPressTimer = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          this.showContextMenu(el.dataset.id, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      el.addEventListener('touchend', () => clearTimeout(longPressTimer));
-      el.addEventListener('touchmove', () => clearTimeout(longPressTimer));
-    });
 
     // Async: patch in git branch badges
     const sessionItems = list.querySelectorAll('.session-item[data-id]');
@@ -6008,92 +6125,6 @@ class CWMApp {
       </div>`;
     }).join('');
 
-    // Bind accordion toggle
-    list.querySelectorAll('.project-accordion-header').forEach(header => {
-      header.addEventListener('click', (e) => {
-        if (e.target.closest('[draggable]') && e.target.classList.contains('project-session-item')) return;
-        const accordion = header.closest('.project-accordion');
-        const body = accordion.querySelector('.project-accordion-body');
-        const chevron = header.querySelector('.project-accordion-chevron');
-        const isOpen = !body.hidden;
-        body.hidden = isOpen;
-        chevron.classList.toggle('open', !isOpen);
-      });
-
-      // Drag entire project
-      header.addEventListener('dragstart', (e) => {
-        const accordion = header.closest('.project-accordion');
-        e.dataTransfer.setData('cwm/project', JSON.stringify({
-          encoded: accordion.dataset.encoded,
-          path: accordion.dataset.path,
-          name: header.querySelector('.project-name').textContent,
-        }));
-        e.dataTransfer.effectAllowed = 'copy';
-        header.classList.add('dragging');
-      });
-      header.addEventListener('dragend', () => header.classList.remove('dragging'));
-
-      // Right-click context menu on project header
-      header.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const accordion = header.closest('.project-accordion');
-        const encoded = accordion.dataset.encoded;
-        const path = accordion.dataset.path;
-        const projName = header.querySelector('.project-name').textContent;
-        this.showProjectContextMenu(encoded, projName, path, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile on project header
-      let headerLongPress = null;
-      header.addEventListener('touchstart', (e) => {
-        headerLongPress = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          const accordion = header.closest('.project-accordion');
-          const encoded = accordion.dataset.encoded;
-          const path = accordion.dataset.path;
-          const projName = header.querySelector('.project-name').textContent;
-          this.showProjectContextMenu(encoded, projName, path, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      header.addEventListener('touchend', () => clearTimeout(headerLongPress));
-      header.addEventListener('touchmove', () => clearTimeout(headerLongPress));
-    });
-
-    // Bind drag + context menu on individual session items inside projects
-    list.querySelectorAll('.project-session-item').forEach(el => {
-      el.addEventListener('dragstart', (e) => {
-        e.stopPropagation(); // don't trigger parent project drag
-        e.dataTransfer.setData('cwm/project-session', JSON.stringify({
-          sessionName: el.dataset.sessionName,
-          projectPath: el.dataset.projectPath,
-          projectEncoded: el.dataset.projectEncoded,
-        }));
-        e.dataTransfer.effectAllowed = 'copy';
-        el.classList.add('dragging');
-      });
-      el.addEventListener('dragend', () => el.classList.remove('dragging'));
-
-      // Right-click context menu on project sessions
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.showProjectSessionContextMenu(el.dataset.sessionName, el.dataset.projectPath, e.clientX, e.clientY);
-      });
-
-      // Long-press for mobile (500ms hold)
-      let longPressTimer = null;
-      el.addEventListener('touchstart', (e) => {
-        longPressTimer = setTimeout(() => {
-          e.preventDefault();
-          const touch = e.touches[0];
-          this.showProjectSessionContextMenu(el.dataset.sessionName, el.dataset.projectPath, touch.clientX, touch.clientY);
-        }, 500);
-      }, { passive: false });
-      el.addEventListener('touchend', () => clearTimeout(longPressTimer));
-      el.addEventListener('touchmove', () => clearTimeout(longPressTimer));
-    });
   }
 
   toggleProjectsPanel() {
@@ -6253,90 +6284,6 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   initDragAndDrop() {
-    // Session items: make draggable
-    this.els.sessionList.addEventListener('dragstart', (e) => {
-      const item = e.target.closest('.session-item');
-      if (!item) return;
-      console.log('[DnD] Drag started: session-item', item.dataset.id);
-      e.dataTransfer.setData('cwm/session', item.dataset.id);
-      e.dataTransfer.effectAllowed = 'move';
-      item.classList.add('dragging');
-    });
-    this.els.sessionList.addEventListener('dragend', (e) => {
-      const item = e.target.closest('.session-item');
-      if (item) item.classList.remove('dragging');
-    });
-
-    // Workspace items: accept project + project-session drops to create sessions
-    this.els.workspaceList.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('cwm/project') || e.dataTransfer.types.includes('cwm/project-session')) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        const item = e.target.closest('.workspace-item');
-        if (item) item.classList.add('drag-over');
-      }
-    });
-    this.els.workspaceList.addEventListener('dragleave', (e) => {
-      const item = e.target.closest('.workspace-item');
-      if (item) item.classList.remove('drag-over');
-    });
-    this.els.workspaceList.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      const item = e.target.closest('.workspace-item');
-      if (item) item.classList.remove('drag-over');
-      if (!item) return;
-
-      const workspaceId = item.dataset.id;
-
-      // Drop a project-session (individual .jsonl from project accordion)
-      const projSessJson = e.dataTransfer.getData('cwm/project-session');
-      if (projSessJson) {
-        try {
-          const ps = JSON.parse(projSessJson);
-          const claudeSessionId = ps.sessionName;
-          // Create a friendly default name: project folder name + short session ID
-          const projectName = ps.projectPath ? (ps.projectPath.split('\\').pop() || ps.projectPath.split('/').pop() || claudeSessionId) : claudeSessionId;
-          const shortId = claudeSessionId.length > 8 ? claudeSessionId.substring(0, 8) : claudeSessionId;
-          const friendlyName = projectName + ' (' + shortId + ')';
-          await this.api('POST', '/api/sessions', {
-            name: friendlyName,
-            workspaceId,
-            workingDir: ps.projectPath,
-            topic: 'Resumed session',
-            command: 'claude',
-            resumeSessionId: claudeSessionId,
-          });
-          this.showToast(`Session "${friendlyName}" added`, 'success');
-          await this.loadSessions();
-          await this.loadStats();
-          this.renderWorkspaces();
-        } catch (err) {
-          this.showToast(err.message || 'Failed to create session', 'error');
-        }
-        return;
-      }
-
-      // Drop an entire project
-      const projectJson = e.dataTransfer.getData('cwm/project');
-      if (projectJson) {
-        try {
-          const project = JSON.parse(projectJson);
-          await this.api('POST', '/api/sessions', {
-            name: project.name,
-            workspaceId,
-            workingDir: project.path,
-            topic: '',
-            command: 'claude',
-          });
-          this.showToast(`Session "${project.name}" created`, 'success');
-          await this.loadSessions();
-          await this.loadStats();
-        } catch (err) {
-          this.showToast(err.message || 'Failed to create session from project', 'error');
-        }
-      }
-    });
-
     // Terminal panes: accept session and project drops
     if (this.els.terminalGrid) {
       const panes = this.els.terminalGrid.querySelectorAll('.terminal-pane');
@@ -8669,8 +8616,20 @@ class CWMApp {
         }
       }
       delete this._groupPaneCache[groupId];
-      // Recalculate grid layout for restored pane count, then refit
+      // Recalculate grid layout for restored pane count, then refit.
+      // After reattaching cached DOM fragments, force xterm.js to repaint
+      // all rows. Moving a <canvas> to a DocumentFragment clears its pixel
+      // buffer; xterm's fit() only re-renders when dimensions change, so
+      // same-size restores produce blank canvases without an explicit refresh.
       this.updateTerminalGridLayout();
+      requestAnimationFrame(() => {
+        for (let j = 0; j < 4; j++) {
+          const tp = this.terminalPanes[j];
+          if (tp && tp.term) {
+            tp.term.refresh(0, tp.term.rows - 1);
+          }
+        }
+      });
     } else {
       // No cache — create fresh connections (first time opening this group)
       const group = this._tabGroups.find(g => g.id === groupId);
