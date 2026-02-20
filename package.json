@@ -16,7 +16,8 @@
     "gui:demo": "node src/gui.js --demo",
     "test": "node test/run.js",
     "mcp:visual-qa": "node src/mcp/visual-qa.js",
-    "gui:cdp": "node src/gui.js --cdp"
+    "gui:cdp": "node src/gui.js --cdp",
+    "postinstall": "node scripts/postinstall.js"
   },
   "repository": {
     "type": "git",
