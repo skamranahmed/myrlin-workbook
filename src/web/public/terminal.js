@@ -238,6 +238,10 @@ class TerminalPane {
     // Activity detection: real-time parsing of Claude Code output patterns
     this._currentActivity = null; // { type: 'thinking'|'reading'|'writing'|'running'|'searching'|'idle', detail: '...' }
     this._activityBuffer = '';    // Rolling buffer for pattern matching (last ~500 chars)
+    // Focus tracking: background terminals flush at lower frequency to prevent
+    // main-thread blocking (the primary cause of cursor freezes with multiple panes)
+    this._isFocused = false;
+    this._bgFlushTimer = null;
   }
 
   _log(msg) {
@@ -702,15 +706,47 @@ class TerminalPane {
 
   /**
    * Enqueue data for batched writing to xterm.
-   * Schedules a single requestAnimationFrame to flush all accumulated data.
+   * Focused terminal: flushes every animation frame for responsive input.
+   * Background terminals: flush every 150ms to avoid blocking the active pane's
+   * main thread — this is what prevents cursor freezes with multiple sessions.
    * @param {string} data - Raw terminal output
    */
   _enqueueWrite(data) {
     this._writeBuf += data;
     this._activitySample += data;
 
-    if (!this._writeRaf) {
-      this._writeRaf = requestAnimationFrame(() => this._flushWriteBuffer());
+    if (this._isFocused) {
+      // Active terminal: flush every frame for real-time responsiveness
+      if (this._bgFlushTimer) { clearTimeout(this._bgFlushTimer); this._bgFlushTimer = null; }
+      if (!this._writeRaf) {
+        this._writeRaf = requestAnimationFrame(() => this._flushWriteBuffer());
+      }
+    } else {
+      // Background terminal: throttled flush to yield main thread to focused pane
+      if (!this._bgFlushTimer) {
+        this._bgFlushTimer = setTimeout(() => {
+          this._bgFlushTimer = null;
+          if (this._writeRaf) { cancelAnimationFrame(this._writeRaf); this._writeRaf = null; }
+          this._flushWriteBuffer();
+        }, 150);
+      }
+    }
+  }
+
+  /**
+   * Mark this terminal as focused (active pane). Focused terminals render
+   * at full frame rate. Background terminals throttle to 150ms intervals.
+   * Called by app.js when the user clicks/focuses a pane.
+   * @param {boolean} focused - Whether this pane is the active/focused one
+   */
+  setFocused(focused) {
+    this._isFocused = focused;
+    // If becoming focused and there's buffered data, flush immediately
+    if (focused && this._writeBuf) {
+      if (this._bgFlushTimer) { clearTimeout(this._bgFlushTimer); this._bgFlushTimer = null; }
+      if (!this._writeRaf) {
+        this._writeRaf = requestAnimationFrame(() => this._flushWriteBuffer());
+      }
     }
   }
 
@@ -877,6 +913,7 @@ class TerminalPane {
     clearTimeout(this._fitTimer);
     clearTimeout(this._idleCheckTimer);
     clearTimeout(this._activityDebounceTimer);
+    clearTimeout(this._bgFlushTimer);
     if (this._writeRaf) cancelAnimationFrame(this._writeRaf);
     this._writeBuf = '';
     this._activitySample = '';

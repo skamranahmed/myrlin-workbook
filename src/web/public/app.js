@@ -965,6 +965,12 @@ class CWMApp {
           return;
         }
 
+        // Full-screen reader overlay: extract terminal buffer as scrollable text
+        if (key === 'reader') {
+          this.openTerminalReader(activePane);
+          return;
+        }
+
         // All other buttons: send key via WebSocket directly
         if (!activePane.ws || activePane.ws.readyState !== WebSocket.OPEN) return;
 
@@ -7293,19 +7299,70 @@ class CWMApp {
     // Set slot early to prevent focusin recursion
     this._activeTerminalSlot = slotIdx;
 
-    // Blur all other terminals
+    // Blur all other terminals and mark them as background (throttled rendering)
     this.terminalPanes.forEach((tp, i) => {
-      if (tp && i !== slotIdx) tp.blur();
+      if (tp && i !== slotIdx) {
+        tp.blur();
+        tp.setFocused(false);
+      }
       const pane = document.getElementById(`term-pane-${i}`);
       if (pane) pane.classList.remove('terminal-pane-active');
     });
 
-    // Activate target
+    // Activate target and mark as focused (full frame-rate rendering)
     const pane = document.getElementById(`term-pane-${slotIdx}`);
     if (pane) pane.classList.add('terminal-pane-active');
 
     const tp = this.terminalPanes[slotIdx];
-    if (tp) tp.focus();
+    if (tp) {
+      tp.setFocused(true);
+      tp.focus();
+    }
+  }
+
+  /**
+   * Open the full-screen terminal reader overlay.
+   * Extracts the entire scrollback buffer from the active terminal pane
+   * and displays it as plain text with native touch scrolling.
+   * @param {TerminalPane} pane - The terminal pane to read from
+   */
+  openTerminalReader(pane) {
+    if (!pane || !pane.term) return;
+
+    const overlay = document.getElementById('terminal-reader-overlay');
+    const content = document.getElementById('terminal-reader-content');
+    const title = document.getElementById('terminal-reader-title');
+    const closeBtn = document.getElementById('terminal-reader-close');
+    if (!overlay || !content) return;
+
+    // Extract full buffer content
+    const buffer = pane.term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    // Trim trailing empty lines
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+      lines.pop();
+    }
+
+    title.textContent = pane.sessionName || 'Terminal Output';
+    content.textContent = lines.join('\n');
+    overlay.hidden = false;
+
+    // Scroll to the bottom (most recent output) by default
+    requestAnimationFrame(() => {
+      content.scrollTop = content.scrollHeight;
+    });
+
+    // Close handler
+    const close = () => {
+      overlay.hidden = true;
+      content.textContent = '';
+      closeBtn.removeEventListener('click', close);
+    };
+    closeBtn.addEventListener('click', close);
   }
 
   /**

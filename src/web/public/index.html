@@ -546,6 +546,7 @@
               <button data-key="up">&#8593;</button>
               <button data-key="down">&#8595;</button>
               <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
             </div>
           </div>
           <div class="terminal-pane terminal-pane-empty" id="term-pane-1" data-slot="1" hidden>
@@ -571,6 +572,7 @@
               <button data-key="up">&#8593;</button>
               <button data-key="down">&#8595;</button>
               <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
             </div>
           </div>
           <div class="terminal-pane terminal-pane-empty" id="term-pane-2" data-slot="2" hidden>
@@ -596,6 +598,7 @@
               <button data-key="up">&#8593;</button>
               <button data-key="down">&#8595;</button>
               <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
             </div>
           </div>
           <div class="terminal-pane terminal-pane-empty" id="term-pane-3" data-slot="3" hidden>
@@ -621,6 +624,7 @@
               <button data-key="up">&#8593;</button>
               <button data-key="down">&#8595;</button>
               <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
             </div>
           </div>
         </div>
@@ -1047,6 +1051,15 @@
       <div class="action-sheet-items" id="action-sheet-items"></div>
       <button class="action-sheet-cancel" id="action-sheet-cancel">Cancel</button>
     </div>
+  </div>
+
+  <!-- Terminal Reader Overlay: full-screen scrollable text view of terminal buffer (mobile) -->
+  <div class="terminal-reader-overlay" id="terminal-reader-overlay" hidden>
+    <div class="terminal-reader-header">
+      <span class="terminal-reader-title" id="terminal-reader-title">Terminal Output</span>
+      <button class="terminal-reader-close" id="terminal-reader-close">&times;</button>
+    </div>
+    <pre class="terminal-reader-content" id="terminal-reader-content"></pre>
   </div>
 
   <!-- Hidden file input for image uploads (reused by all terminal panes) -->
