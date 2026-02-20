@@ -1901,6 +1901,199 @@ app.get('/api/quota-overview', requireAuth, (req, res) => {
   }
 });
 
+// ──────────────────────────────────────────────────────────
+//  SUBSCRIPTION USAGE QUOTA
+// ──────────────────────────────────────────────────────────
+
+/** Cache for aggregated usage stats across all JSONL files */
+let _usageQuotaCache = { timestamp: 0, result: null };
+const USAGE_QUOTA_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Scan all JSONL files and count assistant messages per time period.
+ * Returns message counts bucketed by hour, day, week, and month,
+ * plus total tokens consumed in each period.
+ * @returns {object} Usage stats by time period
+ */
+function calculateUsageQuota() {
+  const now = Date.now();
+
+  // Check cache
+  if (_usageQuotaCache.result && (now - _usageQuotaCache.timestamp) < USAGE_QUOTA_CACHE_TTL) {
+    return _usageQuotaCache.result;
+  }
+
+  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  if (!fs.existsSync(claudeProjectsDir)) {
+    return { periods: {}, totalMessages: 0, totalTokens: 0 };
+  }
+
+  // Time boundaries
+  const nowDate = new Date();
+  const hourAgo = new Date(nowDate.getTime() - 60 * 60 * 1000);
+  const fiveHoursAgo = new Date(nowDate.getTime() - 5 * 60 * 60 * 1000);
+  const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Sunday start
+  const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+
+  // Counters
+  const buckets = {
+    fiveHour: { messages: 0, tokens: 0, cost: 0 },
+    daily:    { messages: 0, tokens: 0, cost: 0 },
+    weekly:   { messages: 0, tokens: 0, cost: 0 },
+    monthly:  { messages: 0, tokens: 0, cost: 0 },
+  };
+
+  // Model usage breakdown for the 5-hour window (most relevant for rate limits)
+  const modelUsage5h = {};
+
+  try {
+    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+
+    for (const dir of projectDirs) {
+      const dirPath = path.join(claudeProjectsDir, dir.name);
+      let files;
+      try {
+        files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+      } catch (_) { continue; }
+
+      for (const file of files) {
+        const filePath = path.join(dirPath, file);
+
+        // Skip files not modified in the last 31 days (can't have this-month messages)
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.mtimeMs < monthStart.getTime()) continue;
+        } catch (_) { continue; }
+
+        let content;
+        try {
+          content = fs.readFileSync(filePath, 'utf-8');
+        } catch (_) { continue; }
+
+        const lines = content.split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type !== 'assistant') continue;
+            const msg = entry.message;
+            if (!msg || !msg.usage) continue;
+
+            const ts = entry.timestamp ? new Date(entry.timestamp) : null;
+            if (!ts || isNaN(ts.getTime())) continue;
+
+            const totalTok = (msg.usage.input_tokens || 0) + (msg.usage.output_tokens || 0);
+            const model = msg.model || 'unknown';
+            const pricing = TOKEN_PRICING[model] || DEFAULT_PRICING;
+            const msgCost =
+              ((msg.usage.input_tokens || 0) / 1_000_000) * pricing.input +
+              ((msg.usage.output_tokens || 0) / 1_000_000) * pricing.output +
+              ((msg.usage.cache_creation_input_tokens || 0) / 1_000_000) * pricing.cacheWrite +
+              ((msg.usage.cache_read_input_tokens || 0) / 1_000_000) * pricing.cacheRead;
+
+            // Bucket by time period
+            if (ts >= fiveHoursAgo) {
+              buckets.fiveHour.messages++;
+              buckets.fiveHour.tokens += totalTok;
+              buckets.fiveHour.cost += msgCost;
+              // Track model usage in 5h window
+              if (!modelUsage5h[model]) modelUsage5h[model] = 0;
+              modelUsage5h[model]++;
+            }
+            if (ts >= todayStart) {
+              buckets.daily.messages++;
+              buckets.daily.tokens += totalTok;
+              buckets.daily.cost += msgCost;
+            }
+            if (ts >= weekStart) {
+              buckets.weekly.messages++;
+              buckets.weekly.tokens += totalTok;
+              buckets.weekly.cost += msgCost;
+            }
+            if (ts >= monthStart) {
+              buckets.monthly.messages++;
+              buckets.monthly.tokens += totalTok;
+              buckets.monthly.cost += msgCost;
+            }
+          } catch (_) {
+            // Skip malformed lines
+          }
+        }
+      }
+    }
+  } catch (_) {
+    // If projects dir can't be read, return empty
+  }
+
+  // Calculate reset times
+  const nextHour = new Date(nowDate);
+  nextHour.setMinutes(0, 0, 0);
+  nextHour.setHours(nextHour.getHours() + 1);
+
+  const fiveHourReset = new Date(fiveHoursAgo.getTime() + 5 * 60 * 60 * 1000);
+
+  const tomorrow = new Date(todayStart);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const nextWeek = new Date(weekStart);
+  nextWeek.setDate(nextWeek.getDate() + 7);
+
+  const nextMonth = new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 1);
+
+  // Round costs
+  for (const b of Object.values(buckets)) {
+    b.cost = Math.round(b.cost * 1000) / 1000;
+  }
+
+  const result = {
+    periods: {
+      fiveHour: {
+        ...buckets.fiveHour,
+        label: '5-Hour Window',
+        resetAt: fiveHourReset.toISOString(),
+        windowMs: 5 * 60 * 60 * 1000,
+      },
+      daily: {
+        ...buckets.daily,
+        label: 'Today',
+        resetAt: tomorrow.toISOString(),
+      },
+      weekly: {
+        ...buckets.weekly,
+        label: 'This Week',
+        resetAt: nextWeek.toISOString(),
+      },
+      monthly: {
+        ...buckets.monthly,
+        label: 'This Month',
+        resetAt: nextMonth.toISOString(),
+      },
+    },
+    modelUsage5h,
+    serverTime: nowDate.toISOString(),
+  };
+
+  _usageQuotaCache = { timestamp: now, result };
+  return result;
+}
+
+/**
+ * GET /api/usage/quota
+ * Returns message counts and token usage bucketed by time period (5h, daily, weekly, monthly).
+ * Scans all JSONL files under ~/.claude/projects/. Cached for 30 seconds.
+ */
+app.get('/api/usage/quota', requireAuth, (req, res) => {
+  try {
+    const data = calculateUsageQuota();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to calculate usage quota: ' + err.message });
+  }
+});
+
 /**
  * GET /api/workspaces/:id/cost
  * Aggregates token usage and cost across all sessions in a workspace.

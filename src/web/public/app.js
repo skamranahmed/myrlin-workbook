@@ -122,6 +122,12 @@ class CWMApp {
         sessionCountInHeader: true,
         confirmBeforeClose: true,
         autoOpenTerminal: true,
+        quotaWidgetVisible: true,
+        quotaApiKeyMode: false,
+        quotaDailyLimit: 0,
+        quotaWeeklyLimit: 0,
+        quotaMonthlyLimit: 0,
+        quotaFiveHourLimit: 0,
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -393,6 +399,14 @@ class CWMApp {
       settingsBtn: document.getElementById('settings-btn'),
       settingsCloseBtn: document.getElementById('settings-close-btn'),
 
+      // Quota Widget
+      quotaWidget: document.getElementById('quota-widget'),
+      quotaWidgetBody: document.getElementById('quota-widget-body'),
+      quotaWidgetToggle: document.getElementById('quota-widget-toggle'),
+      quotaBars: document.getElementById('quota-bars'),
+      quotaReset: document.getElementById('quota-reset'),
+      quotaApikeyOverlay: document.getElementById('quota-apikey-overlay'),
+
       // Session Manager
       sessionManagerOverlay: document.getElementById('session-manager-overlay'),
       sessionManagerList: document.getElementById('session-manager-list'),
@@ -574,6 +588,11 @@ class CWMApp {
     this.els.modalOverlay.addEventListener('click', (e) => {
       if (e.target === this.els.modalOverlay) this.closeModal(null);
     });
+
+    // Quota widget toggle
+    if (this.els.quotaWidgetToggle) {
+      this.els.quotaWidgetToggle.addEventListener('click', () => this.toggleQuotaWidget());
+    }
 
     // Docs panel
     if (this.els.docsToggleRaw) {
@@ -1147,6 +1166,9 @@ class CWMApp {
 
     // Apply settings (CSS classes, visibility) after initial data is loaded
     this.applySettings();
+
+    // Start quota usage polling (non-blocking, 60s interval)
+    this.startQuotaPolling();
   }
 
   async loadWorkspaces() {
@@ -2485,6 +2507,12 @@ class CWMApp {
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
+      { key: 'quotaWidgetVisible', label: 'Usage Quota Widget', description: 'Show message usage tracker in the sidebar', category: 'Usage' },
+      { key: 'quotaApiKeyMode', label: 'API Key Mode', description: 'Blur the quota widget and show "API Key In Use" overlay', category: 'Usage' },
+      { key: 'quotaFiveHourLimit', label: '5-Hour Message Limit', description: 'Max messages per 5-hour rolling window (0 = no limit)', category: 'Usage', type: 'number' },
+      { key: 'quotaDailyLimit', label: 'Daily Message Limit', description: 'Max messages per day (0 = no limit)', category: 'Usage', type: 'number' },
+      { key: 'quotaWeeklyLimit', label: 'Weekly Message Limit', description: 'Max messages per week (0 = no limit)', category: 'Usage', type: 'number' },
+      { key: 'quotaMonthlyLimit', label: 'Monthly Message Limit', description: 'Max messages per month (0 = no limit)', category: 'Usage', type: 'number' },
     ];
   }
 
@@ -2561,6 +2589,16 @@ class CWMApp {
                 <button class="settings-scale-btn" data-scale-dir="up" title="Increase">+</button>
               </div>
             </div>`;
+        } else if (item.type === 'number') {
+          const val = this.state.settings[item.key] || 0;
+          html += `
+            <div class="settings-row">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <input type="number" class="settings-number-input" data-setting-num="${item.key}" value="${val}" min="0" max="99999" placeholder="0" />
+            </div>`;
         } else {
           const checked = this.state.settings[item.key] ? 'checked' : '';
           html += `
@@ -2601,6 +2639,18 @@ class CWMApp {
         this.renderSettingsBody(filter);
       });
     });
+
+    // Bind number input change events (for quota limits)
+    this.els.settingsBody.querySelectorAll('input[data-setting-num]').forEach(input => {
+      input.addEventListener('change', (e) => {
+        const key = e.target.dataset.settingNum;
+        this.state.settings[key] = parseInt(e.target.value, 10) || 0;
+        this.saveSettings();
+        this.applySettings();
+        // Re-render quota widget with new limits
+        if (this._lastQuotaData) this.renderQuotaWidget(this._lastQuotaData);
+      });
+    });
   }
 
   /** Filter settings from search input */
@@ -2628,6 +2678,131 @@ class CWMApp {
     // Re-render sidebar to update pane color pips
     if (typeof this.renderWorkspaces === 'function') {
       this.renderWorkspaces();
+    }
+
+    // Quota widget visibility and API key mode
+    this.applyQuotaSettings();
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     QUOTA USAGE WIDGET
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Apply quota-specific settings (visibility, API key blur) */
+  applyQuotaSettings() {
+    if (!this.els.quotaWidget) return;
+    this.els.quotaWidget.style.display = this.state.settings.quotaWidgetVisible ? '' : 'none';
+    if (this.els.quotaApikeyOverlay) {
+      this.els.quotaApikeyOverlay.hidden = !this.state.settings.quotaApiKeyMode;
+    }
+  }
+
+  /** Toggle collapse/expand of the quota widget body */
+  toggleQuotaWidget() {
+    if (!this.els.quotaWidget) return;
+    this.els.quotaWidget.classList.toggle('collapsed');
+    const isCollapsed = this.els.quotaWidget.classList.contains('collapsed');
+    localStorage.setItem('cwm_quotaCollapsed', isCollapsed ? '1' : '0');
+  }
+
+  /** Start periodic polling for usage quota (every 60s) */
+  startQuotaPolling() {
+    if (!this.els.quotaBars) return;
+
+    // Restore collapse state
+    if (localStorage.getItem('cwm_quotaCollapsed') === '1') {
+      this.els.quotaWidget.classList.add('collapsed');
+    }
+
+    // Initial fetch
+    this.fetchAndRenderQuota();
+
+    // Poll every 60 seconds
+    this._quotaInterval = setInterval(() => this.fetchAndRenderQuota(), 60000);
+  }
+
+  /** Fetch usage quota from server and render the widget */
+  async fetchAndRenderQuota() {
+    if (!this.els.quotaBars) return;
+    try {
+      const data = await this.api('GET', '/api/usage/quota');
+      this._lastQuotaData = data;
+      this.renderQuotaWidget(data);
+    } catch (_) {
+      // Silently fail — don't disrupt the UX for a non-critical widget
+    }
+  }
+
+  /**
+   * Render the quota usage bars from API data.
+   * @param {object} data - Response from /api/usage/quota
+   */
+  renderQuotaWidget(data) {
+    if (!this.els.quotaBars || !data || !data.periods) return;
+
+    const settings = this.state.settings;
+    const limitMap = {
+      fiveHour: settings.quotaFiveHourLimit || 0,
+      daily:    settings.quotaDailyLimit || 0,
+      weekly:   settings.quotaWeeklyLimit || 0,
+      monthly:  settings.quotaMonthlyLimit || 0,
+    };
+
+    // Ordered list of periods to display
+    const periodKeys = ['fiveHour', 'daily', 'weekly', 'monthly'];
+    let html = '';
+
+    for (const key of periodKeys) {
+      const p = data.periods[key];
+      if (!p) continue;
+
+      const limit = limitMap[key];
+      const msgs = p.messages;
+      const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
+      const tier = limit <= 0 ? 'nomax' : pct >= 90 ? 'crit' : pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
+      const widthPct = limit > 0 ? pct : Math.min(msgs * 2, 100); // For no-limit, show proportional bar capped at 100
+
+      const valueText = limit > 0
+        ? `${msgs.toLocaleString()} / ${limit.toLocaleString()}`
+        : `${msgs.toLocaleString()} msgs`;
+
+      const costText = p.cost > 0 ? ` · $${p.cost.toFixed(2)}` : '';
+
+      html += `
+        <div class="quota-bar-row">
+          <div class="quota-bar-label">
+            <span class="quota-bar-name">${p.label}</span>
+            <span class="quota-bar-value">${valueText}${costText}</span>
+          </div>
+          <div class="quota-bar-track">
+            <div class="quota-bar-fill tier-${tier}" style="width:${widthPct}%"></div>
+          </div>
+        </div>`;
+    }
+
+    this.els.quotaBars.innerHTML = html;
+
+    // Render next reset time (use the 5-hour window reset as primary)
+    const fiveHour = data.periods.fiveHour;
+    if (fiveHour && fiveHour.resetAt && this.els.quotaReset) {
+      const resetDate = new Date(fiveHour.resetAt);
+      const diffMs = resetDate.getTime() - Date.now();
+      if (diffMs > 0) {
+        const hrs = Math.floor(diffMs / 3600000);
+        const mins = Math.floor((diffMs % 3600000) / 60000);
+        this.els.quotaReset.textContent = `Window resets in ${hrs}h ${mins}m`;
+      } else {
+        this.els.quotaReset.textContent = 'Window resetting...';
+      }
+    }
+  }
+
+  /** Clean up quota polling interval */
+  stopQuotaPolling() {
+    if (this._quotaInterval) {
+      clearInterval(this._quotaInterval);
+      this._quotaInterval = null;
     }
   }
 

@@ -311,6 +311,25 @@
         <div class="sidebar-list" id="projects-list">
           <!-- Discovered projects rendered by app.js -->
         </div>
+        <!-- Usage Quota Widget -->
+        <div class="quota-widget" id="quota-widget">
+          <div class="quota-widget-header">
+            <span class="quota-widget-title">Usage</span>
+            <button class="btn btn-ghost btn-icon btn-xs quota-widget-toggle" id="quota-widget-toggle" title="Toggle usage widget">
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6l3.5 4 3.5-4z"/></svg>
+            </button>
+          </div>
+          <div class="quota-widget-body" id="quota-widget-body">
+            <div class="quota-bars" id="quota-bars">
+              <!-- Rendered by app.js -->
+            </div>
+            <div class="quota-reset" id="quota-reset"></div>
+          </div>
+          <!-- API key blur overlay -->
+          <div class="quota-apikey-overlay" id="quota-apikey-overlay" hidden>
+            <span class="quota-apikey-label">API Key In Use</span>
+          </div>
+        </div>
         <!-- Sidebar Collapse Button (desktop) -->
         <div class="sidebar-collapse-bar">
           <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Collapse sidebar">

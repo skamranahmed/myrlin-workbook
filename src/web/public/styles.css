@@ -787,6 +787,156 @@ textarea.input {
   flex-shrink: 0;
 }
 
+/* ─── Quota Usage Widget ─────────────────────────────────── */
+.quota-widget {
+  position: relative;
+  padding: 10px 14px 8px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.quota-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.quota-widget-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.quota-widget-toggle {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.quota-widget.collapsed .quota-widget-toggle {
+  transform: rotate(-90deg);
+}
+
+.quota-widget-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: max-height 0.2s ease, opacity 0.15s ease;
+  max-height: 300px;
+  opacity: 1;
+  overflow: hidden;
+}
+
+.quota-widget.collapsed .quota-widget-body {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Individual quota bar row */
+.quota-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quota-bar-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.quota-bar-name {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.quota-bar-value {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Progress track */
+.quota-bar-track {
+  height: 4px;
+  background: var(--surface0);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.quota-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s ease;
+  min-width: 0;
+}
+
+/* Color tiers based on usage percentage */
+.quota-bar-fill.tier-low    { background: var(--green); }
+.quota-bar-fill.tier-mid    { background: var(--yellow); }
+.quota-bar-fill.tier-high   { background: var(--peach); }
+.quota-bar-fill.tier-crit   { background: var(--red); }
+.quota-bar-fill.tier-nomax  { background: var(--blue); opacity: 0.6; }
+
+/* Pulse animation when near limit */
+.quota-bar-fill.tier-crit {
+  animation: quota-pulse 2s ease-in-out infinite;
+}
+
+@keyframes quota-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Reset timer row */
+.quota-reset {
+  font-size: 10px;
+  color: var(--overlay0);
+  text-align: right;
+  padding-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* API key blur overlay */
+.quota-apikey-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg-primary) 60%, transparent);
+  border-radius: inherit;
+  z-index: 2;
+}
+
+.quota-apikey-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  letter-spacing: 0.03em;
+}
+
+/* Hide widget when sidebar is collapsed */
+.sidebar.collapsed .quota-widget {
+  display: none;
+}
+
 /* Sidebar Collapse Button Bar */
 .sidebar-collapse-bar {
   display: flex;
@@ -1894,6 +2044,35 @@ textarea.input {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+/* Number input for settings (e.g., quota limits) */
+.settings-number-input {
+  width: 72px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex-shrink: 0;
+  transition: border-color var(--transition-fast);
+  -moz-appearance: textfield;
+}
+
+.settings-number-input::-webkit-inner-spin-button,
+.settings-number-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.settings-number-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .settings-empty {
   padding: 24px 20px;
   text-align: center;
@@ -2480,6 +2659,7 @@ textarea.input {
 
   .sidebar-resize-handle { display: none; }
   .sidebar-collapse-bar { display: none; }
+  .quota-widget { display: none; }
 }
 
 /* ─── Mobile Terminal Tab Strip ──────────────────────────────── */
