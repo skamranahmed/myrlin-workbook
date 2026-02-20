@@ -3633,8 +3633,60 @@ class CWMApp {
     });
   }
 
+  /**
+   * Show a modal with multiple action buttons (beyond simple confirm/cancel).
+   * @param {object} opts - Modal options
+   * @param {string} opts.title - Modal title
+   * @param {string} opts.message - Modal body message (HTML allowed)
+   * @param {Array<{label: string, value: string, class: string}>} opts.actions - Action buttons
+   * @returns {Promise<string|null>} The chosen action value, or null if cancelled
+   */
+  showChoiceModal({ title, message, actions = [] }) {
+    return new Promise((resolve) => {
+      this.modalResolve = resolve;
+      this.els.modalTitle.textContent = title;
+      this.els.modalBody.innerHTML = `<p>${message}</p>`;
+
+      // Hide default confirm/cancel, render custom action buttons
+      this.els.modalConfirmBtn.hidden = true;
+      this.els.modalCancelBtn.hidden = true;
+
+      const btnContainer = document.createElement('div');
+      btnContainer.className = 'modal-choice-actions';
+      btnContainer.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:flex-end;';
+
+      // Cancel button first (leftmost)
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn btn-ghost';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', () => this.closeModal(null));
+      btnContainer.appendChild(cancelBtn);
+
+      // Action buttons
+      actions.forEach(a => {
+        const btn = document.createElement('button');
+        btn.className = `btn ${a.class || 'btn-primary'}`;
+        btn.textContent = a.label;
+        btn.addEventListener('click', () => this.closeModal(a.value));
+        btnContainer.appendChild(btn);
+      });
+
+      this.els.modalFooter.appendChild(btnContainer);
+      this.els.modalOverlay.hidden = false;
+    });
+  }
+
   closeModal(result) {
     this.els.modalOverlay.hidden = true;
+
+    // Clean up any choice modal action buttons
+    const choiceActions = this.els.modalFooter.querySelector('.modal-choice-actions');
+    if (choiceActions) {
+      choiceActions.remove();
+      this.els.modalConfirmBtn.hidden = false;
+      this.els.modalCancelBtn.hidden = false;
+    }
+
     if (this.modalResolve) {
       this.modalResolve(result);
       this.modalResolve = null;
@@ -8096,7 +8148,7 @@ class CWMApp {
 
   /**
    * Close a tab group with confirmation if it has live sessions.
-   * Kills all PTY sessions in the tab before deleting.
+   * Offers choice to kill sessions or move them to background.
    * @param {string} groupId - Tab group to close
    */
   async closeTabGroupWithConfirmation(groupId) {
@@ -8127,22 +8179,27 @@ class CWMApp {
     }
 
     if (liveSessions.length > 0) {
-      const confirmed = await this.showConfirmModal({
+      const sessionWord = liveSessions.length > 1 ? 'sessions' : 'session';
+      const choice = await this.showChoiceModal({
         title: 'Close Tab',
-        message: `This tab has ${liveSessions.length} live session${liveSessions.length > 1 ? 's' : ''}. Closing will kill them. Continue?`,
-        confirmText: 'Close & Kill',
-        confirmClass: 'btn-danger',
+        message: `This tab has ${liveSessions.length} live ${sessionWord}. What would you like to do?`,
+        actions: [
+          { label: 'Close to Background', value: 'background', class: 'btn-primary' },
+          { label: 'Close & Kill', value: 'kill', class: 'btn-danger' },
+        ],
       });
-      if (!confirmed) return;
+      if (!choice) return;
 
-      // Kill all PTY sessions
-      await Promise.allSettled(
-        liveSessions.map(s =>
-          this.api('POST', `/api/pty/${encodeURIComponent(s.sessionId)}/kill`).catch(() => {})
-        )
-      );
+      if (choice === 'kill') {
+        // Kill all PTY sessions
+        await Promise.allSettled(
+          liveSessions.map(s =>
+            this.api('POST', `/api/pty/${encodeURIComponent(s.sessionId)}/kill`).catch(() => {})
+          )
+        );
+      }
 
-      // Close active terminal panes if this is the active group
+      // Close/dispose active terminal panes if this is the active group
       if (isActive) {
         for (const s of liveSessions) {
           if (this.terminalPanes[s.slot]) {
@@ -8152,7 +8209,11 @@ class CWMApp {
         }
       }
 
-      this.showToast(`Killed ${liveSessions.length} session${liveSessions.length > 1 ? 's' : ''} and closed tab`, 'success');
+      if (choice === 'kill') {
+        this.showToast(`Killed ${liveSessions.length} ${sessionWord} and closed tab`, 'success');
+      } else {
+        this.showToast(`Moved ${liveSessions.length} ${sessionWord} to background — drag to reconnect`, 'info');
+      }
     }
 
     this.deleteTerminalGroup(groupId);
