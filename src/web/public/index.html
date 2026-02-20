@@ -99,6 +99,10 @@
 
       <div class="header-center">
         <nav class="view-tabs" role="tablist">
+          <button class="view-tab active" data-mode="terminal" role="tab" aria-selected="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm3.5 1a.5.5 0 0 0-.354.854l2.5 2.5a.5.5 0 0 0 .708 0l2.5-2.5A.5.5 0 0 0 8.5 3h-5z"/></svg>
+            Terminal
+          </button>
           <button class="view-tab" data-mode="workspace" role="tab" aria-selected="false">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <rect x="1" y="1" width="5" height="5" rx="1.5" stroke="currentColor" stroke-width="1.2"/>
@@ -120,10 +124,6 @@
               <path d="M7 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             Recent
-          </button>
-          <button class="view-tab active" data-mode="terminal" role="tab" aria-selected="true">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm3.5 1a.5.5 0 0 0-.354.854l2.5 2.5a.5.5 0 0 0 .708 0l2.5-2.5A.5.5 0 0 0 8.5 3h-5z"/></svg>
-            Terminal
           </button>
           <button class="view-tab" data-mode="docs" role="tab" aria-selected="false">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -313,17 +313,19 @@
         </div>
         <!-- Usage Quota Widget -->
         <div class="quota-widget" id="quota-widget">
-          <div class="quota-widget-header">
-            <span class="quota-widget-title">Usage</span>
-            <button class="btn btn-ghost btn-icon btn-xs quota-widget-toggle" id="quota-widget-toggle" title="Toggle usage widget">
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6l3.5 4 3.5-4z"/></svg>
-            </button>
+          <!-- Primary usage bar (always visible) -->
+          <div class="quota-primary" id="quota-primary">
+            <!-- Rendered by app.js: single bar + reset timer -->
           </div>
-          <div class="quota-widget-body" id="quota-widget-body">
+          <!-- Collapsible detailed usage -->
+          <button class="quota-details-toggle" id="quota-details-toggle">
+            <svg class="quota-details-chevron" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 6l3.5 4 3.5-4z"/></svg>
+            <span>Detailed Usage</span>
+          </button>
+          <div class="quota-details-body" id="quota-details-body" hidden>
             <div class="quota-bars" id="quota-bars">
-              <!-- Rendered by app.js -->
+              <!-- Rendered by app.js: 4 period bars -->
             </div>
-            <div class="quota-reset" id="quota-reset"></div>
           </div>
           <!-- API key blur overlay -->
           <div class="quota-apikey-overlay" id="quota-apikey-overlay" hidden>

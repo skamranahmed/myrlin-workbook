@@ -401,10 +401,10 @@ class CWMApp {
 
       // Quota Widget
       quotaWidget: document.getElementById('quota-widget'),
-      quotaWidgetBody: document.getElementById('quota-widget-body'),
-      quotaWidgetToggle: document.getElementById('quota-widget-toggle'),
+      quotaPrimary: document.getElementById('quota-primary'),
+      quotaDetailsToggle: document.getElementById('quota-details-toggle'),
+      quotaDetailsBody: document.getElementById('quota-details-body'),
       quotaBars: document.getElementById('quota-bars'),
-      quotaReset: document.getElementById('quota-reset'),
       quotaApikeyOverlay: document.getElementById('quota-apikey-overlay'),
 
       // Session Manager
@@ -589,9 +589,9 @@ class CWMApp {
       if (e.target === this.els.modalOverlay) this.closeModal(null);
     });
 
-    // Quota widget toggle
-    if (this.els.quotaWidgetToggle) {
-      this.els.quotaWidgetToggle.addEventListener('click', () => this.toggleQuotaWidget());
+    // Quota widget details accordion
+    if (this.els.quotaDetailsToggle) {
+      this.els.quotaDetailsToggle.addEventListener('click', () => this.toggleQuotaDetails());
     }
 
     // Docs panel
@@ -2698,21 +2698,23 @@ class CWMApp {
     }
   }
 
-  /** Toggle collapse/expand of the quota widget body */
-  toggleQuotaWidget() {
-    if (!this.els.quotaWidget) return;
-    this.els.quotaWidget.classList.toggle('collapsed');
-    const isCollapsed = this.els.quotaWidget.classList.contains('collapsed');
-    localStorage.setItem('cwm_quotaCollapsed', isCollapsed ? '1' : '0');
+  /** Toggle the "Detailed Usage" accordion open/closed */
+  toggleQuotaDetails() {
+    if (!this.els.quotaDetailsToggle || !this.els.quotaDetailsBody) return;
+    const isOpen = !this.els.quotaDetailsBody.hidden;
+    this.els.quotaDetailsBody.hidden = isOpen;
+    this.els.quotaDetailsToggle.classList.toggle('open', !isOpen);
+    localStorage.setItem('cwm_quotaDetailsOpen', isOpen ? '0' : '1');
   }
 
   /** Start periodic polling for usage quota (every 60s) */
   startQuotaPolling() {
-    if (!this.els.quotaBars) return;
+    if (!this.els.quotaPrimary) return;
 
-    // Restore collapse state
-    if (localStorage.getItem('cwm_quotaCollapsed') === '1') {
-      this.els.quotaWidget.classList.add('collapsed');
+    // Restore details accordion state
+    if (localStorage.getItem('cwm_quotaDetailsOpen') === '1' && this.els.quotaDetailsToggle) {
+      this.els.quotaDetailsBody.hidden = false;
+      this.els.quotaDetailsToggle.classList.add('open');
     }
 
     // Initial fetch
@@ -2724,7 +2726,7 @@ class CWMApp {
 
   /** Fetch usage quota from server and render the widget */
   async fetchAndRenderQuota() {
-    if (!this.els.quotaBars) return;
+    if (!this.els.quotaPrimary) return;
     try {
       const data = await this.api('GET', '/api/usage/quota');
       this._lastQuotaData = data;
@@ -2735,11 +2737,13 @@ class CWMApp {
   }
 
   /**
-   * Render the quota usage bars from API data.
+   * Render the quota usage widget from API data.
+   * Primary bar: single Anthropic-style usage bar (5-hour window by default).
+   * Detailed bars: per-period breakdown in collapsible accordion.
    * @param {object} data - Response from /api/usage/quota
    */
   renderQuotaWidget(data) {
-    if (!this.els.quotaBars || !data || !data.periods) return;
+    if (!this.els.quotaPrimary || !data || !data.periods) return;
 
     const settings = this.state.settings;
     const limitMap = {
@@ -2749,52 +2753,83 @@ class CWMApp {
       monthly:  settings.quotaMonthlyLimit || 0,
     };
 
-    // Ordered list of periods to display
-    const periodKeys = ['fiveHour', 'daily', 'weekly', 'monthly'];
-    let html = '';
-
-    for (const key of periodKeys) {
-      const p = data.periods[key];
-      if (!p) continue;
-
-      const limit = limitMap[key];
-      const msgs = p.messages;
+    // ── Primary bar: use 5-hour window (most relevant for rate limits) ──
+    const primary = data.periods.fiveHour;
+    if (primary) {
+      const limit = limitMap.fiveHour;
+      const msgs = primary.messages;
       const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
       const tier = limit <= 0 ? 'nomax' : pct >= 90 ? 'crit' : pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
-      const widthPct = limit > 0 ? pct : Math.min(msgs * 2, 100); // For no-limit, show proportional bar capped at 100
+      const widthPct = limit > 0 ? pct : Math.min(msgs, 100);
 
-      const valueText = limit > 0
-        ? `${msgs.toLocaleString()} / ${limit.toLocaleString()}`
-        : `${msgs.toLocaleString()} msgs`;
+      // Label text
+      const labelText = limit > 0
+        ? `${msgs} / ${limit} messages`
+        : `${msgs} messages`;
 
-      const costText = p.cost > 0 ? ` · $${p.cost.toFixed(2)}` : '';
+      // Reset countdown
+      let resetText = '';
+      if (primary.resetAt) {
+        const diffMs = new Date(primary.resetAt).getTime() - Date.now();
+        if (diffMs > 0) {
+          const hrs = Math.floor(diffMs / 3600000);
+          const mins = Math.floor((diffMs % 3600000) / 60000);
+          resetText = hrs > 0 ? `Resets in ${hrs}h ${mins}m` : `Resets in ${mins}m`;
+        }
+      }
 
-      html += `
-        <div class="quota-bar-row">
-          <div class="quota-bar-label">
-            <span class="quota-bar-name">${p.label}</span>
-            <span class="quota-bar-value">${valueText}${costText}</span>
-          </div>
-          <div class="quota-bar-track">
-            <div class="quota-bar-fill tier-${tier}" style="width:${widthPct}%"></div>
-          </div>
+      // Cost text (today's cost for context)
+      const dailyCost = data.periods.daily ? data.periods.daily.cost : 0;
+      const costText = dailyCost > 0 ? `$${dailyCost.toFixed(2)} today` : '';
+
+      this.els.quotaPrimary.innerHTML = `
+        <div class="quota-primary-header">
+          <span class="quota-primary-label">${labelText}</span>
+          <span class="quota-primary-meta">${resetText}</span>
+        </div>
+        <div class="quota-primary-track">
+          <div class="quota-primary-fill tier-${tier}" style="width:${widthPct}%"></div>
+        </div>
+        <div class="quota-primary-footer">
+          <span class="quota-primary-cost">${costText}</span>
+          <span>${limit > 0 ? Math.round(pct) + '% used' : '5h window'}</span>
         </div>`;
     }
 
-    this.els.quotaBars.innerHTML = html;
+    // ── Detail bars: all 4 periods in the accordion ──
+    if (this.els.quotaBars) {
+      const periodKeys = ['fiveHour', 'daily', 'weekly', 'monthly'];
+      let detailHtml = '';
 
-    // Render next reset time (use the 5-hour window reset as primary)
-    const fiveHour = data.periods.fiveHour;
-    if (fiveHour && fiveHour.resetAt && this.els.quotaReset) {
-      const resetDate = new Date(fiveHour.resetAt);
-      const diffMs = resetDate.getTime() - Date.now();
-      if (diffMs > 0) {
-        const hrs = Math.floor(diffMs / 3600000);
-        const mins = Math.floor((diffMs % 3600000) / 60000);
-        this.els.quotaReset.textContent = `Window resets in ${hrs}h ${mins}m`;
-      } else {
-        this.els.quotaReset.textContent = 'Window resetting...';
+      for (const key of periodKeys) {
+        const p = data.periods[key];
+        if (!p) continue;
+
+        const limit = limitMap[key];
+        const msgs = p.messages;
+        const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
+        const tier = limit <= 0 ? 'nomax' : pct >= 90 ? 'crit' : pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
+        const widthPct = limit > 0 ? pct : Math.min(msgs * 2, 100);
+
+        const valueText = limit > 0
+          ? `${msgs.toLocaleString()} / ${limit.toLocaleString()}`
+          : `${msgs.toLocaleString()} msgs`;
+
+        const costText = p.cost > 0 ? ` · $${p.cost.toFixed(2)}` : '';
+
+        detailHtml += `
+          <div class="quota-bar-row">
+            <div class="quota-bar-label">
+              <span class="quota-bar-name">${p.label}</span>
+              <span class="quota-bar-value">${valueText}${costText}</span>
+            </div>
+            <div class="quota-bar-track">
+              <div class="quota-bar-fill tier-${tier}" style="width:${widthPct}%"></div>
+            </div>
+          </div>`;
       }
+
+      this.els.quotaBars.innerHTML = detailHtml;
     }
   }
 

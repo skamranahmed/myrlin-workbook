@@ -464,6 +464,14 @@ class TerminalPane {
       this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
     };
 
+    // ── Write batching: accumulate WebSocket data and flush to xterm
+    //    once per animation frame. Prevents main-thread thrashing when
+    //    multiple terminals output rapidly (fixes input freeze). ──
+    this._writeBuf = '';
+    this._writeRaf = null;
+    this._activitySample = '';       // Sampled data for activity detection
+    this._activityDebounceTimer = null;
+
     this.ws.onmessage = (event) => {
       const data = event.data;
 
@@ -476,26 +484,22 @@ class TerminalPane {
         try {
           const msg = JSON.parse(data);
           if (msg.type === 'exit') {
+            // Flush any pending writes before showing exit status
+            this._flushWriteBuffer();
             this._status('[Process exited with code ' + msg.exitCode + ']', 'red');
             this.connected = false;
             return;
           } else if (msg.type === 'error') {
+            this._flushWriteBuffer();
             this._status('[Error: ' + msg.message + ']', 'red');
             return;
           } else if (msg.type === 'output') {
-            this.term.write(msg.data);
-            this._detectActivity(msg.data);
-            this._trackActivityForCompletion();
+            this._enqueueWrite(msg.data);
             return;
           }
         } catch (_) {}
       }
-      this.term.write(data);
-
-      // Detect activity from raw terminal output
-      this._detectActivity(data);
-      // Track activity for completion detection
-      this._trackActivityForCompletion();
+      this._enqueueWrite(data);
     };
 
     this.ws.onclose = (event) => {
@@ -684,6 +688,56 @@ class TerminalPane {
   }
 
   /* ═══════════════════════════════════════════════════════════
+     WRITE BATCHING
+     Accumulates WebSocket data and flushes to xterm.js once per
+     animation frame. Prevents main-thread thrashing when multiple
+     terminals output rapidly — the primary cause of input freezes.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Enqueue data for batched writing to xterm.
+   * Schedules a single requestAnimationFrame to flush all accumulated data.
+   * @param {string} data - Raw terminal output
+   */
+  _enqueueWrite(data) {
+    this._writeBuf += data;
+    this._activitySample += data;
+
+    if (!this._writeRaf) {
+      this._writeRaf = requestAnimationFrame(() => this._flushWriteBuffer());
+    }
+  }
+
+  /**
+   * Flush accumulated write buffer to xterm in a single write call.
+   * Also triggers debounced activity detection and completion tracking.
+   */
+  _flushWriteBuffer() {
+    this._writeRaf = null;
+    if (!this._writeBuf) return;
+
+    const buf = this._writeBuf;
+    this._writeBuf = '';
+
+    // Single xterm write for the entire frame's data
+    this.term.write(buf);
+
+    // Track completion (debounced internally)
+    this._trackActivityForCompletion();
+
+    // Debounce activity detection to at most once per 200ms
+    if (!this._activityDebounceTimer) {
+      this._activityDebounceTimer = setTimeout(() => {
+        this._activityDebounceTimer = null;
+        const sample = this._activitySample;
+        this._activitySample = '';
+        if (sample) this._detectActivity(sample);
+      }, 200);
+    }
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
      ACTIVITY DETECTION
      Parses terminal output in real-time for Claude Code patterns
      and dispatches 'terminal-activity' events so the app layer
@@ -816,6 +870,10 @@ class TerminalPane {
     clearTimeout(this.reconnectTimer);
     clearTimeout(this._fitTimer);
     clearTimeout(this._idleCheckTimer);
+    clearTimeout(this._activityDebounceTimer);
+    if (this._writeRaf) cancelAnimationFrame(this._writeRaf);
+    this._writeBuf = '';
+    this._activitySample = '';
     if (this._touchScrollCleanup) this._touchScrollCleanup();
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this.ws) { this.ws.onmessage = null; this.ws.onclose = null; this.ws.close(); }
