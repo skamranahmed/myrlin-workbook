@@ -3385,6 +3385,7 @@ class CWMApp {
       `;
       this.els.modalConfirmBtn.textContent = 'Import Selected';
       this.els.modalConfirmBtn.className = 'btn btn-primary';
+      this.els.modalConfirmBtn.disabled = false;
       this.els.modalCancelBtn.textContent = 'Cancel';
       this.els.modalOverlay.hidden = false;
 
@@ -3395,6 +3396,14 @@ class CWMApp {
       document.getElementById('discover-select-none').addEventListener('click', () => {
         this.els.modalBody.querySelectorAll('.discover-cb').forEach(cb => cb.checked = false);
       });
+
+      // Wire confirm button to resolve the promise
+      const confirmHandler = () => {
+        this.els.modalConfirmBtn.disabled = true;
+        this.els.modalConfirmBtn.removeEventListener('click', confirmHandler);
+        this.closeModal(true);
+      };
+      this.els.modalConfirmBtn.addEventListener('click', confirmHandler);
 
       // Wait for confirm/cancel
       const result = await new Promise(resolve => {
