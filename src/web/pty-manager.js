@@ -255,19 +255,42 @@ class PtySessionManager {
       });
     }
 
-    // PTY output handler: buffer + broadcast as raw binary (no JSON wrapping)
-    ptyProcess.onData((data) => {
-      session.appendScrollback(data);
+    // PTY output handler: buffer + broadcast with chunked flushing.
+    // Accumulates PTY output and flushes at most once per 16ms (~60fps)
+    // to prevent flooding WebSocket clients when Claude dumps large output.
+    session._outputBuf = '';
+    session._flushTimer = null;
 
-      // Broadcast raw output to all connected WebSocket clients
+    const flushOutput = () => {
+      session._flushTimer = null;
+      if (!session._outputBuf) return;
+
+      const chunk = session._outputBuf;
+      session._outputBuf = '';
+
+      // Broadcast the accumulated chunk to all connected WebSocket clients
       for (const ws of session.clients) {
         try {
           if (ws.readyState === 1) { // WebSocket.OPEN
-            ws.send(data);
+            // Check WebSocket backpressure: if buffered data exceeds 64KB,
+            // skip this client to let it catch up (data is in scrollback)
+            if (ws.bufferedAmount < 65536) {
+              ws.send(chunk);
+            }
           }
         } catch (_) {
           session.clients.delete(ws);
         }
+      }
+    };
+
+    ptyProcess.onData((data) => {
+      session.appendScrollback(data);
+
+      // Accumulate data and schedule a flush
+      session._outputBuf += data;
+      if (!session._flushTimer) {
+        session._flushTimer = setTimeout(flushOutput, 16);
       }
 
       // Throttled lastActive update - fires immediately then at most once per 30s
@@ -286,6 +309,19 @@ class PtySessionManager {
 
     // PTY exit handler
     ptyProcess.onExit(({ exitCode }) => {
+      // Flush any remaining buffered output before sending exit
+      if (session._flushTimer) {
+        clearTimeout(session._flushTimer);
+        session._flushTimer = null;
+      }
+      if (session._outputBuf) {
+        const finalChunk = session._outputBuf;
+        session._outputBuf = '';
+        for (const ws of session.clients) {
+          try { if (ws.readyState === 1) ws.send(finalChunk); } catch (_) {}
+        }
+      }
+
       session.alive = false;
       session.exitCode = exitCode;
 
