@@ -555,12 +555,16 @@ class CWMApp {
       });
     }
 
-    // Suppress browser's native right-click menu within the app
+    // Suppress browser's native right-click menu within the app.
+    // Show a minimal context menu with "Inspect Element" for non-handled areas.
+    // (Specific handlers on child elements call stopPropagation, so this only
+    // fires for areas without their own context menu.)
     this.els.app.addEventListener('contextmenu', (e) => {
       // Allow native menu on text inputs/textareas for copy/paste
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       e.preventDefault();
+      this._showInspectContextMenu(e.target, e.clientX, e.clientY);
     });
 
     // Quick Switcher
@@ -1846,43 +1850,44 @@ class CWMApp {
 
     items.push({ type: 'sep' });
 
-    // Actions
-    items.push(
-      { label: 'Rename', icon: '&#9998;', action: () => this.renameSession(sessionId) },
-      { label: 'Auto Title', icon: '&#9733;', action: () => this.autoTitleSession(sessionId) },
-      { label: 'Summarize', icon: '&#128220;', action: () => this.summarizeSession(sessionId) },
-      { label: 'Copy Session ID', icon: '&#128203;', action: () => {
-        navigator.clipboard.writeText(session.resumeSessionId || session.id);
-        this.showToast('Session ID copied', 'success');
-      }},
-      { label: 'Start with Context', icon: '&#128218;', action: () => this.startSessionWithContext(sessionId) },
-      { label: 'Save as Template', icon: '&#128190;', action: () => this.saveSessionAsTemplate(session) },
-      { label: 'Export Context', icon: '&#128230;', action: () => this.exportSessionContext(sessionId) },
-      { label: 'Summarize to Docs', icon: '&#128221;', action: () => this.summarizeSessionToDocs(sessionId) },
-    );
-
-    // Refocus submenu — distill conversation + reset or compact
+    // Naming submenu — rename and auto-title grouped together
     items.push({
-      label: 'Refocus', icon: '&#128260;',
+      label: 'Naming', icon: '&#9998;',
       submenu: [
-        { label: 'Reset & Refocus', action: () => this.refocusSession(sessionId, 'reset') },
-        { label: 'Compact & Refocus', action: () => this.refocusSession(sessionId, 'compact') },
+        { label: 'Rename', action: () => this.renameSession(sessionId) },
+        { label: 'Auto Title', action: () => this.autoTitleSession(sessionId) },
       ],
     });
 
-    // If the session has a working directory, add git worktree option
+    // Insights submenu — session analysis and export
+    items.push({
+      label: 'Insights', icon: '&#128220;',
+      submenu: [
+        { label: 'Summarize', action: () => this.summarizeSession(sessionId) },
+        { label: 'Summarize to Docs', action: () => this.summarizeSessionToDocs(sessionId) },
+        { label: 'Export Context', action: () => this.exportSessionContext(sessionId) },
+        { label: 'Copy Session ID', action: () => {
+          navigator.clipboard.writeText(session.resumeSessionId || session.id);
+          this.showToast('Session ID copied', 'success');
+        }},
+      ],
+    });
+
+    // Advanced submenu — templates, context, refocus, worktrees
+    const advancedItems = [
+      { label: 'Start with Context', action: () => this.startSessionWithContext(sessionId) },
+      { label: 'Save as Template', action: () => this.saveSessionAsTemplate(session) },
+      { label: 'Reset & Refocus', action: () => this.refocusSession(sessionId, 'reset') },
+      { label: 'Compact & Refocus', action: () => this.refocusSession(sessionId, 'compact') },
+    ];
     if (session.workingDir) {
-      items.push({
-        label: 'View Worktrees',
-        icon: '&#128268;',
-        action: () => this.showWorktreeList(session.workingDir)
-      });
+      advancedItems.push({ label: 'View Worktrees', action: () => this.showWorktreeList(session.workingDir) });
     }
+    items.push({ label: 'Advanced', icon: '&#9881;', submenu: advancedItems });
 
     // Move to another workspace (submenu)
     const otherWorkspaces = this.state.workspaces.filter(w => w.id !== session.workspaceId);
     if (otherWorkspaces.length > 0) {
-      items.push({ type: 'sep' });
       items.push({
         label: 'Move to', icon: '&#8594;',
         submenu: otherWorkspaces.slice(0, 8).map(ws => ({
@@ -1958,6 +1963,54 @@ class CWMApp {
     this.els.contextMenu.hidden = true;
   }
 
+  /**
+   * Show a minimal context menu with developer utilities like "Inspect Element".
+   * Appears when right-clicking areas without a specific context menu handler.
+   */
+  _showInspectContextMenu(targetEl, x, y) {
+    const items = [
+      {
+        label: 'Inspect Element', icon: '&#128269;', action: () => {
+          // Use Chrome DevTools inspect() when available (requires DevTools open)
+          if (typeof inspect === 'function') {
+            inspect(targetEl);
+          } else {
+            // Fallback: log element details to console and hint to open DevTools
+            console.log('%c[Inspect]', 'color:#cba6f7;font-weight:bold', targetEl);
+            console.log('  Tag:', targetEl.tagName, '| Classes:', targetEl.className);
+            console.log('  Selector:', this._buildSelector(targetEl));
+            this.showToast('Element logged to console (F12)', 'info');
+          }
+        },
+      },
+      {
+        label: 'Copy Selector', icon: '&#128203;', action: () => {
+          const selector = this._buildSelector(targetEl);
+          navigator.clipboard.writeText(selector);
+          this.showToast('Selector copied', 'success');
+        },
+      },
+    ];
+    this._renderContextItems('', items, x, y);
+  }
+
+  /** Build a CSS selector path for an element (for debugging) */
+  _buildSelector(el) {
+    const parts = [];
+    let cur = el;
+    while (cur && cur !== document.body && parts.length < 5) {
+      let sel = cur.tagName.toLowerCase();
+      if (cur.id) { sel += '#' + cur.id; parts.unshift(sel); break; }
+      if (cur.className && typeof cur.className === 'string') {
+        const cls = cur.className.trim().split(/\s+/).slice(0, 2).join('.');
+        if (cls) sel += '.' + cls;
+      }
+      parts.unshift(sel);
+      cur = cur.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
   showProjectSessionContextMenu(sessionName, projectPath, x, y) {
     const items = [];
 
@@ -2009,35 +2062,27 @@ class CWMApp {
 
     items.push({ type: 'sep' });
 
-    // Auto Title (reads first user message and stores a friendly name)
+    // Grouped: naming + insights
     items.push({
-      label: 'Auto Title', icon: '&#9733;', action: () => this.autoTitleProjectSession(sessionName),
+      label: 'Naming', icon: '&#9998;',
+      submenu: [
+        { label: 'Auto Title', action: () => this.autoTitleProjectSession(sessionName) },
+      ],
     });
-
-    // Summarize session
     items.push({
-      label: 'Summarize', icon: '&#128220;', action: () => this.summarizeSession(sessionName, sessionName),
+      label: 'Insights', icon: '&#128220;',
+      submenu: [
+        { label: 'Summarize', action: () => this.summarizeSession(sessionName, sessionName) },
+        { label: 'Copy Session ID', action: () => {
+          navigator.clipboard.writeText(sessionName);
+          this.showToast('Session ID copied', 'success');
+        }},
+        { label: 'Copy Path', action: () => {
+          navigator.clipboard.writeText(projectPath);
+          this.showToast('Path copied', 'success');
+        }},
+      ],
     });
-
-    items.push({ type: 'sep' });
-
-    // Copy session ID
-    items.push({
-      label: 'Copy Session ID', icon: '&#128203;', action: () => {
-        navigator.clipboard.writeText(sessionName);
-        this.showToast('Session ID copied', 'success');
-      },
-    });
-
-    // Copy project path
-    items.push({
-      label: 'Copy Path', icon: '&#128193;', action: () => {
-        navigator.clipboard.writeText(projectPath);
-        this.showToast('Path copied', 'success');
-      },
-    });
-
-    // Start a new session with project context pre-injected
     items.push({
       label: 'Start with Context', icon: '&#128218;', action: () => this.startProjectWithContext(projectPath),
     });
@@ -6727,13 +6772,15 @@ class CWMApp {
       },
     });
 
-    // Inspect - open browser DevTools console
+    // Inspect Element - select element in DevTools or log to console
     items.push({
-      label: 'Inspect', icon: '&#128269;', action: () => {
-        if (window.__TAURI__ || (window.process && window.process.versions && window.process.versions.electron)) {
-          try { require('electron').remote.getCurrentWindow().webContents.openDevTools(); } catch (_) {}
+      label: 'Inspect Element', icon: '&#128269;', action: () => {
+        const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+        if (typeof inspect === 'function') {
+          inspect(paneEl);
         } else {
-          this.showToast('Press F12 or Ctrl+Shift+I to open DevTools', 'info');
+          console.log('%c[Inspect]', 'color:#cba6f7;font-weight:bold', paneEl);
+          this.showToast('Element logged to console (F12)', 'info');
         }
       },
     });
