@@ -8878,10 +8878,8 @@ class CWMApp {
         }
       }
       delete this._groupPaneCache[groupId];
-      // Refit terminals after DOM reattachment
-      requestAnimationFrame(() => {
-        this.terminalPanes.forEach(tp => { if (tp) tp.safeFit(); });
-      });
+      // Recalculate grid layout for restored pane count, then refit
+      this.updateTerminalGridLayout();
     } else {
       // No cache — create fresh connections (first time opening this group)
       const group = this._tabGroups.find(g => g.id === groupId);
