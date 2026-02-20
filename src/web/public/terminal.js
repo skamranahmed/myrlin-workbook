@@ -641,6 +641,7 @@ class TerminalPane {
     if (!this._isMobile() || !this.term) return;
 
     this._mobileTypeMode = false;
+    this._mobileSelecting = false;
 
     const container = document.getElementById(this.containerId);
     if (!container) return;
@@ -649,19 +650,166 @@ class TerminalPane {
 
     this._xtermTextarea = textarea;
     this._xtermScreen = container.querySelector('.xterm-screen');
+    this._xtermViewport = container.querySelector('.xterm-viewport');
 
     // Default to scroll mode: block touch from reaching textarea and screen.
     // textarea: prevents keyboard popup on scroll
-    // screen: lets touches pass through to .xterm-viewport for native scroll
+    // screen: block xterm.js's internal touch handling that calls preventDefault
     textarea.style.pointerEvents = 'none';
     if (this._xtermScreen) this._xtermScreen.style.pointerEvents = 'none';
+
+    // ── Manual touch-scroll with momentum ──────────────────────────
+    // Why manual? xterm.js registers touch/wheel handlers on .xterm-viewport
+    // and .xterm that call preventDefault(), blocking native browser scroll
+    // even when pointer-events: none is set on .xterm-screen (events still
+    // bubble from viewport to .xterm where xterm.js intercepts them).
+    //
+    // This handler intercepts touches at our container level (capture phase)
+    // and programmatically scrolls .xterm-viewport.scrollTop. Momentum
+    // simulation provides native-feeling inertia on touch release.
+    //
+    // Long-press (400ms hold) switches to xterm.js selection mode so the
+    // user can highlight text without triggering the keyboard.
+
+    const viewport = this._xtermViewport;
+    if (!viewport) return;
+
+    let startY = 0;          // Touch start Y position
+    let lastY = 0;           // Previous touchmove Y
+    let lastTime = 0;        // Previous touchmove timestamp
+    let velocity = 0;        // Scroll velocity for momentum (px/ms)
+    let momentumRaf = null;  // rAF ID for momentum animation
+    let isScrolling = false; // Whether we detected a scroll gesture
+    let longPressTimer = null;
+    const LONG_PRESS_MS = 400;
+    const MOVE_THRESHOLD = 8;  // px — must move this far to be a scroll
+    const FRICTION = 0.95;     // Momentum deceleration per frame
+    const MIN_VELOCITY = 0.5;  // Stop momentum below this (px/ms)
+
+    /** Cancel any running momentum animation */
+    const stopMomentum = () => {
+      if (momentumRaf) { cancelAnimationFrame(momentumRaf); momentumRaf = null; }
+      velocity = 0;
+    };
+
+    /** Animate momentum scroll after finger lifts */
+    const animateMomentum = () => {
+      velocity *= FRICTION;
+      if (Math.abs(velocity) < MIN_VELOCITY) { stopMomentum(); return; }
+      viewport.scrollTop -= velocity * 16; // ~16ms per frame
+      momentumRaf = requestAnimationFrame(animateMomentum);
+    };
+
+    const onTouchStart = (e) => {
+      // In type mode, let xterm.js handle everything
+      if (this._mobileTypeMode) return;
+      // If currently selecting, let xterm handle
+      if (this._mobileSelecting) return;
+
+      stopMomentum();
+      const touch = e.touches[0];
+      startY = touch.clientY;
+      lastY = touch.clientY;
+      lastTime = Date.now();
+      velocity = 0;
+      isScrolling = false;
+
+      // Start long-press timer for text selection
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (!isScrolling) this._enableMobileSelection();
+      }, LONG_PRESS_MS);
+    };
+
+    const onTouchMove = (e) => {
+      if (this._mobileTypeMode) return;
+      // If selecting, let xterm.js handle the selection drag
+      if (this._mobileSelecting) return;
+
+      const touch = e.touches[0];
+      const deltaY = touch.clientY - lastY;
+      const totalDelta = Math.abs(touch.clientY - startY);
+      const now = Date.now();
+      const dt = now - lastTime;
+
+      // Once movement exceeds threshold, it's a scroll — cancel long-press
+      if (!isScrolling && totalDelta > MOVE_THRESHOLD) {
+        isScrolling = true;
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      }
+
+      if (isScrolling) {
+        // Scroll the viewport by the finger's delta
+        viewport.scrollTop -= deltaY;
+        // Track velocity for momentum (smoothed)
+        if (dt > 0) {
+          const instantV = deltaY / dt;
+          velocity = velocity * 0.6 + instantV * 0.4; // weighted average
+        }
+      }
+
+      lastY = touch.clientY;
+      lastTime = now;
+    };
+
+    const onTouchEnd = () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+
+      // If we were selecting, revert after a delay for xterm.js to process
+      if (this._mobileSelecting) {
+        setTimeout(() => this._disableMobileSelection(), 300);
+        return;
+      }
+
+      if (this._mobileTypeMode) return;
+
+      // Start momentum animation if finger was moving fast enough
+      if (isScrolling && Math.abs(velocity) > MIN_VELOCITY) {
+        momentumRaf = requestAnimationFrame(animateMomentum);
+      }
+      isScrolling = false;
+    };
+
+    // Use CAPTURE phase to intercept before xterm.js gets the events.
+    // Non-passive so we can prevent xterm from seeing the events in scroll mode.
+    container.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+    container.addEventListener('touchmove', onTouchMove, { capture: true, passive: true });
+    container.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { capture: true, passive: true });
+
+    // Store cleanup function for dispose()
+    this._touchScrollCleanup = () => {
+      clearTimeout(longPressTimer);
+      stopMomentum();
+      container.removeEventListener('touchstart', onTouchStart, { capture: true });
+      container.removeEventListener('touchmove', onTouchMove, { capture: true });
+      container.removeEventListener('touchend', onTouchEnd, { capture: true });
+      container.removeEventListener('touchcancel', onTouchEnd, { capture: true });
+    };
   }
 
-  // Touch scrolling is handled natively by the browser.
-  // In scroll mode, .xterm-screen has pointer-events: none, so touches
-  // pass through to .xterm-viewport which scrolls natively via CSS
-  // touch-action: pan-y. This runs on the compositor thread for 60fps
-  // smoothness with native momentum/deceleration — no JS needed.
+  /**
+   * Temporarily enable xterm.js touch handling for text selection (long-press).
+   * Re-enables pointer-events on .xterm-screen so xterm handles selection,
+   * but keeps textarea pointer-events disabled to prevent keyboard popup.
+   */
+  _enableMobileSelection() {
+    this._mobileSelecting = true;
+    if (this._xtermScreen) this._xtermScreen.style.pointerEvents = 'auto';
+    // Haptic feedback if available (subtle vibration signals selection mode)
+    if (navigator.vibrate) navigator.vibrate(25);
+  }
+
+  /**
+   * Disable xterm.js touch handling after selection ends.
+   * Reverts .xterm-screen to pointer-events: none for scroll passthrough.
+   */
+  _disableMobileSelection() {
+    this._mobileSelecting = false;
+    if (this._xtermScreen && !this._mobileTypeMode) {
+      this._xtermScreen.style.pointerEvents = 'none';
+    }
+  }
 
   /**
    * Switch to type mode - keyboard appears, user can type into terminal.

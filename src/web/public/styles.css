@@ -2854,21 +2854,30 @@ textarea.input {
   tab-size: 4;
 }
 
-/* ─── Mobile: xterm scrollbar fix ────────────────────────────
-   xterm's .xterm-viewport uses overflow-y:scroll (always-on scrollbar).
-   On mobile this overlaps with the browser's native scroll chrome.
-   Fix: hide the visual scrollbar on touch devices — xterm's built-in
-   touch gesture handling still allows swiping to scroll the buffer.
+/* ─── Mobile: xterm scrollbar + scroll behavior ─────────────
+   Show a thin, themed scrollbar on mobile for draggable scrolling.
+   Native touch scroll works via pointer-events passthrough to .xterm-viewport.
+   Long-press activates text selection (handled in terminal.js).
    Also prevent the page itself from scrolling under the terminal. */
 @media (max-width: 768px) {
-  /* Hide xterm's forced scrollbar — touch scroll still works */
+  /* Show a thin scrollbar on mobile — touch-draggable for precise positioning */
   .xterm .xterm-viewport {
-    overflow-y: auto;
-    scrollbar-width: none;           /* Firefox */
-    -ms-overflow-style: none;        /* IE/Edge */
+    overflow-y: scroll;
+    scrollbar-width: thin;                /* Firefox: thin scrollbar */
+    scrollbar-color: var(--surface1) transparent;  /* thumb + track */
   }
   .xterm .xterm-viewport::-webkit-scrollbar {
-    display: none;                   /* Chrome/Safari */
+    width: 6px;                           /* thin scrollbar */
+  }
+  .xterm .xterm-viewport::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .xterm .xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--surface1);
+    border-radius: 3px;
+  }
+  .xterm .xterm-viewport::-webkit-scrollbar-thumb:active {
+    background: var(--overlay0);
   }
 
   /* Prevent terminal scroll from chaining to page scroll (bounce effect) */
