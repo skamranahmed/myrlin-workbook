@@ -122,15 +122,6 @@ class CWMApp {
         sessionCountInHeader: true,
         confirmBeforeClose: true,
         autoOpenTerminal: true,
-        quotaWidgetVisible: true,
-        quotaApiKeyMode: false,
-        quotaSessionLimit: 0,
-        quotaWeeklyAllLimit: 0,
-        quotaWeeklySonnetLimit: 0,
-        quotaDailyLimit: 0,
-        quotaWeeklyLimit: 0,
-        quotaMonthlyLimit: 0,
-        quotaFiveHourLimit: 0,
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -405,14 +396,6 @@ class CWMApp {
       settingsBtn: document.getElementById('settings-btn'),
       settingsCloseBtn: document.getElementById('settings-close-btn'),
 
-      // Quota Widget
-      quotaWidget: document.getElementById('quota-widget'),
-      quotaPrimary: document.getElementById('quota-primary'),
-      quotaDetailsToggle: document.getElementById('quota-details-toggle'),
-      quotaDetailsBody: document.getElementById('quota-details-body'),
-      quotaBars: document.getElementById('quota-bars'),
-      quotaApikeyOverlay: document.getElementById('quota-apikey-overlay'),
-
       // Session Manager
       sessionManagerOverlay: document.getElementById('session-manager-overlay'),
       sessionManagerList: document.getElementById('session-manager-list'),
@@ -594,11 +577,6 @@ class CWMApp {
     this.els.modalOverlay.addEventListener('click', (e) => {
       if (e.target === this.els.modalOverlay) this.closeModal(null);
     });
-
-    // Quota widget details accordion
-    if (this.els.quotaDetailsToggle) {
-      this.els.quotaDetailsToggle.addEventListener('click', () => this.toggleQuotaDetails());
-    }
 
     // Docs panel
     if (this.els.docsToggleRaw) {
@@ -1188,9 +1166,6 @@ class CWMApp {
 
     // Apply settings (CSS classes, visibility) after initial data is loaded
     this.applySettings();
-
-    // Start quota usage polling (non-blocking, 60s interval)
-    this.startQuotaPolling();
   }
 
   async loadWorkspaces() {
@@ -2529,11 +2504,6 @@ class CWMApp {
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
-      { key: 'quotaWidgetVisible', label: 'Usage Quota Widget', description: 'Show plan usage tracker in the sidebar', category: 'Usage' },
-      { key: 'quotaApiKeyMode', label: 'API Key Mode', description: 'Blur the quota widget and show "API Key In Use" overlay', category: 'Usage' },
-      { key: 'quotaSessionLimit', label: 'Session Limit (5h)', description: 'Max messages per 5-hour session window (0 = no limit shown)', category: 'Usage', type: 'number' },
-      { key: 'quotaWeeklyAllLimit', label: 'Weekly All Models Limit', description: 'Weekly rate limit for all models combined (0 = no limit shown)', category: 'Usage', type: 'number' },
-      { key: 'quotaWeeklySonnetLimit', label: 'Weekly Sonnet Limit', description: 'Weekly rate limit for Sonnet-only usage (0 = no limit shown)', category: 'Usage', type: 'number' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
     ];
   }
@@ -2742,15 +2712,6 @@ class CWMApp {
         tags: ['resources', 'cpu', 'memory', 'process', 'monitor', 'system', 'kill', 'performance'],
         icon: '&#128200;',
         navigateTo: 'resources',
-      },
-      {
-        id: 'quota-tracking',
-        name: 'Usage Quota Tracking',
-        description: 'Track message usage against 5-hour, daily, weekly, monthly limits',
-        detail: 'The sidebar shows a usage widget with configurable limits. Set limits in Settings. Shows progress bars for each quota period.',
-        category: 'feature',
-        tags: ['quota', 'usage', 'limit', 'message', 'rate', 'throttle'],
-        icon: '&#128200;',
       },
       {
         id: 'worktrees',
@@ -3058,15 +3019,13 @@ class CWMApp {
       });
     });
 
-    // Bind number input change events (for quota limits)
+    // Bind number input change events
     this.els.settingsBody.querySelectorAll('input[data-setting-num]').forEach(input => {
       input.addEventListener('change', (e) => {
         const key = e.target.dataset.settingNum;
         this.state.settings[key] = parseInt(e.target.value, 10) || 0;
         this.saveSettings();
         this.applySettings();
-        // Re-render quota widget with new limits
-        if (this._lastQuotaData) this.renderQuotaWidget(this._lastQuotaData);
       });
     });
   }
@@ -3098,237 +3057,6 @@ class CWMApp {
       this.renderWorkspaces();
     }
 
-    // Quota widget visibility and API key mode
-    this.applyQuotaSettings();
-  }
-
-
-  /* ═══════════════════════════════════════════════════════════
-     QUOTA USAGE WIDGET
-     ═══════════════════════════════════════════════════════════ */
-
-  /** Apply quota-specific settings (visibility, API key blur) */
-  applyQuotaSettings() {
-    if (!this.els.quotaWidget) return;
-    this.els.quotaWidget.style.display = this.state.settings.quotaWidgetVisible ? '' : 'none';
-    if (this.els.quotaApikeyOverlay) {
-      this.els.quotaApikeyOverlay.hidden = !this.state.settings.quotaApiKeyMode;
-    }
-  }
-
-  /** Toggle the "Detailed Usage" accordion open/closed */
-  toggleQuotaDetails() {
-    if (!this.els.quotaDetailsToggle || !this.els.quotaDetailsBody) return;
-    const isOpen = !this.els.quotaDetailsBody.hidden;
-    this.els.quotaDetailsBody.hidden = isOpen;
-    this.els.quotaDetailsToggle.classList.toggle('open', !isOpen);
-    localStorage.setItem('cwm_quotaDetailsOpen', isOpen ? '0' : '1');
-  }
-
-  /** Start periodic polling for usage quota (every 60s) */
-  startQuotaPolling() {
-    if (!this.els.quotaPrimary) return;
-
-    // Restore details accordion state
-    if (localStorage.getItem('cwm_quotaDetailsOpen') === '1' && this.els.quotaDetailsToggle) {
-      this.els.quotaDetailsBody.hidden = false;
-      this.els.quotaDetailsToggle.classList.add('open');
-    }
-
-    // Initial fetch
-    this.fetchAndRenderQuota();
-
-    // Poll every 60 seconds
-    this._quotaInterval = setInterval(() => this.fetchAndRenderQuota(), 60000);
-  }
-
-  /** Fetch usage quota from server and render the widget */
-  async fetchAndRenderQuota() {
-    if (!this.els.quotaPrimary) return;
-    try {
-      const data = await this.api('GET', '/api/usage/quota');
-      this._lastQuotaData = data;
-      this.renderQuotaWidget(data);
-    } catch (_) {
-      // Silently fail — don't disrupt the UX for a non-critical widget
-    }
-  }
-
-  /**
-   * Format a millisecond duration into a human-readable reset countdown.
-   * Matches Anthropic dashboard format: "Resets in 2 hr 32 min", "Resets Thu 5:00 PM"
-   * @param {string} resetAt - ISO timestamp of reset
-   * @param {boolean} [absolute] - Show absolute day/time instead of countdown
-   * @returns {string} Formatted reset text
-   */
-  _formatResetText(resetAt, absolute) {
-    if (!resetAt) return '';
-    const diffMs = new Date(resetAt).getTime() - Date.now();
-    if (diffMs <= 0) return 'Resetting...';
-
-    if (absolute) {
-      const d = new Date(resetAt);
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const hr = d.getHours();
-      const ampm = hr >= 12 ? 'PM' : 'AM';
-      const h12 = hr % 12 || 12;
-      const min = d.getMinutes().toString().padStart(2, '0');
-      return `Resets ${days[d.getDay()]} ${h12}:${min} ${ampm}`;
-    }
-
-    const hrs = Math.floor(diffMs / 3600000);
-    const mins = Math.floor((diffMs % 3600000) / 60000);
-    if (hrs > 0) return `Resets in ${hrs} hr ${mins} min`;
-    return `Resets in ${mins} min`;
-  }
-
-  /**
-   * Get a CSS tier class based on usage percentage.
-   * @param {number} pct - Usage percentage (0-100)
-   * @param {boolean} hasLimit - Whether a limit is configured
-   * @returns {string} tier class name
-   */
-  _usageTier(pct, hasLimit) {
-    if (!hasLimit) return 'nomax';
-    if (pct >= 90) return 'crit';
-    if (pct >= 70) return 'high';
-    if (pct >= 40) return 'mid';
-    return 'low';
-  }
-
-  /**
-   * Render the quota usage widget from API data.
-   * Matches Anthropic's dashboard: "Current session" + "Weekly limits" sections.
-   * Detailed per-period breakdown in collapsible accordion below.
-   * @param {object} data - Response from /api/usage/quota
-   */
-  renderQuotaWidget(data) {
-    if (!this.els.quotaPrimary || !data || !data.periods) return;
-
-    const settings = this.state.settings;
-    const tiers = data.tiers || {};
-
-    // ── Anthropic-style: Current session + Weekly limits ──
-    let primaryHtml = '';
-
-    // ─ Current session (5h rolling window) ─
-    const sessionData = tiers.session || {};
-    const sessionCount = sessionData.all || 0;
-    const sessionLimit = settings.quotaSessionLimit || 0;
-    const sessionPct = sessionLimit > 0 ? Math.min((sessionCount / sessionLimit) * 100, 100) : 0;
-    const sessionTier = this._usageTier(sessionPct, sessionLimit > 0);
-    const sessionWidthPct = sessionLimit > 0 ? sessionPct : Math.min(sessionCount, 100);
-    const sessionResetText = this._formatResetText(sessionData.resetAt);
-
-    primaryHtml += `
-      <div class="quota-section">
-        <div class="quota-section-header">
-          <span class="quota-section-title">Current session</span>
-        </div>
-        <div class="quota-row">
-          <div class="quota-row-meta">
-            <span class="quota-row-reset">${sessionResetText}</span>
-            <span class="quota-row-pct">${sessionLimit > 0 ? Math.round(sessionPct) + '% used' : sessionCount + ' msgs'}</span>
-          </div>
-          <div class="quota-primary-track">
-            <div class="quota-primary-fill tier-${sessionTier}" style="width:${sessionWidthPct}%"></div>
-          </div>
-        </div>
-      </div>`;
-
-    // ─ Weekly limits ─
-    const weeklyAll = tiers.weeklyAll || {};
-    const weeklySonnet = tiers.weeklySonnet || {};
-    const weeklyAllCount = weeklyAll.count || 0;
-    const weeklySonnetCount = weeklySonnet.count || 0;
-    const weeklyAllLimit = settings.quotaWeeklyAllLimit || 0;
-    const weeklySonnetLimit = settings.quotaWeeklySonnetLimit || 0;
-
-    const weeklyAllPct = weeklyAllLimit > 0 ? Math.min((weeklyAllCount / weeklyAllLimit) * 100, 100) : 0;
-    const weeklySonnetPct = weeklySonnetLimit > 0 ? Math.min((weeklySonnetCount / weeklySonnetLimit) * 100, 100) : 0;
-    const weeklyAllTier = this._usageTier(weeklyAllPct, weeklyAllLimit > 0);
-    const weeklySonnetTier = this._usageTier(weeklySonnetPct, weeklySonnetLimit > 0);
-    const weeklyAllWidthPct = weeklyAllLimit > 0 ? weeklyAllPct : Math.min(weeklyAllCount, 100);
-    const weeklySonnetWidthPct = weeklySonnetLimit > 0 ? weeklySonnetPct : Math.min(weeklySonnetCount, 100);
-
-    primaryHtml += `
-      <div class="quota-section quota-section-weekly">
-        <div class="quota-section-header">
-          <span class="quota-section-title">Weekly limits</span>
-        </div>
-        <div class="quota-row">
-          <div class="quota-row-label">All models</div>
-          <div class="quota-row-meta">
-            <span class="quota-row-reset">${this._formatResetText(weeklyAll.resetAt, true)}</span>
-            <span class="quota-row-pct">${weeklyAllLimit > 0 ? Math.round(weeklyAllPct) + '% used' : weeklyAllCount + ' msgs'}</span>
-          </div>
-          <div class="quota-primary-track">
-            <div class="quota-primary-fill tier-${weeklyAllTier}" style="width:${weeklyAllWidthPct}%"></div>
-          </div>
-        </div>
-        <div class="quota-row">
-          <div class="quota-row-label">Sonnet only</div>
-          <div class="quota-row-meta">
-            <span class="quota-row-reset">${this._formatResetText(weeklySonnet.resetAt, true)}</span>
-            <span class="quota-row-pct">${weeklySonnetLimit > 0 ? Math.round(weeklySonnetPct) + '% used' : weeklySonnetCount + ' msgs'}</span>
-          </div>
-          <div class="quota-primary-track">
-            <div class="quota-primary-fill tier-${weeklySonnetTier}" style="width:${weeklySonnetWidthPct}%"></div>
-          </div>
-        </div>
-      </div>`;
-
-    this.els.quotaPrimary.innerHTML = primaryHtml;
-
-    // ── Detail bars: all 4 periods + cost in the accordion ──
-    if (this.els.quotaBars) {
-      const periodKeys = ['fiveHour', 'daily', 'weekly', 'monthly'];
-      const periodLimits = {
-        fiveHour: settings.quotaFiveHourLimit || 0,
-        daily:    settings.quotaDailyLimit || 0,
-        weekly:   settings.quotaWeeklyLimit || 0,
-        monthly:  settings.quotaMonthlyLimit || 0,
-      };
-      let detailHtml = '';
-
-      for (const key of periodKeys) {
-        const p = data.periods[key];
-        if (!p) continue;
-
-        const limit = periodLimits[key];
-        const msgs = p.messages;
-        const pct = limit > 0 ? Math.min((msgs / limit) * 100, 100) : 0;
-        const tier = this._usageTier(pct, limit > 0);
-        const widthPct = limit > 0 ? pct : Math.min(msgs * 2, 100);
-
-        const valueText = limit > 0
-          ? `${msgs.toLocaleString()} / ${limit.toLocaleString()}`
-          : `${msgs.toLocaleString()} msgs`;
-
-        const costText = p.cost > 0 ? ` · $${p.cost.toFixed(2)}` : '';
-
-        detailHtml += `
-          <div class="quota-bar-row">
-            <div class="quota-bar-label">
-              <span class="quota-bar-name">${p.label}</span>
-              <span class="quota-bar-value">${valueText}${costText}</span>
-            </div>
-            <div class="quota-bar-track">
-              <div class="quota-bar-fill tier-${tier}" style="width:${widthPct}%"></div>
-            </div>
-          </div>`;
-      }
-
-      this.els.quotaBars.innerHTML = detailHtml;
-    }
-  }
-
-  /** Clean up quota polling interval */
-  stopQuotaPolling() {
-    if (this._quotaInterval) {
-      clearInterval(this._quotaInterval);
-      this._quotaInterval = null;
-    }
   }
 
 
