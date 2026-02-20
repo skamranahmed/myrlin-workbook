@@ -244,10 +244,16 @@ class TerminalPane {
     console.log('[Terminal]', msg);
   }
 
+  /** Write a colored status message through the batching pipeline to avoid freezing */
   _status(msg, color) {
-    if (this.term) {
-      const c = color === 'red' ? '31' : color === 'green' ? '32' : color === 'yellow' ? '33' : '34';
-      this.term.write('\x1b[1;' + c + 'm' + msg + '\x1b[0m\r\n');
+    if (!this.term) return;
+    const c = color === 'red' ? '31' : color === 'green' ? '32' : color === 'yellow' ? '33' : '34';
+    const statusMsg = '\x1b[1;' + c + 'm' + msg + '\x1b[0m\r\n';
+    // Route through rAF batching instead of direct term.write()
+    if (typeof this._enqueueWrite === 'function') {
+      this._enqueueWrite(statusMsg);
+    } else {
+      this.term.write(statusMsg);
     }
   }
 

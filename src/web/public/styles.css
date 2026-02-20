@@ -904,9 +904,10 @@ textarea.input {
   width: 100%;
   padding: 6px 0 2px;
   margin-top: 2px;
-  background: transparent;
-  background-color: transparent;
+  background: transparent !important;
+  background-color: transparent !important;
   border: none;
+  outline: none;
   color: var(--overlay0);
   font-size: 10px;
   font-family: inherit;
@@ -916,9 +917,12 @@ textarea.input {
   appearance: none;
 }
 
-.quota-details-toggle:hover {
+.quota-details-toggle:hover,
+.quota-details-toggle:focus,
+.quota-details-toggle:active {
   color: var(--text-secondary);
-  background: transparent;
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 .quota-details-chevron {
