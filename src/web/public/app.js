@@ -974,6 +974,35 @@ class CWMApp {
 
     // Set up event delegation on persistent containers (replaces per-render addEventListener)
     this._setupEventDelegation();
+
+    // Page Visibility API: pause polling when tab is hidden to save resources/battery
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Pause conflict and resource polling
+        if (this._conflictCheckInterval) {
+          clearInterval(this._conflictCheckInterval);
+          this._conflictCheckPaused = true;
+        }
+        if (this._resourcesInterval) {
+          clearInterval(this._resourcesInterval);
+          this._resourcesPaused = true;
+        }
+      } else {
+        // Resume polling when tab becomes visible again
+        if (this._conflictCheckPaused) {
+          this._conflictCheckPaused = false;
+          this._conflictCheckInterval = setInterval(() => this.checkForConflicts(), 60000);
+          this.checkForConflicts(); // Immediate check on return
+        }
+        if (this._resourcesPaused && this.state.viewMode === 'resources') {
+          this._resourcesPaused = false;
+          this._resourcesInterval = setInterval(() => {
+            if (this.state.viewMode === 'resources') this.fetchResources();
+          }, 10000);
+          this.fetchResources(); // Immediate refresh on return
+        }
+      }
+    });
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -4543,6 +4572,7 @@ class CWMApp {
 
   showConfirmModal({ title, message, confirmText = 'Confirm', confirmClass = 'btn-primary' }) {
     return new Promise((resolve) => {
+      this._modalOpen = true;
       this.modalResolve = resolve;
       this.els.modalTitle.textContent = title;
       this.els.modalBody.innerHTML = `<p>${message}</p>`;
@@ -4567,6 +4597,7 @@ class CWMApp {
 
   showPromptModal({ title, fields, confirmText = 'Confirm', confirmClass = 'btn-primary', headerHtml = '', onHeaderClick = null }) {
     return new Promise((resolve) => {
+      this._modalOpen = true;
       this.modalResolve = resolve;
       this.els.modalTitle.textContent = title;
 
@@ -4751,6 +4782,7 @@ class CWMApp {
   }
 
   closeModal(result) {
+    this._modalOpen = false;
     this.els.modalOverlay.hidden = true;
 
     // Clean up any choice modal action buttons
@@ -4764,6 +4796,16 @@ class CWMApp {
     if (this.modalResolve) {
       this.modalResolve(result);
       this.modalResolve = null;
+    }
+
+    // Flush queued SSE events that arrived while modal was open
+    if (this._sseQueue && this._sseQueue.length > 0) {
+      const queued = this._sseQueue;
+      this._sseQueue = [];
+      // Deduplicate: only process the latest event per type
+      const latest = new Map();
+      queued.forEach(evt => latest.set(evt.type, evt));
+      latest.forEach(evt => this.handleSSEEvent(evt));
     }
   }
 
@@ -5044,6 +5086,13 @@ class CWMApp {
   }
 
   handleSSEEvent(data) {
+    // Queue events while a modal is open to prevent UI glitches and race conditions
+    if (this._modalOpen) {
+      if (!this._sseQueue) this._sseQueue = [];
+      this._sseQueue.push(data);
+      return;
+    }
+
     switch (data.type) {
       case 'session:started':
         this.showToast(`Session "${data.name || 'unknown'}" started`, 'success');
