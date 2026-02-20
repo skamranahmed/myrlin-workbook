@@ -242,6 +242,9 @@ class TerminalPane {
     // main-thread blocking (the primary cause of cursor freezes with multiple panes)
     this._isFocused = false;
     this._bgFlushTimer = null;
+    // Callback for fatal connection failure (max retries exhausted or server error).
+    // App.js uses this to auto-close dead panes so they don't occupy grid space.
+    this.onFatalError = null;
   }
 
   _log(msg) {
@@ -524,7 +527,8 @@ class TerminalPane {
       if (event.code === 1011) {
         const reason = event.reason || 'PTY session failed to spawn';
         this._status('[Server error: ' + reason + ']', 'red');
-        this._status('Check server logs for details. Drag a new session to retry.', 'yellow');
+        // Auto-close this pane after a brief delay so user sees the error
+        if (this.onFatalError) setTimeout(() => this.onFatalError(this.sessionId), 2000);
         return; // No reconnect
       }
 
@@ -536,6 +540,8 @@ class TerminalPane {
         this.reconnectTimer = setTimeout(() => this.connect(), delay);
       } else {
         this._status('[Connection lost after ' + this._maxReconnectAttempts + ' attempts]', 'red');
+        // Auto-close this pane after a brief delay so user sees the error
+        if (this.onFatalError) setTimeout(() => this.onFatalError(this.sessionId), 2000);
       }
     };
 

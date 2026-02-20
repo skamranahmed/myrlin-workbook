@@ -6587,6 +6587,13 @@ class CWMApp {
       });
     };
 
+    // Auto-close pane on fatal connection error (max retries exhausted or server error).
+    // Prevents dead panes from occupying grid space in the terminal layout.
+    tp.onFatalError = () => {
+      const idx = this.terminalPanes.indexOf(tp);
+      if (idx !== -1) this.closeTerminalPane(idx);
+    };
+
     // Apply grid layout FIRST so container dimensions are established,
     // then mount the terminal so fitAddon.fit() gets real dimensions.
     this.updateTerminalGridLayout();
