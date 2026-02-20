@@ -942,10 +942,11 @@ function decodeClaudePath(encoded) {
 
       for (let len = tokens.length - idx; len > 1; len--) {
         const slice = tokens.slice(idx, idx + len);
-        // Try hyphen-joined (e.g. "claude-workspace-manager") and
+        // Try hyphen-joined (e.g. "claude-workspace-manager"),
+        // underscore-joined (e.g. "filepro_ai"), and
         // space-joined (e.g. "Work AI Project") since Claude encodes
-        // both path separators and spaces as dashes
-        const candidates = [slice.join('-'), slice.join(' ')];
+        // path separators, underscores, and spaces as dashes
+        const candidates = [slice.join('-'), slice.join('_'), slice.join(' ')];
         for (const candidate of candidates) {
           const candidatePath = path.join(resolved, candidate);
           try {
