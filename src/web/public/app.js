@@ -140,6 +140,9 @@ class CWMApp {
     // ─── Terminal panes ──────────────────────────────────────────
     this.terminalPanes = [null, null, null, null];
     this._activeTerminalSlot = null;
+    // Cache of TerminalPane instances per group to avoid reconnection on tab switch.
+    // Key: groupId, Value: { panes: [TerminalPane|null x4], domFragments: [DocumentFragment|null x4] }
+    this._groupPaneCache = {};
     this.PANE_SLOT_COLORS = ['mauve', 'blue', 'green', 'peach'];
     this._gridColSizes = [1, 1];  // fr ratios for column widths
     this._gridRowSizes = [1, 1];  // fr ratios for row heights
@@ -8755,42 +8758,83 @@ class CWMApp {
     const tabBtn = document.querySelector(`.terminal-group-tab[data-group-id="${groupId}"]`);
     if (tabBtn) tabBtn.classList.remove('tab-notify');
 
-    // Save current group's pane state
+    // Save current group's pane state to layout JSON
     this.saveCurrentGroupPanes();
 
-    // Close current panes (disconnect but don't kill PTYs)
-    for (let i = 0; i < 4; i++) {
-      if (this.terminalPanes[i]) {
-        this.terminalPanes[i].dispose();
+    // ── Cache current group's live TerminalPane instances + DOM ──
+    // Instead of disposing, detach the xterm DOM into DocumentFragments
+    // so we can reattach instantly when switching back.
+    const prevGroupId = this._activeGroupId;
+    if (prevGroupId) {
+      const cached = { panes: [null, null, null, null], domFragments: [null, null, null, null] };
+      for (let i = 0; i < 4; i++) {
+        if (this.terminalPanes[i]) {
+          cached.panes[i] = this.terminalPanes[i];
+          // Detach xterm DOM into a fragment (preserves WebSocket + state)
+          const termContainer = document.getElementById(`term-container-${i}`);
+          if (termContainer && termContainer.childNodes.length > 0) {
+            const frag = document.createDocumentFragment();
+            while (termContainer.firstChild) frag.appendChild(termContainer.firstChild);
+            cached.domFragments[i] = frag;
+          }
+        }
         this.terminalPanes[i] = null;
+        // Reset pane DOM to empty visual state
+        const paneEl = document.getElementById(`term-pane-${i}`);
+        if (paneEl) {
+          paneEl.classList.add('terminal-pane-empty');
+          const header = paneEl.querySelector('.terminal-pane-title');
+          if (header) header.textContent = 'Drop a session here';
+          const closeBtn = paneEl.querySelector('.terminal-pane-close');
+          if (closeBtn) closeBtn.hidden = true;
+          const uploadBtnG = paneEl.querySelector('.terminal-pane-upload');
+          if (uploadBtnG) uploadBtnG.hidden = true;
+        }
       }
-      // Always reset the pane DOM to empty state - even if terminalPanes[i] was
-      // null, the DOM element might have stale content from a previous group
-      const paneEl = document.getElementById(`term-pane-${i}`);
-      if (paneEl) {
-        paneEl.classList.add('terminal-pane-empty');
-        const header = paneEl.querySelector('.terminal-pane-title');
-        if (header) header.textContent = 'Drop a session here';
-        const closeBtn = paneEl.querySelector('.terminal-pane-close');
-        if (closeBtn) closeBtn.hidden = true;
-        const uploadBtnG = paneEl.querySelector('.terminal-pane-upload');
-        if (uploadBtnG) uploadBtnG.hidden = true;
-        // Clear any leftover xterm DOM from the terminal container
-        const termContainer = paneEl.querySelector('.terminal-container');
-        if (termContainer) termContainer.innerHTML = '';
-      }
+      this._groupPaneCache[prevGroupId] = cached;
     }
 
     this._activeGroupId = groupId;
 
-    // Restore the new group's panes
-    const group = this._tabGroups.find(g => g.id === groupId);
-    if (group && group.panes) {
-      group.panes.forEach(p => {
-        if (p.sessionId) {
-          this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
+    // ── Restore target group: try cache first, fall back to fresh connections ──
+    const cached = this._groupPaneCache[groupId];
+    if (cached) {
+      // Reattach cached panes instantly (no reconnection needed)
+      for (let i = 0; i < 4; i++) {
+        if (cached.panes[i]) {
+          this.terminalPanes[i] = cached.panes[i];
+          const paneEl = document.getElementById(`term-pane-${i}`);
+          if (paneEl) {
+            paneEl.classList.remove('terminal-pane-empty');
+            const titleEl = paneEl.querySelector('.terminal-pane-title');
+            if (titleEl) titleEl.textContent = cached.panes[i].sessionName || cached.panes[i].sessionId;
+            const closeBtn = paneEl.querySelector('.terminal-pane-close');
+            if (closeBtn) closeBtn.hidden = false;
+            const uploadBtn = paneEl.querySelector('.terminal-pane-upload');
+            if (uploadBtn) uploadBtn.hidden = false;
+          }
+          // Reattach xterm DOM
+          if (cached.domFragments[i]) {
+            const termContainer = document.getElementById(`term-container-${i}`);
+            if (termContainer) termContainer.appendChild(cached.domFragments[i]);
+          }
         }
+      }
+      delete this._groupPaneCache[groupId];
+      // Refit terminals after DOM reattachment
+      requestAnimationFrame(() => {
+        this.terminalPanes.forEach(tp => { if (tp) tp.safeFit(); });
       });
+    } else {
+      // No cache — create fresh connections (first time opening this group)
+      const group = this._tabGroups.find(g => g.id === groupId);
+      if (group && group.panes) {
+        group.panes.forEach(p => {
+          if (p.sessionId) {
+            this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
+          }
+        });
+      }
     }
 
     this.renderTerminalGroupTabs();
@@ -8992,6 +9036,9 @@ class CWMApp {
     // isn't lost when saveTerminalLayout runs.
     this.saveCurrentGroupPanes();
 
+    // Dispose any cached panes for the deleted group to free WebSocket connections
+    this._disposeGroupCache(groupId);
+
     this._tabGroups = this._tabGroups.filter(g => g.id !== groupId);
 
     if (wasDeletingActive) {
@@ -9001,10 +9048,28 @@ class CWMApp {
       const targetId = this._activeGroupId;
       this._activeGroupId = '__switching__';
       this.switchTerminalGroup(targetId);
+      // Clean up the temp cache entry created by switchTerminalGroup for '__switching__'
+      this._disposeGroupCache('__switching__');
     }
 
     this.saveTerminalLayout();
     this.renderTerminalGroupTabs();
+  }
+
+  /**
+   * Dispose cached TerminalPane instances for a group, freeing WebSocket connections.
+   * @param {string} groupId - Group whose cache to dispose
+   */
+  _disposeGroupCache(groupId) {
+    const cached = this._groupPaneCache[groupId];
+    if (!cached) return;
+    for (let i = 0; i < 4; i++) {
+      if (cached.panes[i]) {
+        cached.panes[i].dispose();
+        cached.panes[i] = null;
+      }
+    }
+    delete this._groupPaneCache[groupId];
   }
 
   /**
