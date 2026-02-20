@@ -5288,6 +5288,40 @@ class CWMApp {
       });
     });
 
+    // Drop workspace onto the list background to ungroup it
+    list.addEventListener('dragover', (e) => {
+      // Only accept if dragging a workspace and hovering over the list itself (not a child element)
+      if (!e.dataTransfer.types.includes('cwm/workspace')) return;
+      // Allow drop on the list area, the workspace-group-items, or workspace-group containers
+      // The key is: if the closest drop target is the list or a group container (not a header),
+      // treat it as an "ungroup" drop
+      const overWorkspaceItem = e.target.closest('.workspace-item');
+      const overGroupHeader = e.target.closest('.workspace-group-header');
+      if (overWorkspaceItem || overGroupHeader) return; // let those handle it
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      list.classList.add('workspace-list-drop-target');
+    });
+    list.addEventListener('dragleave', (e) => {
+      // Only remove highlight if leaving the list entirely
+      if (!list.contains(e.relatedTarget)) {
+        list.classList.remove('workspace-list-drop-target');
+      }
+    });
+    list.addEventListener('drop', (e) => {
+      list.classList.remove('workspace-list-drop-target');
+      const workspaceId = e.dataTransfer.getData('cwm/workspace');
+      if (!workspaceId) return;
+      // Check if this workspace is in a group — if so, remove it from the group
+      const groups = this.state.groups || [];
+      const inGroup = groups.find(g => (g.workspaceIds || []).includes(workspaceId));
+      if (inGroup) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.removeWorkspaceFromGroup(workspaceId);
+      }
+    });
+
     this.els.workspaceCount.textContent = `${workspaces.length} workspace${workspaces.length !== 1 ? 's' : ''}`;
   }
 

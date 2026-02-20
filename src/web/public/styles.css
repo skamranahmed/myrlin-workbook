@@ -1136,6 +1136,13 @@ textarea.input {
   box-shadow: inset 0 0 0 1px var(--blue);
 }
 
+/* Highlight the workspace list itself when dragging a workspace out of a group */
+.sidebar-list.workspace-list-drop-target {
+  background: color-mix(in srgb, var(--blue) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 25%, transparent);
+  border-radius: var(--radius-sm);
+}
+
 /* Workspace reorder drop indicators */
 .workspace-item.ws-drop-before {
   box-shadow: 0 -2px 0 0 var(--mauve);
@@ -2989,6 +2996,40 @@ textarea.input {
     min-width: 44px; font-size: 13px; color: var(--blue); border-color: var(--blue);
   }
   .terminal-mobile-toolbar .toolbar-upload:active { opacity: 0.8; }
+}
+
+/* ─── Mobile: xterm scrollbar fix ────────────────────────────
+   xterm's .xterm-viewport uses overflow-y:scroll (always-on scrollbar).
+   On mobile this overlaps with the browser's native scroll chrome.
+   Fix: hide the visual scrollbar on touch devices — xterm's built-in
+   touch gesture handling still allows swiping to scroll the buffer.
+   Also prevent the page itself from scrolling under the terminal. */
+@media (max-width: 768px) {
+  /* Hide xterm's forced scrollbar — touch scroll still works */
+  .xterm .xterm-viewport {
+    overflow-y: auto;
+    scrollbar-width: none;           /* Firefox */
+    -ms-overflow-style: none;        /* IE/Edge */
+  }
+  .xterm .xterm-viewport::-webkit-scrollbar {
+    display: none;                   /* Chrome/Safari */
+  }
+
+  /* Prevent terminal scroll from chaining to page scroll (bounce effect) */
+  .terminal-pane .terminal-container {
+    overscroll-behavior: contain;
+  }
+  .xterm {
+    touch-action: pan-y;             /* allow vertical scroll, block horizontal/zoom */
+    overscroll-behavior: contain;    /* don't chain to parent */
+  }
+
+  /* Ensure the app never exceeds viewport — no page-level scrollbar */
+  .app {
+    overflow: hidden;
+    position: fixed;
+    inset: 0;
+  }
 }
 
 /* Small mobile */
