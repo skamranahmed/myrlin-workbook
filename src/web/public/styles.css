@@ -5310,6 +5310,21 @@ html.activity-indicators-disabled .terminal-pane-activity {
 .kanban-card-changes .added { color: var(--green); }
 .kanban-card-changes .removed { color: var(--red); }
 
+.kanban-card-preview {
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: var(--mantle);
+  border-radius: var(--radius-xs, 3px);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--overlay1, var(--text-secondary));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .kanban-card-actions {
   display: flex;
   gap: 4px;

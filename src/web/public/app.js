@@ -357,6 +357,8 @@ class CWMApp {
       newTaskCancel: document.getElementById('new-task-cancel'),
       newTaskCreate: document.getElementById('new-task-create'),
       newTaskName: document.getElementById('new-task-name'),
+      newTaskDescription: document.getElementById('new-task-description'),
+      newTaskStartNow: document.getElementById('new-task-start-now'),
       newTaskBranchPreview: document.getElementById('new-task-branch-preview'),
       newTaskDir: document.getElementById('new-task-dir'),
       newTaskDirCustom: document.getElementById('new-task-dir-custom'),
@@ -4069,6 +4071,18 @@ class CWMApp {
         <span class="added">+${task.branchAhead || 0}</span> commits -- ${task.changedFiles} files changed
       </div>` : '';
 
+    // Live session preview -- show last terminal line for running tasks
+    let previewHtml = '';
+    if (columnStatus === 'running' && task.sessionId) {
+      const pane = this.terminalPanes.find(p => p && p.sessionId === task.sessionId);
+      if (pane && pane.term) {
+        const lastLine = this._getTerminalLastLine(pane.term);
+        if (lastLine) {
+          previewHtml = `<div class="kanban-card-preview">${this.escapeHtml(lastLine)}</div>`;
+        }
+      }
+    }
+
     // Actions vary by column
     let actionsHtml = '';
     if (columnStatus === 'running') {
@@ -4093,12 +4107,31 @@ class CWMApp {
         ${rejectedBadge}
         ${timeStr ? `<span>${timeStr}</span>` : ''}
       </div>
+      ${previewHtml}
       ${changesHtml}
       ${actionsHtml}
     </div>`;
   }
 
   /** Wire up drag-and-drop and click events on kanban cards */
+  /** Get the last non-empty line from a terminal buffer for live preview */
+  _getTerminalLastLine(term) {
+    try {
+      const buffer = term.buffer.active;
+      // Walk backwards from the cursor to find the last non-empty line
+      for (let i = buffer.cursorY + buffer.baseY; i >= 0; i--) {
+        const line = buffer.getLine(i);
+        if (!line) continue;
+        const text = line.translateToString(true).trim();
+        if (text.length > 0) {
+          // Truncate to 80 chars for card preview
+          return text.length > 80 ? text.slice(0, 77) + '...' : text;
+        }
+      }
+    } catch (_) { /* buffer not ready */ }
+    return '';
+  }
+
   /** Filter tasks by the current search query, matching branch, description, model, and status */
   _filterTasks(tasks) {
     const q = this._tasksSearchQuery;
@@ -4208,11 +4241,13 @@ class CWMApp {
 
     // Reset form
     this.els.newTaskName.value = '';
+    if (this.els.newTaskDescription) this.els.newTaskDescription.value = '';
     this.els.newTaskPrompt.value = '';
     this.els.newTaskModel.value = '';
     this.els.newTaskDirCustom.value = '';
     this.els.newTaskDirCustom.hidden = true;
     this.els.newTaskBranchPreview.textContent = '';
+    if (this.els.newTaskStartNow) this.els.newTaskStartNow.checked = true;
     this.els.newTaskFlags.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
 
     // Populate project directory dropdown from all sessions' working dirs
@@ -4299,6 +4334,8 @@ class CWMApp {
 
     const model = this.els.newTaskModel.value || undefined;
     const prompt = (this.els.newTaskPrompt.value || '').trim() || undefined;
+    const description = (this.els.newTaskDescription ? this.els.newTaskDescription.value : '').trim() || name;
+    const startNow = this.els.newTaskStartNow ? this.els.newTaskStartNow.checked : true;
 
     // Collect flags
     const flags = [];
@@ -4320,34 +4357,55 @@ class CWMApp {
     this.els.newTaskCreate.textContent = 'Creating...';
 
     try {
-      const data = await this.api('POST', '/api/worktree-tasks', {
-        workspaceId,
-        repoDir,
-        branch,
-        description: name,
-        baseBranch: 'main',
-        model,
-        prompt,
-        flags,
-      });
+      if (startNow) {
+        // Create and immediately start the worktree task (existing behavior)
+        const data = await this.api('POST', '/api/worktree-tasks', {
+          workspaceId,
+          repoDir,
+          branch,
+          description,
+          baseBranch: 'main',
+          model,
+          prompt,
+          flags,
+        });
 
-      this.closeNewTaskDialog();
-      await this.loadSessions();
+        this.closeNewTaskDialog();
+        await this.loadSessions();
 
-      // Open session in terminal pane
-      if (data.session) {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
-        if (emptySlot !== -1) {
-          this.setViewMode('terminal');
-          this.openTerminalInPane(emptySlot, data.session.id, branch, {
-            cwd: data.task.worktreePath,
-            ...(model ? { model } : {}),
-            ...(flags.length > 0 ? { flags } : {}),
-          });
+        // Open session in terminal pane
+        if (data.session) {
+          const emptySlot = this.terminalPanes.findIndex(p => p === null);
+          if (emptySlot !== -1) {
+            this.setViewMode('terminal');
+            this.openTerminalInPane(emptySlot, data.session.id, branch, {
+              cwd: data.task.worktreePath,
+              ...(model ? { model } : {}),
+              ...(flags.length > 0 ? { flags } : {}),
+            });
+          }
         }
-      }
 
-      this.showToast(`Task started on ${branch}`, 'success');
+        this.showToast(`Task started on ${branch}`, 'success');
+      } else {
+        // Create task in backlog (no session, no worktree yet)
+        const data = await this.api('POST', '/api/worktree-tasks', {
+          workspaceId,
+          repoDir,
+          branch,
+          description,
+          baseBranch: 'main',
+          model,
+          flags,
+          startNow: false,
+        });
+
+        this.closeNewTaskDialog();
+
+        // Switch to tasks view to see the backlog
+        this.setViewMode('tasks');
+        this.showToast(`Task added to backlog: ${branch}`, 'success');
+      }
     } catch (err) {
       this.showToast(err.message || 'Failed to create task', 'error');
     } finally {

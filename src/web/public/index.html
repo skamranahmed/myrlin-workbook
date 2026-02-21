@@ -1092,8 +1092,19 @@
           <input type="text" id="new-task-dir-custom" class="form-input" placeholder="Or enter a custom path..." style="margin-top: 6px;" hidden />
         </div>
         <div class="form-group">
+          <label class="form-label">Description <span style="color: var(--overlay0); font-weight: 400;">(optional)</span></label>
+          <input type="text" id="new-task-description" class="form-input" placeholder="Brief description of the task" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="form-group">
           <label class="form-label">Initial Prompt <span style="color: var(--overlay0); font-weight: 400;">(optional)</span></label>
           <textarea id="new-task-prompt" class="form-textarea" rows="3" placeholder="What should the agent work on?"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-checkbox" style="margin-bottom: 8px;">
+            <input type="checkbox" id="new-task-start-now" checked />
+            Start immediately
+            <span style="color: var(--overlay0); font-size: 11px; display: block; margin-top: 2px; margin-left: 20px;">Uncheck to create in backlog</span>
+          </label>
         </div>
         <div class="form-group">
           <label class="form-label">Model</label>

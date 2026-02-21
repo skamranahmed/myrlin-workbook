@@ -4110,13 +4110,36 @@ app.get('/api/worktree-tasks', requireAuth, async (req, res) => {
  * Create a worktree task: creates git worktree, session, and task record.
  */
 app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
-  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model } = req.body || {};
+  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model, startNow } = req.body || {};
   if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
   if (!repoDir) return res.status(400).json({ error: 'repoDir is required' });
   if (!branch) return res.status(400).json({ error: 'branch is required' });
   if (!description) return res.status(400).json({ error: 'description is required' });
 
   const store = getStore();
+
+  // Backlog mode: create task record without worktree or session
+  if (startNow === false) {
+    try {
+      const task = store.createWorktreeTask({
+        workspaceId,
+        sessionId: null,
+        branch,
+        worktreePath: null,
+        repoDir: repoDir,
+        description,
+        baseBranch: baseBranch || 'main',
+        featureId: featureId || null,
+      });
+      // Override status to backlog (createWorktreeTask defaults to running)
+      store.updateWorktreeTask(task.id, { status: 'backlog' });
+      broadcastSSE('worktreeTask:created', { task });
+      return res.status(201).json({ task });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   try {
     // 1. Create the git worktree
     const root = await gitRepoRoot(repoDir);
