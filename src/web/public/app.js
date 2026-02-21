@@ -350,6 +350,7 @@ class CWMApp {
       tasksList: document.getElementById('tasks-list'),
       kanbanBoard: document.getElementById('kanban-board'),
       tasksLayoutToggle: document.getElementById('tasks-layout-toggle'),
+      tasksSearch: document.getElementById('tasks-search'),
       newTaskBtn: document.getElementById('new-task-btn'),
       newTaskOverlay: document.getElementById('new-task-overlay'),
       newTaskClose: document.getElementById('new-task-close'),
@@ -771,6 +772,21 @@ class CWMApp {
           const layout = btn.dataset.layout;
           this.setTasksLayout(layout);
         });
+      });
+    }
+
+    // Tasks search filter
+    if (this.els.tasksSearch) {
+      this.els.tasksSearch.addEventListener('input', () => {
+        this._tasksSearchQuery = this.els.tasksSearch.value.toLowerCase().trim();
+        if (this._worktreeTaskCache) {
+          const filtered = this._filterTasks(this._worktreeTaskCache);
+          if (this._tasksLayout === 'board') {
+            this._renderKanbanBoard(filtered);
+          } else {
+            this._renderTasksList(filtered);
+          }
+        }
       });
     }
 
@@ -4083,6 +4099,16 @@ class CWMApp {
   }
 
   /** Wire up drag-and-drop and click events on kanban cards */
+  /** Filter tasks by the current search query, matching branch, description, model, and status */
+  _filterTasks(tasks) {
+    const q = this._tasksSearchQuery;
+    if (!q) return tasks;
+    return tasks.filter(t => {
+      const haystack = [t.branch, t.description, t.model, t.status, t.id].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+
   _wireKanbanEvents() {
     if (!this.els.kanbanBoard) return;
 
@@ -6178,6 +6204,7 @@ class CWMApp {
         this.selectWorkspace(workspaceId);
         this.createSession();
       }},
+      { label: 'Open All in Tab', icon: '&#128448;', action: () => this.openWorkspaceInTabGroup(workspaceId) },
       { label: 'New Feature Session', icon: '&#9733;', action: () => this.startFeatureSession(workspaceId) },
       { label: 'Create Worktree', icon: '&#128268;', action: () => this.createWorktree(workspaceId) },
       ...(this.getSetting('enableWorktreeTasks') ? [
@@ -9496,6 +9523,60 @@ class CWMApp {
         });
       }
     }
+  }
+
+  /**
+   * Open all sessions from a workspace/focus in a new tab group.
+   * Creates a new tab group named after the workspace, switches to terminal view,
+   * and opens as many sessions as possible (up to 4 terminal panes).
+   * @param {string} workspaceId - The workspace to open
+   */
+  openWorkspaceInTabGroup(workspaceId) {
+    const ws = this.state.workspaces.find(w => w.id === workspaceId);
+    if (!ws) return;
+
+    // Get all sessions for this workspace
+    const wsSessions = (this.state.allSessions || this.state.sessions || [])
+      .filter(s => s.workspaceId === workspaceId);
+
+    if (wsSessions.length === 0) {
+      this.showToast('No sessions in this project to open', 'warning');
+      return;
+    }
+
+    // Create a new tab group with the workspace name
+    const groupId = 'tg_' + Date.now().toString(36);
+    this._tabGroups.push({ id: groupId, name: ws.name, panes: [] });
+
+    // Switch to the new group
+    this._activeGroupId = groupId;
+    this.setViewMode('terminal');
+
+    // Clear current panes first (they belong to the new group now)
+    for (let i = 0; i < 4; i++) {
+      if (this.terminalPanes[i]) {
+        this.terminalPanes[i].dispose();
+        this.terminalPanes[i] = null;
+      }
+    }
+
+    // Open up to 4 sessions in panes
+    const maxPanes = Math.min(wsSessions.length, 4);
+    for (let i = 0; i < maxPanes; i++) {
+      const session = wsSessions[i];
+      const spawnOpts = {};
+      if (session.workingDir) spawnOpts.cwd = session.workingDir;
+      if (session.flags) spawnOpts.flags = session.flags;
+      if (session.model) spawnOpts.model = session.model;
+      this.openTerminalInPane(i, session.id, session.name || session.id, spawnOpts);
+    }
+
+    this.renderTerminalGroupTabs();
+    this.saveTerminalLayout();
+    this.updateTerminalGridLayout();
+
+    const extra = wsSessions.length > 4 ? ` (${wsSessions.length - 4} more sessions available)` : '';
+    this.showToast(`Opened ${maxPanes} sessions from "${ws.name}"${extra}`, 'success');
   }
 
   createTerminalGroup() {

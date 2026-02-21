@@ -5109,6 +5109,27 @@ html.activity-indicators-disabled .terminal-pane-activity {
   gap: 8px;
 }
 
+.tasks-search-input {
+  width: 160px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  background: var(--surface0);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.tasks-search-input:focus {
+  border-color: var(--blue);
+}
+
+.tasks-search-input::placeholder {
+  color: var(--overlay0);
+}
+
 .tasks-layout-toggle {
   display: flex;
   background: var(--surface0);
@@ -5218,10 +5239,11 @@ html.activity-indicators-disabled .terminal-pane-activity {
   border-radius: var(--radius-sm);
 }
 
-/* ─── Kanban Card ────────────────────────────────────── */
+/* ─── Kanban Card (GitHub-inspired) ──────────────────── */
 .kanban-card {
   background: var(--base);
   border: 1px solid var(--surface0);
+  border-left: 3px solid var(--overlay0);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   cursor: grab;
@@ -5229,14 +5251,28 @@ html.activity-indicators-disabled .terminal-pane-activity {
   position: relative;
 }
 
+/* Status-colored left border accent */
+.kanban-column[data-status="backlog"] .kanban-card { border-left-color: var(--overlay0); }
+.kanban-column[data-status="running"] .kanban-card { border-left-color: var(--green); }
+.kanban-column[data-status="review"] .kanban-card { border-left-color: var(--peach); }
+.kanban-column[data-status="completed"] .kanban-card { border-left-color: var(--blue); }
+
 .kanban-card:hover {
   border-color: var(--surface1);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
 }
 
+/* Preserve left border color on hover */
+.kanban-column[data-status="backlog"] .kanban-card:hover { border-left-color: var(--overlay0); }
+.kanban-column[data-status="running"] .kanban-card:hover { border-left-color: var(--green); }
+.kanban-column[data-status="review"] .kanban-card:hover { border-left-color: var(--peach); }
+.kanban-column[data-status="completed"] .kanban-card:hover { border-left-color: var(--blue); }
+
 .kanban-card.dragging {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: grabbing;
+  transform: rotate(2deg);
 }
 
 .kanban-card-title {
