@@ -4903,6 +4903,291 @@ html.activity-indicators-disabled .terminal-pane-activity {
 }
 
 /* ═══════════════════════════════════════════════════════════ */
+/* TASKS PANEL (Worktree Tasks View)                           */
+/* ═══════════════════════════════════════════════════════════ */
+
+.tasks-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.tasks-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tasks-panel-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.tasks-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+/* ─── Task status group sections ─────────────────────── */
+.tasks-group {
+  margin-bottom: 12px;
+}
+
+.tasks-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--overlay0);
+}
+
+.tasks-group-count {
+  font-size: 10px;
+  color: var(--overlay0);
+  font-weight: 400;
+}
+
+/* ─── Task item (two-line layout) ────────────────────── */
+.task-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.task-item:hover {
+  background: var(--surface0);
+}
+
+.task-item-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-item-dot.busy {
+  background: var(--green);
+  animation: tristate-pulse 1.5s ease-in-out infinite;
+}
+
+.task-item-dot.waiting {
+  background: var(--peach);
+  opacity: 0.7;
+}
+
+.task-item-dot.ready {
+  background: var(--blue);
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.task-item-dot.review {
+  background: var(--mauve);
+}
+
+.task-item-dot.completed {
+  background: var(--overlay0);
+  opacity: 0.5;
+}
+
+.task-item-branch {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.task-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-left: 14px;
+  font-size: 10px;
+  color: var(--overlay0);
+}
+
+.task-item-changes {
+  font-family: var(--font-mono);
+}
+
+.task-item-changes .added { color: var(--green); }
+.task-item-changes .removed { color: var(--red); }
+
+.task-item-actions {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  padding-left: 14px;
+  padding-top: 4px;
+}
+
+.task-item-actions .btn {
+  font-size: 10px;
+  padding: 2px 8px;
+}
+
+/* Completed tasks - muted */
+.tasks-group-completed .task-item {
+  opacity: 0.5;
+}
+
+.tasks-group-completed .task-item:hover {
+  opacity: 0.8;
+}
+
+/* ─── Task empty state ───────────────────────────────── */
+.tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--overlay0);
+}
+
+.tasks-empty-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+.tasks-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.tasks-empty-desc {
+  font-size: 12px;
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+/* ─── New Task Dialog form elements ──────────────────── */
+.form-group {
+  margin-bottom: 14px;
+}
+
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.form-input, .form-select, .form-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--surface0);
+  color: var(--text-primary);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--mauve);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.form-hint {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--overlay0);
+  margin-top: 4px;
+  min-height: 16px;
+}
+
+.form-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.form-checkbox input[type="checkbox"] {
+  accent-color: var(--mauve);
+}
+
+/* ─── Workspace hover button for new task ────────────── */
+.workspace-item {
+  position: relative;
+}
+
+.ws-new-task-btn {
+  position: absolute;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--surface1);
+  color: var(--overlay0);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.workspace-item:hover .ws-new-task-btn {
+  opacity: 1;
+}
+
+.ws-new-task-btn:hover {
+  background: var(--surface1);
+  color: var(--text-primary);
+  border-color: var(--mauve);
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
 /* COSTS DASHBOARD                                             */
 /* ═══════════════════════════════════════════════════════════ */
 

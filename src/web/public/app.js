@@ -345,6 +345,22 @@ class CWMApp {
       notesEditorCancel: document.getElementById('notes-editor-cancel'),
       notesEditorSave: document.getElementById('notes-editor-save'),
 
+      // Tasks
+      tasksPanel: document.getElementById('tasks-panel'),
+      tasksList: document.getElementById('tasks-list'),
+      newTaskBtn: document.getElementById('new-task-btn'),
+      newTaskOverlay: document.getElementById('new-task-overlay'),
+      newTaskClose: document.getElementById('new-task-close'),
+      newTaskCancel: document.getElementById('new-task-cancel'),
+      newTaskCreate: document.getElementById('new-task-create'),
+      newTaskName: document.getElementById('new-task-name'),
+      newTaskBranchPreview: document.getElementById('new-task-branch-preview'),
+      newTaskDir: document.getElementById('new-task-dir'),
+      newTaskDirCustom: document.getElementById('new-task-dir-custom'),
+      newTaskPrompt: document.getElementById('new-task-prompt'),
+      newTaskModel: document.getElementById('new-task-model'),
+      newTaskFlags: document.getElementById('new-task-flags'),
+
       // Costs
       costsPanel: document.getElementById('costs-panel'),
       costsBody: document.getElementById('costs-body'),
@@ -728,6 +744,35 @@ class CWMApp {
       this.els.settingsSearchInput.addEventListener('input', () => this.filterSettings());
     }
 
+    // New Task dialog
+    if (this.els.newTaskBtn) {
+      this.els.newTaskBtn.addEventListener('click', () => this.openNewTaskDialog());
+    }
+    if (this.els.newTaskClose) {
+      this.els.newTaskClose.addEventListener('click', () => this.closeNewTaskDialog());
+    }
+    if (this.els.newTaskCancel) {
+      this.els.newTaskCancel.addEventListener('click', () => this.closeNewTaskDialog());
+    }
+    if (this.els.newTaskCreate) {
+      this.els.newTaskCreate.addEventListener('click', () => this.submitNewTask());
+    }
+    if (this.els.newTaskOverlay) {
+      this.els.newTaskOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.newTaskOverlay) this.closeNewTaskDialog();
+      });
+    }
+    if (this.els.newTaskName) {
+      this.els.newTaskName.addEventListener('input', () => this.updateBranchPreview());
+    }
+    if (this.els.newTaskDir) {
+      this.els.newTaskDir.addEventListener('change', () => {
+        const isCustom = this.els.newTaskDir.value === '__custom__';
+        this.els.newTaskDirCustom.hidden = !isCustom;
+        if (isCustom) this.els.newTaskDirCustom.focus();
+      });
+    }
+
     // Update button
     if (this.els.updateBtn) {
       this.els.updateBtn.addEventListener('click', () => this.showUpdateModal());
@@ -769,8 +814,16 @@ class CWMApp {
         e.preventDefault();
         if (this.state.token) this.openSettings();
       }
+      // Ctrl+Shift+N / Cmd+Shift+N - New Worktree Task
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        if (this.state.token && this.state.settings.enableWorktreeTasks) this.openNewTaskDialog();
+      }
       // Escape
       if (e.key === 'Escape') {
+        if (this.els.newTaskOverlay && !this.els.newTaskOverlay.hidden) {
+          this.closeNewTaskDialog();
+        } else
         if (this.els.settingsOverlay && !this.els.settingsOverlay.hidden) {
           this.closeSettings();
         } else if (this.els.conflictCenterOverlay && !this.els.conflictCenterOverlay.hidden) {
@@ -1038,6 +1091,9 @@ class CWMApp {
     // Click delegation
     wsList.addEventListener('click', (e) => {
       if (e.target.closest('#sidebar-create-ws')) { this.createWorkspace(); return; }
+
+      const newTaskBtn = e.target.closest('.ws-new-task-btn');
+      if (newTaskBtn) { e.stopPropagation(); this.openNewTaskDialog(newTaskBtn.dataset.wsId); return; }
 
       const renameBtn = e.target.closest('.ws-rename-btn');
       if (renameBtn) { e.stopPropagation(); this.renameWorkspace(renameBtn.dataset.id); return; }
@@ -3391,6 +3447,26 @@ class CWMApp {
         action: () => this.openSettings(),
       },
       {
+        id: 'feature-tasks-view',
+        name: 'Tasks View',
+        description: 'Dedicated view for worktree tasks showing active, review, and completed tasks with status indicators and quick actions.',
+        category: 'feature',
+        tags: ['tasks', 'worktree', 'branch', 'autonomous', 'agent', 'view'],
+        icon: '&#128736;',
+        action: () => this.setViewMode('tasks'),
+      },
+      {
+        id: 'action-new-task',
+        name: 'New Worktree Task',
+        description: 'Create an isolated worktree branch for Claude to work on autonomously',
+        category: 'action',
+        tags: ['new', 'task', 'worktree', 'branch', 'create', 'autonomous'],
+        shortcut: 'Ctrl+Shift+N',
+        icon: '&#43;',
+        action: () => this.openNewTaskDialog(),
+        isAvailable: () => !!this.state.settings.enableWorktreeTasks,
+      },
+      {
         id: 'feature-auto-trust',
         name: 'Auto-accept Trust Dialogs',
         description: 'Automatically accept safe trust/permission prompts (Y/n, "trust this folder") in terminals. Dangerous prompts are never auto-accepted. Enable in Settings > Automation.',
@@ -3635,6 +3711,301 @@ class CWMApp {
       this.renderWorkspaces();
     }
 
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     TASKS VIEW
+     Renders worktree tasks grouped by status (Active, Review,
+     Completed) with tri-state dots and quick actions.
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Render the Tasks view panel with all worktree tasks grouped by status */
+  async renderTasksView() {
+    if (!this.els.tasksList) return;
+
+    try {
+      const data = await this.api('GET', '/api/worktree-tasks');
+      const tasks = data.tasks || [];
+      this._worktreeTaskCache = tasks;
+
+      if (tasks.length === 0) {
+        this.els.tasksList.innerHTML = `
+          <div class="tasks-empty">
+            <div class="tasks-empty-icon">&#128736;</div>
+            <div class="tasks-empty-title">No worktree tasks</div>
+            <div class="tasks-empty-desc">Create a task to have Claude work on a feature in an isolated git branch. Click "New Task" above to get started.</div>
+          </div>`;
+        return;
+      }
+
+      // Group by status
+      const groups = { running: [], review: [], completed: [], rejected: [] };
+      tasks.forEach(t => {
+        const key = (t.status === 'running' || t.status === 'active') ? 'running' : (groups[t.status] ? t.status : 'running');
+        groups[key].push(t);
+      });
+
+      let html = '';
+
+      // Active tasks
+      if (groups.running.length > 0) {
+        html += this._renderTaskGroup('Active', groups.running, 'running');
+      }
+
+      // Review tasks
+      if (groups.review.length > 0) {
+        html += this._renderTaskGroup('Review', groups.review, 'review');
+      }
+
+      // Completed tasks
+      if (groups.completed.length > 0) {
+        html += this._renderTaskGroup('Completed', groups.completed, 'completed');
+      }
+
+      this.els.tasksList.innerHTML = html;
+
+      // Wire up task item clicks
+      this.els.tasksList.querySelectorAll('.task-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const sessionId = el.dataset.sessionId;
+          if (sessionId) {
+            const session = (this.state.allSessions || []).find(s => s.id === sessionId);
+            if (session) {
+              this.state.selectedSession = session;
+              this.setViewMode('workspace');
+              this.renderSessionDetail();
+            }
+          }
+        });
+      });
+
+      // Wire up quick action buttons
+      this.els.tasksList.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const taskId = btn.dataset.taskId;
+          const action = btn.dataset.action;
+          if (action === 'merge') this.mergeWorktreeTask(taskId);
+          else if (action === 'diff') this.showWorktreeTaskDiff(taskId);
+          else if (action === 'open') {
+            const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+            if (task && task.sessionId) {
+              const emptySlot = this.terminalPanes.findIndex(p => p === null);
+              if (emptySlot !== -1) {
+                this.setViewMode('terminal');
+                this.openTerminalInPane(emptySlot, task.sessionId, task.branch, { cwd: task.worktreePath });
+              }
+            }
+          }
+        });
+      });
+    } catch (err) {
+      this.els.tasksList.innerHTML = `<div class="tasks-empty"><div class="tasks-empty-desc">Failed to load tasks</div></div>`;
+    }
+  }
+
+  /** Render a group of tasks (Active/Review/Completed) */
+  _renderTaskGroup(label, tasks, groupType) {
+    const items = tasks.map(t => {
+      // Determine dot state
+      let dotClass = 'completed';
+      if (groupType === 'running') {
+        const tp = this.terminalPanes.find(p => p && p.sessionId === t.sessionId);
+        const isActive = tp && (Date.now() - tp._lastOutputTime) < 3000;
+        dotClass = isActive ? 'busy' : 'waiting';
+      } else if (groupType === 'review') {
+        dotClass = 'review';
+      }
+
+      const timeStr = t.createdAt ? this.relativeTime(t.createdAt) : '';
+      const changes = (t.changedFiles > 0) ? `<span class="task-item-changes"><span class="added">+${t.branchAhead || 0}</span> commits, ${t.changedFiles} files</span>` : '';
+
+      const actions = groupType === 'review' ? `
+        <div class="task-item-actions">
+          <button class="btn btn-primary btn-sm" data-action="merge" data-task-id="${t.id}">Merge</button>
+          <button class="btn btn-ghost btn-sm" data-action="diff" data-task-id="${t.id}">Diff</button>
+        </div>` : '';
+
+      const openBtn = groupType === 'running' ? `<button class="btn btn-ghost btn-sm" data-action="open" data-task-id="${t.id}" style="font-size:10px;padding:1px 6px;margin-left:auto;">Open</button>` : '';
+
+      return `<div class="task-item" data-session-id="${t.sessionId || ''}" data-task-id="${t.id}">
+        <span class="task-item-dot ${dotClass}"></span>
+        <span class="task-item-branch">${this.escapeHtml(t.branch || t.description || t.id)}</span>
+        ${openBtn}
+        <div class="task-item-meta">
+          ${t.model ? `<span class="session-badge session-badge-model">${this.escapeHtml(t.model.includes('opus') ? 'opus' : t.model.includes('sonnet') ? 'sonnet' : t.model.includes('haiku') ? 'haiku' : t.model)}</span>` : ''}
+          ${timeStr ? `<span>${timeStr}</span>` : ''}
+          ${changes}
+        </div>
+        ${actions}
+      </div>`;
+    }).join('');
+
+    return `<div class="tasks-group ${groupType === 'completed' ? 'tasks-group-completed' : ''}">
+      <div class="tasks-group-header">${label} <span class="tasks-group-count">(${tasks.length})</span></div>
+      ${items}
+    </div>`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     NEW TASK DIALOG
+     Dedicated dialog for creating worktree tasks with project
+     directory auto-detection, branch preview, and flag selection.
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Open the New Task dialog and populate project directory dropdown */
+  openNewTaskDialog(preselectedWorkspaceId) {
+    if (!this.els.newTaskOverlay) return;
+
+    // Reset form
+    this.els.newTaskName.value = '';
+    this.els.newTaskPrompt.value = '';
+    this.els.newTaskModel.value = '';
+    this.els.newTaskDirCustom.value = '';
+    this.els.newTaskDirCustom.hidden = true;
+    this.els.newTaskBranchPreview.textContent = '';
+    this.els.newTaskFlags.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+
+    // Populate project directory dropdown from all sessions' working dirs
+    const dirs = new Map(); // path → count
+    (this.state.allSessions || []).forEach(s => {
+      if (s.workingDir) {
+        const d = s.workingDir.replace(/\\/g, '/');
+        dirs.set(d, (dirs.get(d) || 0) + 1);
+      }
+    });
+    // Sort by frequency (most sessions = top)
+    const sortedDirs = [...dirs.entries()].sort((a, b) => b[1] - a[1]);
+
+    this.els.newTaskDir.innerHTML = '<option value="">Select a project...</option>';
+    sortedDirs.forEach(([dir, count]) => {
+      const parts = dir.split('/');
+      const short = parts.slice(-2).join('/');
+      const opt = document.createElement('option');
+      opt.value = dir;
+      opt.textContent = `${short} (${count} sessions)`;
+      this.els.newTaskDir.appendChild(opt);
+    });
+    // Add custom option
+    const customOpt = document.createElement('option');
+    customOpt.value = '__custom__';
+    customOpt.textContent = 'Enter custom path...';
+    this.els.newTaskDir.appendChild(customOpt);
+
+    // Pre-select if we have an active workspace with sessions
+    if (preselectedWorkspaceId || (this.state.activeWorkspace && this.state.activeWorkspace.id)) {
+      const wsId = preselectedWorkspaceId || this.state.activeWorkspace.id;
+      const wsSessions = (this.state.allSessions || []).filter(s => s.workspaceId === wsId);
+      if (wsSessions.length > 0 && wsSessions[0].workingDir) {
+        this.els.newTaskDir.value = wsSessions[0].workingDir.replace(/\\/g, '/');
+      }
+    }
+
+    this.els.newTaskOverlay.hidden = false;
+    this.els.newTaskName.focus();
+  }
+
+  /** Close the New Task dialog */
+  closeNewTaskDialog() {
+    if (this.els.newTaskOverlay) this.els.newTaskOverlay.hidden = true;
+  }
+
+  /** Update the branch name preview as user types task name */
+  updateBranchPreview() {
+    const name = (this.els.newTaskName.value || '').trim();
+    if (!name) {
+      this.els.newTaskBranchPreview.textContent = '';
+      return;
+    }
+    const slug = name.toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 40);
+    this.els.newTaskBranchPreview.textContent = `Branch: feat/${slug}`;
+  }
+
+  /** Submit the new task form and create the worktree task */
+  async submitNewTask() {
+    const name = (this.els.newTaskName.value || '').trim();
+    if (!name) {
+      this.showToast('Task name is required', 'error');
+      return;
+    }
+
+    let repoDir = this.els.newTaskDir.value;
+    if (repoDir === '__custom__') {
+      repoDir = (this.els.newTaskDirCustom.value || '').trim();
+    }
+    if (!repoDir) {
+      this.showToast('Project directory is required', 'error');
+      return;
+    }
+
+    const branch = 'feat/' + name.toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 40);
+
+    const model = this.els.newTaskModel.value || undefined;
+    const prompt = (this.els.newTaskPrompt.value || '').trim() || undefined;
+
+    // Collect flags
+    const flags = [];
+    this.els.newTaskFlags.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      flags.push(cb.value);
+    });
+
+    // Find workspace for this directory (best match)
+    let workspaceId = this.state.activeWorkspace ? this.state.activeWorkspace.id : null;
+    if (!workspaceId && this.state.workspaces.length > 0) {
+      workspaceId = this.state.workspaces[0].id;
+    }
+    if (!workspaceId) {
+      this.showToast('No workspace available', 'error');
+      return;
+    }
+
+    this.els.newTaskCreate.disabled = true;
+    this.els.newTaskCreate.textContent = 'Creating...';
+
+    try {
+      const data = await this.api('POST', '/api/worktree-tasks', {
+        workspaceId,
+        repoDir,
+        branch,
+        description: name,
+        baseBranch: 'main',
+        model,
+        prompt,
+        flags,
+      });
+
+      this.closeNewTaskDialog();
+      await this.loadSessions();
+
+      // Open session in terminal pane
+      if (data.session) {
+        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        if (emptySlot !== -1) {
+          this.setViewMode('terminal');
+          this.openTerminalInPane(emptySlot, data.session.id, branch, {
+            cwd: data.task.worktreePath,
+            ...(model ? { model } : {}),
+            ...(flags.length > 0 ? { flags } : {}),
+          });
+        }
+      }
+
+      this.showToast(`Task started on ${branch}`, 'success');
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create task', 'error');
+    } finally {
+      this.els.newTaskCreate.disabled = false;
+      this.els.newTaskCreate.textContent = 'Create Task';
+    }
   }
 
 
@@ -4072,13 +4443,14 @@ class CWMApp {
       this._resourcesInterval = null;
     }
 
-    // Toggle terminal grid vs session panels vs docs vs resources vs costs
+    // Toggle terminal grid vs session panels vs docs vs resources vs costs vs tasks
     const isTerminal = mode === 'terminal';
     const isDocs = mode === 'docs';
     const isResources = mode === 'resources';
     const isCosts = mode === 'costs';
-    this.els.sessionListPanel.hidden = isTerminal || isDocs || isResources || isCosts;
-    this.els.detailPanel.hidden = isTerminal || isDocs || isResources || isCosts || !this.state.selectedSession;
+    const isTasks = mode === 'tasks';
+    this.els.sessionListPanel.hidden = isTerminal || isDocs || isResources || isCosts || isTasks;
+    this.els.detailPanel.hidden = isTerminal || isDocs || isResources || isCosts || isTasks || !this.state.selectedSession;
     if (this.els.terminalGrid) {
       this.els.terminalGrid.hidden = !isTerminal;
     }
@@ -4104,8 +4476,13 @@ class CWMApp {
     if (this.els.costsPanel) {
       this.els.costsPanel.hidden = !isCosts;
     }
+    if (this.els.tasksPanel) {
+      this.els.tasksPanel.hidden = !isTasks;
+    }
 
-    if (isDocs) {
+    if (isTasks) {
+      this.renderTasksView();
+    } else if (isDocs) {
       this.loadDocs();
     } else if (isResources) {
       this.loadResources();
@@ -5368,6 +5745,7 @@ class CWMApp {
               <div class="workspace-session-count">${sessionCount} session${sessionCount !== 1 ? 's' : ''}</div>
             </div>
             <div class="workspace-actions">
+              ${this.state.settings.enableWorktreeTasks ? `<button class="btn btn-ghost btn-icon btn-sm ws-new-task-btn" data-ws-id="${ws.id}" title="New Task">+</button>` : ''}
               <button class="btn btn-ghost btn-icon btn-sm ws-rename-btn" data-id="${ws.id}" title="Edit">
                 <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                   <path d="M8.5 2.5l3 3M2 9.5V12h2.5L11 5.5l-3-3L2 9.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
