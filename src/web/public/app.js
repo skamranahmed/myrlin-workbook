@@ -123,6 +123,7 @@ class CWMApp {
         confirmBeforeClose: true,
         autoOpenTerminal: true,
         autoTrustDialogs: false,
+        maxConcurrentTasks: 4,
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -3227,6 +3228,7 @@ class CWMApp {
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
+      { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
     ];
   }
 
@@ -4250,6 +4252,18 @@ class CWMApp {
         const currentColumn = (task.status === 'active') ? 'running' : (task.status === 'pending' ? 'backlog' : task.status);
         if (currentColumn === newStatus) return;
 
+        // Enforce concurrent limit when moving to running
+        if (newStatus === 'running') {
+          const maxConcurrent = this.state.settings.maxConcurrentTasks || 4;
+          const runningCount = (this._worktreeTaskCache || []).filter(t =>
+            (t.status === 'running' || t.status === 'active') && t.id !== taskId
+          ).length;
+          if (runningCount >= maxConcurrent) {
+            this.showToast(`Concurrent task limit reached (${maxConcurrent}). Increase in Settings.`, 'warning');
+            return;
+          }
+        }
+
         try {
           await this.api('PUT', `/api/worktree-tasks/${taskId}`, { status: apiStatus });
           this.showToast(`Task moved to ${newStatus}`, 'success');
@@ -4477,6 +4491,16 @@ class CWMApp {
     if (!workspaceId) {
       this.showToast('No project available', 'error');
       return;
+    }
+
+    // Enforce concurrent task limit when starting immediately
+    if (startNow) {
+      const maxConcurrent = this.state.settings.maxConcurrentTasks || 4;
+      const runningCount = (this._worktreeTaskCache || []).filter(t => t.status === 'running' || t.status === 'active').length;
+      if (runningCount >= maxConcurrent) {
+        this.showToast(`Concurrent task limit reached (${maxConcurrent}). Add to backlog or increase the limit in Settings.`, 'warning');
+        return;
+      }
     }
 
     this.els.newTaskCreate.disabled = true;
