@@ -5250,12 +5250,14 @@ class CWMApp {
           ? `<span class="pane-color-pip" style="background:var(--${this.PANE_SLOT_COLORS[slotIdx]})"></span>`
           : '';
 
+        // Build meta row (badges + size + time) — only if there's something to show
+        const metaParts = [badges, sizeStr ? `<span class="ws-session-size">${sizeStr}</span>` : '', timeStr ? `<span class="ws-session-time">${timeStr}</span>` : ''].filter(Boolean).join('');
+        const metaRow = metaParts ? `<div class="ws-session-meta-row">${metaParts}</div>` : '';
+
         return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
           <span class="ws-session-dot" style="background: ${statusDot}"></span>${pip}
-          <span class="ws-session-name">${this.escapeHtml(name.length > 22 ? name.substring(0, 22) + '...' : name)}</span>
-          ${badges}
-          ${sizeStr ? `<span class="ws-session-size">${sizeStr}</span>` : ''}
-          ${timeStr ? `<span class="ws-session-time">${timeStr}</span>` : ''}
+          <span class="ws-session-name">${this.escapeHtml(name)}</span>
+          ${metaRow}
         </div>`;
       };
 
