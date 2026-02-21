@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-workspace docs & kanban, session templates, costs dashboard, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into workspaces. Runs in your browser, everything stays local.
+Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-project docs & kanban, session templates, costs dashboard, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into projects with focused work contexts. Runs in your browser, everything stays local.
 </p>
 
 <p align="center">
@@ -80,7 +80,7 @@ Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./sta
 
 I use Claude Code daily and had a growing list of pet peeves. Can't name sessions, so `/resume` is just picking from a list of IDs. No shift+enter for multiline. If you have a few sessions going at once, the terminal window juggling gets old fast. PC restarts and you have to reopen everything from scratch. No idea what you're spending.
 
-Got fed up and built something for it. Myrlin scans `~/.claude/projects/`, finds every session you've ever run, and you organize them into workspaces with embedded terminals, docs, and cost tracking. Everything runs locally, no cloud, no telemetry.
+Got fed up and built something for it. Myrlin scans `~/.claude/projects/`, finds every session you've ever run, and you organize them into projects with embedded terminals, docs, and cost tracking. Everything runs locally, no cloud, no telemetry.
 
 ### Compared to other tools
 
@@ -92,7 +92,7 @@ There are good tools in this space. I tried them. Here's where Myrlin fits:
 | Costs dashboard | Yes | No | Yes | No |
 | Session discovery | Yes | Yes | No | No |
 | Session manager overlay | Yes | No | No | No |
-| Workspace docs/kanban | Yes | No | No | No |
+| Project docs/kanban | Yes | No | No | No |
 | Themes | 13 (Catppuccin, Nord, Dracula, etc.) | No | No | No |
 | Session templates | Yes | No | No | No |
 | Conflict detection | Yes | No | No | No |
@@ -105,7 +105,7 @@ There are good tools in this space. I tried them. Here's where Myrlin fits:
 | npx install | Yes | Yes | No | No |
 | Build step required | None | Vite | Tauri | None |
 
-**What those tools do better:** ClaudeCodeUI has a file explorer and multi-agent support. Opcode is a polished desktop app with 20k stars. Claude Squad supports 5+ AI tools. Myrlin is workspace-first with cost tracking and per-workspace docs. Different approach to the same problem.
+**What those tools do better:** ClaudeCodeUI has a file explorer and multi-agent support. Opcode is a polished desktop app with 20k stars. Claude Squad supports 5+ AI tools. Myrlin is project-first with cost tracking and per-project docs. Different approach to the same problem.
 
 ---
 
@@ -122,13 +122,24 @@ Per-session and per-workspace cost breakdown. Parses Claude's JSONL usage data, 
 - Auto-titles sessions from conversation content
 - Import sessions into workspaces with one click
 
-### Workspaces & Sessions
+### Projects, Focuses & Sessions
 
-![Workspace dashboard with sessions grouped by project](docs/images/hero-dashboard.png)
+![Project dashboard with sessions grouped by focus](docs/images/hero-dashboard.png)
 
-- Named workspaces with color coding
-- Group workspaces under umbrella folders
-- Drag-and-drop sessions between workspaces and into terminal panes
+Myrlin uses a 3-level organizational hierarchy:
+
+```
+Category ("Side Projects", "Work")     -- optional top-level grouping
+  Project ("Myrlin Workbook")          -- the codebase / main container
+    Focus ("UI Polish", "Backend")     -- sub-groups within a project
+      Sessions                         -- Claude Code conversations
+```
+
+- **Categories** group related projects (e.g., "Work" vs "Side Projects")
+- **Projects** are the main containers -- one per codebase, with color coding and docs
+- **Focuses** are sub-groups within a project for different areas of work
+- Drag-and-drop sessions between projects and into terminal panes
+- Tab groups are free-form -- mix sessions from any project in any tab
 - State persists to disk. Survives crashes and restarts
 - Auto-recovery on startup (detects orphaned sessions, restores state)
 
@@ -142,16 +153,16 @@ Per-session and per-workspace cost breakdown. Parses Claude's JSONL usage data, 
 - Model selection (Opus, Sonnet, Haiku) and session resume
 - Right-click context menu with Copy, Stop, Restart, Model picker
 
-### Per-Workspace Docs & Feature Board
+### Per-Project Docs & Feature Board
 
 ![Docs panel with Notes, Goals, Tasks, Roadmap, and Rules](docs/images/docs-panel.png)
 
-![Switching between workspace docs](docs/images/workspace-docs.gif)
+![Switching between project docs](docs/images/workspace-docs.gif)
 
-- Notes, Goals, Tasks, Rules, and Roadmap sections per workspace
+- Notes, Goals, Tasks, Rules, and Roadmap sections per project
 - Kanban-style feature board (Planned -> Active -> Review -> Done)
 - Markdown editor with formatting toolbar
-- AI Insights tab: auto-generated summaries of workspace sessions
+- AI Insights tab: auto-generated summaries of project sessions
 
 ![Feature tracking Kanban board](docs/images/kanban-board.png)
 
@@ -165,13 +176,13 @@ Real-time warnings when two or more running sessions are editing the same files.
 
 ### Quick Switcher
 
-`Ctrl+K` / `Cmd+K` opens a fuzzy search across all sessions and workspaces. Jump to anything instantly.
+`Ctrl+K` / `Cmd+K` opens a fuzzy search across all sessions and projects. Jump to anything instantly.
 
 ### Git & Worktree Management
 
-- Full git status per workspace: current branch, dirty/clean, ahead/behind remote
+- Full git status per project: current branch, dirty/clean, ahead/behind remote
 - Branch listing and worktree CRUD
-- **"New Feature Session"**: right-click a workspace -> creates a branch + worktree + Claude session in one click
+- **"New Feature Session"**: right-click a project -> creates a branch + worktree + Claude session in one click
 - Branch badges on session rows
 
 ### Themes
@@ -211,7 +222,7 @@ A comprehensive list of everything Myrlin Workbook offers today.
 ### Core
 
 - **Session discovery** - scans `~/.claude/projects/`, finds every session you've ever run
-- **Workspace management** - named workspaces with color coding, drag-and-drop grouping
+- **Project management** - 3-level hierarchy (Category > Project > Focus), color coding, drag-and-drop
 - **Auto-recovery** - restores state after crash or restart, detects orphaned sessions
 - **State persistence** - JSON on disk, survives everything
 
@@ -229,7 +240,7 @@ A comprehensive list of everything Myrlin Workbook offers today.
 
 ### Cost Tracking
 
-- **Per-session and per-workspace cost breakdown** - input/output/cache tokens
+- **Per-session and per-project cost breakdown** - input/output/cache tokens
 - **Costs dashboard tab** - period selector (Day / Week / Month / All)
 - **SVG timeline chart** - visual spend over time, model breakdown
 - **Sortable session table** - rank sessions by cost, tokens, or duration
@@ -242,14 +253,14 @@ A comprehensive list of everything Myrlin Workbook offers today.
 - **Filter** - All / Running / Stopped quick filters
 - **One-click terminal open** - from session manager rows
 - **Session templates** - save launch configs (directory, model, flags), one-click launch
-- **Quick switcher** - `Ctrl+K` / `Cmd+K` fuzzy search across sessions and workspaces
+- **Quick switcher** - `Ctrl+K` / `Cmd+K` fuzzy search across sessions and projects
 
 ### Docs & Planning
 
-- **Per-workspace docs** - Notes, Goals, Tasks, Rules, Roadmap sections
+- **Per-project docs** - Notes, Goals, Tasks, Rules, Roadmap sections
 - **Kanban-style feature board** - Planned, Active, Review, Done columns
 - **Markdown editor** - with formatting toolbar
-- **AI Insights tab** - auto-generated summaries of workspace sessions
+- **AI Insights tab** - auto-generated summaries of project sessions
 
 ### Conflict Detection
 
@@ -259,7 +270,7 @@ A comprehensive list of everything Myrlin Workbook offers today.
 
 ### Git & Worktree
 
-- **Git status per workspace** - current branch, dirty/clean, ahead/behind remote
+- **Git status per project** - current branch, dirty/clean, ahead/behind remote
 - **Branch listing and worktree CRUD** - create, switch, delete from the UI
 - **"New Feature Session"** - creates branch + worktree + Claude session in one click
 - **Branch badges** - shown on session rows
@@ -309,7 +320,7 @@ Browser (vanilla JS SPA)
   |                         |-- State store (JSON + EventEmitter)
   |                         |-- Session manager (launch/stop/restart)
   |                         |-- Resource monitoring (CPU, RAM, per-PID)
-  |                         +-- Workspace groups, discovery, docs
+  |                         +-- Project hierarchy, discovery, docs
   |
   |-- SSE --------------- Real-time updates (store events -> clients)
   |
@@ -317,7 +328,7 @@ Browser (vanilla JS SPA)
                              +-- node-pty -> ConPTY / PTY
 ```
 
-No React, no build step. Vanilla JS SPA, Express backend. ~24 source files, 26 tests.
+No React, no build step. Vanilla JS SPA, Express backend. ~24 source files, 42 tests.
 
 ### Project Structure
 
@@ -325,10 +336,10 @@ No React, no build step. Vanilla JS SPA, Express backend. ~24 source files, 26 t
 src/
 |-- state/
 |   |-- store.js              # Core state (JSON persistence + EventEmitter)
-|   +-- docs-manager.js       # Per-workspace markdown docs
+|   +-- docs-manager.js       # Per-project markdown docs
 |-- core/
 |   |-- session-manager.js    # Launch/stop/restart processes
-|   |-- workspace-manager.js  # Workspace CRUD
+|   |-- workspace-manager.js  # Project/Focus CRUD
 |   |-- process-tracker.js    # PID monitoring
 |   |-- recovery.js           # Auto-recovery on startup
 |   +-- notifications.js      # Event-based notifications
@@ -376,7 +387,7 @@ PORT=8080 npm run gui
 | `Ctrl+Enter` | Save in notes editor |
 | Double-click session | Inline rename |
 | Right-click session | Context menu (launch, model, rename, hide) |
-| Right-click workspace | Context menu (docs, add session, edit, delete) |
+| Right-click project | Context menu (docs, add session, edit, delete) |
 
 ---
 
@@ -399,21 +410,34 @@ Same issue. node-pty is compiling. If it fails, install the C++ build tools firs
 
 ## Roadmap
 
-- Multi-provider support (Codex, Cursor, Aider)
+### Coming Soon
+
+- **Kanban workflow view** - Backlog, Planning, Running, Review, Done columns with automated task lifecycle
+- **PR automation** - AI-generated PR descriptions, one-click creation via `gh`, state tracking
+- **Multi-model orchestration** - assign different AI models per workflow stage (plan, implement, review)
+- **Multi-agent detection** - auto-detect installed agents (Claude, Codex, Aider, Copilot)
+- **Cross-cutting tags** - tag sessions and tasks across projects for filtered views
+- **Task dependencies** - mark blocking relationships between tasks
+- Export/import projects
+- Push notifications for session events
+
+### Shipped
+
+- ~~Project hierarchy~~ shipped (Category > Project > Focus > Sessions)
+- ~~3-pane grid layout~~ shipped (bottom pane spans full width)
+- ~~Worktree task system~~ shipped (create, diff, merge, push)
 - ~~Conflict center~~ shipped
 - ~~Session manager overlay~~ shipped
 - ~~Costs dashboard~~ shipped
 - ~~Tab grouping~~ shipped
 - ~~Session templates~~ shipped
 - ~~Session search~~ shipped
-- ~~Light theme~~ shipped (4 Catppuccin themes)
+- ~~13 themes~~ shipped (Catppuccin, Nord, Dracula, Tokyo Night, + 6 more)
 - ~~Cost tracking~~ shipped (per-session token + cost breakdown)
-- ~~Feature board~~ shipped (Kanban per workspace)
+- ~~Feature board~~ shipped (Kanban per project)
 - ~~Git worktree management~~ shipped (branch CRUD, "New Feature Session" flow)
 - ~~Port detection~~ shipped (auto-discover ports from running sessions)
-- Export/import workspaces
-- Pinned sessions
-- Push notifications for session events
+- ~~Mobile support~~ shipped (responsive layout, touch gestures, dedicated input)
 
 ---
 
@@ -428,7 +452,7 @@ Same issue. node-pty is compiling. If it fails, install the C++ build tools firs
 Issues and PRs welcome. No build step. Clone, `npm install`, hack.
 
 ```bash
-npm test        # 26 tests
+npm test        # 42 tests
 npm run gui     # Start dev server
 ```
 
