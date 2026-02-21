@@ -274,7 +274,7 @@ class Store extends EventEmitter {
 
   // ─── Session CRUD ────────────────────────────────────────
 
-  createSession({ name, workspaceId, workingDir = '', topic = '', command = 'claude', resumeSessionId = null }) {
+  createSession({ name, workspaceId, workingDir = '', topic = '', command = 'claude', resumeSessionId = null, tags = [] }) {
     if (!this._state.workspaces[workspaceId]) return null;
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -288,6 +288,7 @@ class Store extends EventEmitter {
       resumeSessionId,
       status: 'stopped', // 'running' | 'stopped' | 'error' | 'idle'
       pid: null,
+      tags: Array.isArray(tags) ? tags : [],
       createdAt: now,
       lastActive: now,
       logs: [],
@@ -826,7 +827,7 @@ class Store extends EventEmitter {
    * @param {string} [params.featureId] - Linked feature board card ID
    * @returns {Object} The created worktree task
    */
-  createWorktreeTask({ workspaceId, sessionId, branch, worktreePath, repoDir, description, baseBranch = 'main', featureId = null }) {
+  createWorktreeTask({ workspaceId, sessionId, branch, worktreePath, repoDir, description, baseBranch = 'main', featureId = null, model = null, tags = [] }) {
     if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
     const id = 'wt_' + crypto.randomUUID().slice(0, 8);
     const now = new Date().toISOString();
@@ -840,6 +841,8 @@ class Store extends EventEmitter {
       repoDir,
       baseBranch,
       description,
+      model: model || null,
+      tags: Array.isArray(tags) ? tags : [],
       status: 'running',
       blockedBy: [],
       history: [{ status: 'running', at: now }],

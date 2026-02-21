@@ -684,6 +684,9 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
     if (!safe && updates.resumeSessionId) return res.status(400).json({ error: 'Invalid resume session ID.' });
     updates.resumeSessionId = safe || null;
   }
+  if (updates.tags !== undefined) {
+    updates.tags = Array.isArray(updates.tags) ? updates.tags.filter(t => typeof t === 'string' && t.length <= 30).slice(0, 10) : [];
+  }
 
   // Capture previous status before applying updates so we can detect
   // running->stopped transitions for auto-summary generation.
@@ -4110,11 +4113,14 @@ app.get('/api/worktree-tasks', requireAuth, async (req, res) => {
  * Create a worktree task: creates git worktree, session, and task record.
  */
 app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
-  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model, startNow } = req.body || {};
+  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model, tags, startNow } = req.body || {};
   if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
   if (!repoDir) return res.status(400).json({ error: 'repoDir is required' });
   if (!branch) return res.status(400).json({ error: 'branch is required' });
   if (!description) return res.status(400).json({ error: 'description is required' });
+
+  // Validate tags: must be array of short strings
+  const safeTags = Array.isArray(tags) ? tags.filter(t => typeof t === 'string' && t.length <= 30).slice(0, 10) : [];
 
   const store = getStore();
 
@@ -4130,6 +4136,8 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
         description,
         baseBranch: baseBranch || 'main',
         featureId: featureId || null,
+        model: model || null,
+        tags: safeTags,
       });
       // Override status to backlog (createWorktreeTask defaults to running)
       store.updateWorktreeTask(task.id, { status: 'backlog' });
@@ -4213,6 +4221,8 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
       description,
       baseBranch: baseBranch || 'main',
       featureId: featureId || null,
+      model: model || null,
+      tags: safeTags,
     });
 
     broadcastSSE('worktreeTask:created', { task });
@@ -4228,7 +4238,18 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
  */
 app.put('/api/worktree-tasks/:id', requireAuth, (req, res) => {
   const store = getStore();
-  const task = store.updateWorktreeTask(req.params.id, req.body);
+  const updates = { ...req.body };
+  // Validate tags if provided
+  if (updates.tags !== undefined) {
+    updates.tags = Array.isArray(updates.tags) ? updates.tags.filter(t => typeof t === 'string' && t.length <= 30).slice(0, 10) : [];
+  }
+  // Validate model if provided
+  if (updates.model !== undefined) {
+    const safe = sanitizeModel(updates.model);
+    if (!safe && updates.model) return res.status(400).json({ error: 'Invalid model identifier.' });
+    updates.model = safe || null;
+  }
+  const task = store.updateWorktreeTask(req.params.id, updates);
   if (!task) return res.status(404).json({ error: 'Worktree task not found' });
   broadcastSSE('worktreeTask:updated', { task });
   res.json({ task });

@@ -448,6 +448,14 @@ textarea.input {
   font-size: 9px;
 }
 
+.session-badge-tag {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 
 /* ═══════════════════════════════════════════════════════════════
    LOGIN SCREEN

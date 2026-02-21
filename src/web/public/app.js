@@ -124,6 +124,8 @@ class CWMApp {
         autoOpenTerminal: true,
         autoTrustDialogs: false,
         maxConcurrentTasks: 4,
+        defaultModelPlanning: '',
+        defaultModelRunning: '',
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -368,6 +370,7 @@ class CWMApp {
       newTaskDirCustom: document.getElementById('new-task-dir-custom'),
       newTaskPrompt: document.getElementById('new-task-prompt'),
       newTaskModel: document.getElementById('new-task-model'),
+      newTaskTags: document.getElementById('new-task-tags'),
       newTaskFlags: document.getElementById('new-task-flags'),
 
       // Costs
@@ -2548,6 +2551,27 @@ class CWMApp {
       ],
     });
 
+    // Tags
+    const sessionTags = session.tags || [];
+    items.push({
+      label: 'Tags...',
+      icon: '&#127991;',
+      hint: sessionTags.length > 0 ? sessionTags.join(', ') : 'none',
+      action: async () => {
+        const current = sessionTags.join(', ');
+        const result = prompt('Tags (comma-separated):', current);
+        if (result === null) return;
+        const newTags = result.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+        try {
+          await this.api('PUT', `/api/sessions/${sessionId}`, { tags: newTags });
+          this.showToast('Tags updated', 'success');
+          await this.loadSessions();
+        } catch (err) {
+          this.showToast(err.message || 'Failed to update tags', 'error');
+        }
+      }
+    });
+
     // Insights submenu — session analysis and export
     items.push({
       label: 'Insights', icon: '&#128220;',
@@ -3241,6 +3265,8 @@ class CWMApp {
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
+      { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign this model when tasks enter the Planning column. Leave empty for no default.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku' }, { value: 'claude-sonnet-4-6', label: 'Sonnet' }, { value: 'claude-opus-4-6', label: 'Opus' }] },
+      { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign this model when tasks enter the Running column. Leave empty for no default.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku' }, { value: 'claude-sonnet-4-6', label: 'Sonnet' }, { value: 'claude-opus-4-6', label: 'Opus' }] },
     ];
   }
 
@@ -3602,6 +3628,23 @@ class CWMApp {
         icon: '&#9000;',
         action: () => this.openQuickSwitcher('help'),
       },
+      {
+        id: 'feature-tags',
+        name: 'Tags',
+        description: 'Add comma-separated tags to sessions and tasks. Tags appear as colored badges on kanban cards and session list. Search tasks by tag. Right-click any session or kanban card to edit tags.',
+        category: 'feature',
+        tags: ['tag', 'label', 'badge', 'category', 'filter', 'organize', 'group'],
+        icon: '&#127991;',
+      },
+      {
+        id: 'feature-model-orchestration',
+        name: 'Model Orchestration',
+        description: 'Assign models per task from the kanban context menu. Configure default models for Planning and Running stages in Settings > Advanced. Tasks auto-inherit the stage model when dragged between columns.',
+        category: 'feature',
+        tags: ['model', 'orchestration', 'opus', 'sonnet', 'haiku', 'stage', 'planning', 'running'],
+        icon: '&#9881;',
+        action: () => this.openSettings(),
+      },
     ];
   }
 
@@ -3743,6 +3786,21 @@ class CWMApp {
               </div>
               <input type="number" class="settings-number-input" data-setting-num="${item.key}" value="${val}" min="0" max="99999" placeholder="0" />
             </div>`;
+        } else if (item.type === 'select' && Array.isArray(item.options)) {
+          const val = this.state.settings[item.key] || '';
+          const optionsHtml = item.options.map(opt =>
+            `<option value="${this.escapeHtml(opt.value)}"${opt.value === val ? ' selected' : ''}>${this.escapeHtml(opt.label)}</option>`
+          ).join('');
+          html += `
+            <div class="settings-row" data-setting-key="${item.key}">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <select class="form-select settings-select-input" data-setting-select="${item.key}" style="width: 140px; font-size: 12px;">
+                ${optionsHtml}
+              </select>
+            </div>`;
         } else {
           const checked = this.state.settings[item.key] ? 'checked' : '';
           html += `
@@ -3789,6 +3847,16 @@ class CWMApp {
       input.addEventListener('change', (e) => {
         const key = e.target.dataset.settingNum;
         this.state.settings[key] = parseInt(e.target.value, 10) || 0;
+        this.saveSettings();
+        this.applySettings();
+      });
+    });
+
+    // Bind select input change events
+    this.els.settingsBody.querySelectorAll('select[data-setting-select]').forEach(sel => {
+      sel.addEventListener('change', (e) => {
+        const key = e.target.dataset.settingSelect;
+        this.state.settings[key] = e.target.value;
         this.saveSettings();
         this.applySettings();
       });
@@ -4075,12 +4143,18 @@ class CWMApp {
 
       const openBtn = groupType === 'running' ? `<button class="btn btn-ghost btn-sm" data-action="open" data-task-id="${t.id}" style="font-size:10px;padding:1px 6px;margin-left:auto;">Open</button>` : '';
 
+      const listTagBadges = (t.tags || []).slice(0, 3).map(tag => {
+        const color = this._tagColor(tag);
+        return `<span class="session-badge session-badge-tag" style="background:color-mix(in srgb, var(--${color}) 15%, transparent);color:var(--${color});">${this.escapeHtml(tag)}</span>`;
+      }).join('');
+
       return `<div class="task-item" data-session-id="${t.sessionId || ''}" data-task-id="${t.id}">
         <span class="task-item-dot ${dotClass}"></span>
         <span class="task-item-branch">${this.escapeHtml(t.branch || t.description || t.id)}</span>
         ${openBtn}
         <div class="task-item-meta">
           ${t.model ? `<span class="session-badge session-badge-model">${this.escapeHtml(t.model.includes('opus') ? 'opus' : t.model.includes('sonnet') ? 'sonnet' : t.model.includes('haiku') ? 'haiku' : t.model)}</span>` : ''}
+          ${listTagBadges}
           ${timeStr ? `<span>${timeStr}</span>` : ''}
           ${changes}
         </div>
@@ -4141,6 +4215,14 @@ class CWMApp {
 
     // Wire up events on all cards
     this._wireKanbanEvents();
+  }
+
+  /** Map a tag name to a consistent Catppuccin color variable */
+  _tagColor(tag) {
+    const palette = ['teal', 'pink', 'sky', 'peach', 'lavender', 'flamingo', 'sapphire', 'rosewater'];
+    let hash = 0;
+    for (let i = 0; i < tag.length; i++) hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
+    return palette[Math.abs(hash) % palette.length];
   }
 
   /** Render a single kanban card */
@@ -4217,12 +4299,19 @@ class CWMApp {
       timelineHtml = `<div class="kanban-card-timeline">${task.history.length} transitions -- ${durationStr} total</div>`;
     }
 
+    // Tag badges
+    const tagBadges = (task.tags || []).map(tag => {
+      const color = this._tagColor(tag);
+      return `<span class="session-badge session-badge-tag" style="background:color-mix(in srgb, var(--${color}) 15%, transparent);color:var(--${color});">${this.escapeHtml(tag)}</span>`;
+    }).join('');
+
     return `<div class="kanban-card${task.blockedBy && task.blockedBy.length > 0 ? ' kanban-card-blocked-state' : ''}" draggable="true" data-task-id="${task.id}" data-session-id="${task.sessionId || ''}">
       <div class="kanban-card-title">${this.escapeHtml(task.branch || task.description || task.id)}</div>
       <div class="kanban-card-meta">
         ${modelShort ? `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>` : ''}
         ${agentBadge}
         ${rejectedBadge}
+        ${tagBadges}
         ${timeStr ? `<span>${timeStr}</span>` : ''}
       </div>
       ${blockedHtml}
@@ -4252,12 +4341,12 @@ class CWMApp {
     return '';
   }
 
-  /** Filter tasks by the current search query, matching branch, description, model, and status */
+  /** Filter tasks by the current search query, matching branch, description, model, status, and tags */
   _filterTasks(tasks) {
     const q = this._tasksSearchQuery;
     if (!q) return tasks;
     return tasks.filter(t => {
-      const haystack = [t.branch, t.description, t.model, t.status, t.id].filter(Boolean).join(' ').toLowerCase();
+      const haystack = [t.branch, t.description, t.model, t.status, t.id, ...(t.tags || [])].filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(q);
     });
   }
@@ -4356,7 +4445,16 @@ class CWMApp {
         }
 
         try {
-          await this.api('PUT', `/api/worktree-tasks/${taskId}`, { status: apiStatus });
+          // Build update payload -- auto-assign model if configured for this stage
+          const updatePayload = { status: apiStatus };
+          const stageModelKey = newStatus === 'planning' ? 'defaultModelPlanning' : newStatus === 'running' ? 'defaultModelRunning' : null;
+          if (stageModelKey) {
+            const stageModel = this.state.settings[stageModelKey];
+            if (stageModel && !task.model) {
+              updatePayload.model = stageModel;
+            }
+          }
+          await this.api('PUT', `/api/worktree-tasks/${taskId}`, updatePayload);
           this.showToast(`Task moved to ${newStatus}`, 'success');
           this.renderTasksView(); // Re-fetch and render
         } catch (err) {
@@ -4438,6 +4536,52 @@ class CWMApp {
       });
     }
 
+    // Model selection submenu
+    const modelOptions = [
+      { id: '', label: 'Default' },
+      { id: 'claude-opus-4-6', label: 'Opus' },
+      { id: 'claude-sonnet-4-6', label: 'Sonnet' },
+      { id: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+    ];
+    const currentTaskModel = task.model || '';
+    const currentModelLabel = currentTaskModel ? (modelOptions.find(m => m.id === currentTaskModel)?.label || 'Custom') : 'Default';
+    items.push({
+      label: 'Model', icon: '&#9881;', hint: currentModelLabel,
+      submenu: modelOptions.map(m => ({
+        label: m.label,
+        check: currentTaskModel === m.id,
+        action: async () => {
+          try {
+            await this.api('PUT', `/api/worktree-tasks/${taskId}`, { model: m.id || null });
+            this.showToast(`Model set to ${m.label}`, 'success');
+            this.renderTasksView();
+          } catch (err) {
+            this.showToast(err.message || 'Failed to update model', 'error');
+          }
+        }
+      }))
+    });
+
+    // Edit tags
+    items.push({
+      label: 'Edit Tags...',
+      icon: '&#127991;',
+      hint: (task.tags || []).length > 0 ? (task.tags || []).join(', ') : 'none',
+      action: async () => {
+        const current = (task.tags || []).join(', ');
+        const result = prompt('Tags (comma-separated):', current);
+        if (result === null) return;
+        const newTags = result.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+        try {
+          await this.api('PUT', `/api/worktree-tasks/${taskId}`, { tags: newTags });
+          this.showToast('Tags updated', 'success');
+          this.renderTasksView();
+        } catch (err) {
+          this.showToast(err.message || 'Failed to update tags', 'error');
+        }
+      }
+    });
+
     // Delete task
     items.push({ type: 'sep' });
     items.push({
@@ -4475,6 +4619,7 @@ class CWMApp {
     if (this.els.newTaskDescription) this.els.newTaskDescription.value = '';
     this.els.newTaskPrompt.value = '';
     this.els.newTaskModel.value = '';
+    if (this.els.newTaskTags) this.els.newTaskTags.value = '';
     this.els.newTaskDirCustom.value = '';
     this.els.newTaskDirCustom.hidden = true;
     this.els.newTaskBranchPreview.textContent = '';
@@ -4567,6 +4712,7 @@ class CWMApp {
     const prompt = (this.els.newTaskPrompt.value || '').trim() || undefined;
     const description = (this.els.newTaskDescription ? this.els.newTaskDescription.value : '').trim() || name;
     const startNow = this.els.newTaskStartNow ? this.els.newTaskStartNow.checked : true;
+    const tags = this.els.newTaskTags ? this.els.newTaskTags.value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
 
     // Collect flags
     const flags = [];
@@ -4607,6 +4753,7 @@ class CWMApp {
           description,
           baseBranch: 'main',
           model,
+          tags,
           prompt,
           flags,
         });
@@ -4637,6 +4784,7 @@ class CWMApp {
           description,
           baseBranch: 'main',
           model,
+          tags,
           flags,
           startNow: false,
         });
@@ -6327,6 +6475,13 @@ class CWMApp {
         const cachedSubagents = this._getSubagentsCached(s.id);
         if (cachedSubagents !== null && cachedSubagents > 0) {
           badges += `<span class="session-badge session-badge-agents">${cachedSubagents}</span>`;
+        }
+        // Tag badges (from session)
+        if (s.tags && s.tags.length > 0) {
+          for (const tag of s.tags.slice(0, 3)) {
+            const color = this._tagColor(tag);
+            badges += `<span class="session-badge session-badge-tag" style="background:color-mix(in srgb, var(--${color}) 15%, transparent);color:var(--${color});">${this.escapeHtml(tag)}</span>`;
+          }
         }
 
         // Pane color pip — show matching dot if session is open in a terminal slot
