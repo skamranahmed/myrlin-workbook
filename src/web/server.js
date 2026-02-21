@@ -4159,6 +4159,38 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
     if (branchExists) args.push(branch);
     await gitExec(args, root);
 
+    // 1.5. Run init hooks (copy_files and init_script) if configured
+    const initHooks = store.getWorktreeInitHooks();
+    if (initHooks) {
+      // copy_files: array of relative paths to copy from repo root to worktree
+      if (Array.isArray(initHooks.copy_files)) {
+        for (const relPath of initHooks.copy_files) {
+          const src = path.join(root, relPath);
+          const dest = path.join(worktreePath, relPath);
+          try {
+            const destDir = path.dirname(dest);
+            if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+            fs.copyFileSync(src, dest);
+          } catch (e) {
+            console.error(`[init-hook] Failed to copy ${relPath}: ${e.message}`);
+          }
+        }
+      }
+      // init_script: shell command to run in the worktree directory
+      if (initHooks.init_script && typeof initHooks.init_script === 'string') {
+        try {
+          const { execSync } = require('child_process');
+          execSync(initHooks.init_script, {
+            cwd: worktreePath,
+            timeout: 30000,
+            stdio: 'pipe',
+          });
+        } catch (e) {
+          console.error(`[init-hook] init_script failed: ${e.message}`);
+        }
+      }
+    }
+
     // 2. Create a session in this workspace pointing at the worktree
     const sessionName = branch.replace(/^feat\//, '') + ' (worktree task)';
     const session = store.createSession(workspaceId, {
@@ -4314,6 +4346,30 @@ app.delete('/api/worktree-tasks/:id', requireAuth, (req, res) => {
   const deleted = store.deleteWorktreeTask(req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Worktree task not found' });
   broadcastSSE('worktreeTask:deleted', { id: req.params.id });
+  res.json({ success: true });
+});
+
+/**
+ * GET /api/worktree-init-hooks
+ * Get the current worktree init hooks configuration.
+ */
+app.get('/api/worktree-init-hooks', requireAuth, (req, res) => {
+  const store = getStore();
+  res.json({ hooks: store.getWorktreeInitHooks() || { copy_files: [], init_script: '' } });
+});
+
+/**
+ * PUT /api/worktree-init-hooks
+ * Update worktree init hooks configuration.
+ * Body: { copy_files: string[], init_script: string }
+ */
+app.put('/api/worktree-init-hooks', requireAuth, (req, res) => {
+  const store = getStore();
+  const { copy_files, init_script } = req.body || {};
+  store.setWorktreeInitHooks({
+    copy_files: Array.isArray(copy_files) ? copy_files : [],
+    init_script: typeof init_script === 'string' ? init_script : '',
+  });
   res.json({ success: true });
 });
 

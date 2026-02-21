@@ -889,6 +889,23 @@ class Store extends EventEmitter {
   }
 
   /**
+   * Get worktree init hooks configuration.
+   * @returns {Object|null} { copy_files: string[], init_script: string } or null
+   */
+  getWorktreeInitHooks() {
+    return this._state.worktreeInitHooks || null;
+  }
+
+  /**
+   * Set worktree init hooks configuration.
+   * @param {Object} hooks - { copy_files: string[], init_script: string }
+   */
+  setWorktreeInitHooks(hooks) {
+    this._state.worktreeInitHooks = hooks;
+    this._debouncedSave();
+  }
+
+  /**
    * Delete a worktree task record.
    * @param {string} id - Worktree task ID
    * @returns {boolean} True if deleted

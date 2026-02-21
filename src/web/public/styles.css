@@ -5201,6 +5201,7 @@ html.activity-indicators-disabled .terminal-pane-activity {
 }
 
 .kanban-column-dot.backlog { background: var(--overlay0); }
+.kanban-column-dot.planning { background: var(--mauve); }
 .kanban-column-dot.running { background: var(--green); animation: tristate-pulse 1.5s ease-in-out infinite; }
 .kanban-column-dot.review { background: var(--peach); }
 .kanban-column-dot.completed { background: var(--blue); }
@@ -5253,6 +5254,7 @@ html.activity-indicators-disabled .terminal-pane-activity {
 
 /* Status-colored left border accent */
 .kanban-column[data-status="backlog"] .kanban-card { border-left-color: var(--overlay0); }
+.kanban-column[data-status="planning"] .kanban-card { border-left-color: var(--mauve); }
 .kanban-column[data-status="running"] .kanban-card { border-left-color: var(--green); }
 .kanban-column[data-status="review"] .kanban-card { border-left-color: var(--peach); }
 .kanban-column[data-status="completed"] .kanban-card { border-left-color: var(--blue); }
@@ -5265,6 +5267,7 @@ html.activity-indicators-disabled .terminal-pane-activity {
 
 /* Preserve left border color on hover */
 .kanban-column[data-status="backlog"] .kanban-card:hover { border-left-color: var(--overlay0); }
+.kanban-column[data-status="planning"] .kanban-card:hover { border-left-color: var(--mauve); }
 .kanban-column[data-status="running"] .kanban-card:hover { border-left-color: var(--green); }
 .kanban-column[data-status="review"] .kanban-card:hover { border-left-color: var(--peach); }
 .kanban-column[data-status="completed"] .kanban-card:hover { border-left-color: var(--blue); }

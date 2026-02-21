@@ -4025,11 +4025,13 @@ class CWMApp {
   _renderKanbanBoard(tasks) {
     if (!this.els.kanbanBoard) return;
 
-    // Categorize tasks into kanban columns
-    const columns = { backlog: [], running: [], review: [], completed: [] };
+    // Categorize tasks into 5 kanban columns: Backlog | Planning | Running | Review | Done
+    const columns = { backlog: [], planning: [], running: [], review: [], completed: [] };
     tasks.forEach(t => {
       if (t.status === 'backlog' || t.status === 'pending') {
         columns.backlog.push(t);
+      } else if (t.status === 'planning' || t.status === 'exploring') {
+        columns.planning.push(t);
       } else if (t.status === 'running' || t.status === 'active') {
         columns.running.push(t);
       } else if (t.status === 'review') {
@@ -4244,7 +4246,7 @@ class CWMApp {
         if (!task) return;
 
         // Map kanban column to API status
-        const statusMap = { backlog: 'backlog', running: 'running', review: 'review', completed: 'completed' };
+        const statusMap = { backlog: 'backlog', planning: 'planning', running: 'running', review: 'review', completed: 'completed' };
         const apiStatus = statusMap[newStatus];
         if (!apiStatus) return;
 
