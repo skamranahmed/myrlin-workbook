@@ -1159,6 +1159,51 @@
   </div>
 
   <!-- ═══════════════════════════════════════════ -->
+  <!-- PR CREATION DIALOG                           -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="pr-dialog-overlay" hidden>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-label="Create Pull Request" style="max-width: 560px;">
+      <div class="modal-header">
+        <h3>Create Pull Request</h3>
+        <button class="btn btn-ghost btn-icon btn-sm" id="pr-dialog-close" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <div class="form-group">
+          <label class="form-label">Title</label>
+          <input type="text" id="pr-title" class="form-input" placeholder="PR title" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="form-group">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <label class="form-label" style="margin-bottom: 0;">Description</label>
+            <button class="btn btn-ghost btn-sm" id="pr-generate-desc" style="font-size: 10px; padding: 1px 8px;">Generate with AI</button>
+          </div>
+          <textarea id="pr-body" class="form-textarea" rows="8" placeholder="Describe your changes..."></textarea>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Base Branch</label>
+            <input type="text" id="pr-base-branch" class="form-input" value="main" />
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Labels <span style="color: var(--overlay0); font-weight: 400;">(comma-separated)</span></label>
+            <input type="text" id="pr-labels" class="form-input" placeholder="e.g. enhancement, bug" />
+          </div>
+        </div>
+        <label class="form-checkbox" style="margin-top: 4px;">
+          <input type="checkbox" id="pr-draft" />
+          Create as draft
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="pr-dialog-cancel">Cancel</button>
+        <button class="btn btn-primary" id="pr-dialog-submit">Create PR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
   <!-- DIFF VIEWER                                 -->
   <!-- ═══════════════════════════════════════════ -->
   <div class="modal-overlay" id="diff-viewer-overlay" hidden>

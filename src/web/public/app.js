@@ -373,6 +373,18 @@ class CWMApp {
       newTaskTags: document.getElementById('new-task-tags'),
       newTaskFlags: document.getElementById('new-task-flags'),
 
+      // PR dialog
+      prDialogOverlay: document.getElementById('pr-dialog-overlay'),
+      prDialogClose: document.getElementById('pr-dialog-close'),
+      prDialogCancel: document.getElementById('pr-dialog-cancel'),
+      prDialogSubmit: document.getElementById('pr-dialog-submit'),
+      prTitle: document.getElementById('pr-title'),
+      prBody: document.getElementById('pr-body'),
+      prBaseBranch: document.getElementById('pr-base-branch'),
+      prLabels: document.getElementById('pr-labels'),
+      prDraft: document.getElementById('pr-draft'),
+      prGenerateDesc: document.getElementById('pr-generate-desc'),
+
       // Costs
       costsPanel: document.getElementById('costs-panel'),
       costsBody: document.getElementById('costs-body'),
@@ -835,6 +847,25 @@ class CWMApp {
         this.els.newTaskDirCustom.hidden = !isCustom;
         if (isCustom) this.els.newTaskDirCustom.focus();
       });
+    }
+
+    // PR dialog bindings
+    if (this.els.prDialogClose) {
+      this.els.prDialogClose.addEventListener('click', () => this.closePRDialog());
+    }
+    if (this.els.prDialogCancel) {
+      this.els.prDialogCancel.addEventListener('click', () => this.closePRDialog());
+    }
+    if (this.els.prDialogSubmit) {
+      this.els.prDialogSubmit.addEventListener('click', () => this.submitPR());
+    }
+    if (this.els.prDialogOverlay) {
+      this.els.prDialogOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.prDialogOverlay) this.closePRDialog();
+      });
+    }
+    if (this.els.prGenerateDesc) {
+      this.els.prGenerateDesc.addEventListener('click', () => this.generatePRDescription());
     }
 
     // Update button
@@ -3637,6 +3668,14 @@ class CWMApp {
         icon: '&#127991;',
       },
       {
+        id: 'feature-pr-automation',
+        name: 'Pull Request Automation',
+        description: 'Create GitHub PRs directly from worktree tasks. AI-generated descriptions from diffs. PR badges on kanban cards link to GitHub. Auto-advances tasks to Done when PR is merged. Available from review column, context menu, or session detail banner.',
+        category: 'feature',
+        tags: ['pr', 'pull request', 'github', 'merge', 'review', 'branch', 'code review'],
+        icon: '&#128279;',
+      },
+      {
         id: 'feature-model-orchestration',
         name: 'Model Orchestration',
         description: 'Assign models per task from the kanban context menu. Configure default models for Planning and Running stages in Settings > Advanced. Tasks auto-inherit the stage model when dragged between columns.',
@@ -4104,6 +4143,8 @@ class CWMApp {
           } catch (err) {
             this.showToast(err.message || 'Push failed', 'error');
           }
+        } else if (action === 'create-pr') {
+          this.openPRDialog(taskId);
         } else if (action === 'open') {
           const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
           if (task && task.sessionId) {
@@ -4264,15 +4305,26 @@ class CWMApp {
         <button class="btn btn-ghost btn-sm" data-action="open" data-task-id="${task.id}">Open Terminal</button>
       </div>`;
     } else if (columnStatus === 'review') {
+      const prBtn = (task.pr && task.pr.url)
+        ? `<a href="${this.escapeHtml(task.pr.url)}" target="_blank" class="btn btn-ghost btn-sm" style="color:var(--green);text-decoration:none;">View PR</a>`
+        : `<button class="btn btn-ghost btn-sm" data-action="create-pr" data-task-id="${task.id}" style="color:var(--green)">Create PR</button>`;
       actionsHtml = `<div class="kanban-card-actions">
         <button class="btn btn-primary btn-sm" data-action="merge" data-task-id="${task.id}">Merge</button>
         <button class="btn btn-ghost btn-sm" data-action="diff" data-task-id="${task.id}">Diff</button>
-        <button class="btn btn-ghost btn-sm" data-action="push" data-task-id="${task.id}" style="color:var(--teal)">Push</button>
+        ${prBtn}
       </div>`;
     }
 
     // Rejected badge for tasks in done column that were rejected
     const rejectedBadge = task.status === 'rejected' ? '<span class="session-badge" style="background:var(--red);color:var(--base);">rejected</span>' : '';
+
+    // PR badge
+    let prBadge = '';
+    if (task.pr && task.pr.url) {
+      const prColors = { open: 'var(--green)', draft: 'var(--overlay1)', merged: 'var(--mauve)', closed: 'var(--red)' };
+      const prColor = prColors[task.pr.state] || 'var(--overlay1)';
+      prBadge = `<a href="${this.escapeHtml(task.pr.url)}" target="_blank" class="session-badge session-badge-pr" style="background:color-mix(in srgb, ${prColor} 15%, transparent);color:${prColor};text-decoration:none;cursor:pointer;" title="PR #${task.pr.number} (${task.pr.state})">#${task.pr.number}</a>`;
+    }
 
     // Blocked-by indicator
     let blockedHtml = '';
@@ -4322,6 +4374,7 @@ class CWMApp {
       <div class="kanban-card-meta">
         ${modelShort ? `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>` : ''}
         ${agentBadge}
+        ${prBadge}
         ${rejectedBadge}
         ${tagBadges}
         ${timeStr ? `<span>${timeStr}</span>` : ''}
@@ -4595,6 +4648,30 @@ class CWMApp {
       }
     });
 
+    // PR actions
+    if (task.pr && task.pr.url) {
+      items.push({
+        label: `View PR #${task.pr.number}`,
+        icon: '&#128279;',
+        action: () => window.open(task.pr.url, '_blank'),
+      });
+      items.push({
+        label: 'Refresh PR Status',
+        icon: '&#8635;',
+        action: async () => {
+          const pr = await this.refreshPRStatus(taskId);
+          if (pr) this.showToast(`PR #${pr.number}: ${pr.state}`, 'info');
+          this.renderTasksView();
+        }
+      });
+    } else {
+      items.push({
+        label: 'Create PR...',
+        icon: '&#128279;',
+        action: () => this.openPRDialog(taskId),
+      });
+    }
+
     // Delete task
     items.push({ type: 'sep' });
     items.push({
@@ -4816,6 +4893,110 @@ class CWMApp {
     }
   }
 
+
+  /* ═══════════════════════════════════════════════════════════
+     PULL REQUEST DIALOG
+     Create, track, and manage GitHub pull requests from tasks.
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Open the PR creation dialog for a worktree task */
+  openPRDialog(taskId) {
+    if (!this.els.prDialogOverlay) return;
+    this._prDialogTaskId = taskId;
+    const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+
+    // Pre-fill form
+    this.els.prTitle.value = task ? (task.description || task.branch || '') : '';
+    this.els.prBody.value = '';
+    this.els.prBaseBranch.value = task ? (task.baseBranch || 'main') : 'main';
+    this.els.prLabels.value = (task && task.tags) ? task.tags.join(', ') : '';
+    this.els.prDraft.checked = false;
+    this.els.prDialogSubmit.disabled = false;
+    this.els.prDialogSubmit.textContent = 'Create PR';
+
+    this.els.prDialogOverlay.hidden = false;
+  }
+
+  /** Close the PR dialog */
+  closePRDialog() {
+    if (this.els.prDialogOverlay) this.els.prDialogOverlay.hidden = true;
+    this._prDialogTaskId = null;
+  }
+
+  /** Generate a PR description using AI */
+  async generatePRDescription() {
+    const taskId = this._prDialogTaskId;
+    if (!taskId) return;
+
+    this.els.prGenerateDesc.disabled = true;
+    this.els.prGenerateDesc.textContent = 'Generating...';
+
+    try {
+      const data = await this.api('POST', `/api/worktree-tasks/${taskId}/pr/generate-description`);
+      if (data.description) {
+        this.els.prBody.value = data.description;
+        this.showToast('Description generated', 'success');
+      }
+    } catch (err) {
+      this.showToast(err.message || 'Failed to generate description', 'error');
+    } finally {
+      this.els.prGenerateDesc.disabled = false;
+      this.els.prGenerateDesc.textContent = 'Generate with AI';
+    }
+  }
+
+  /** Submit the PR creation form */
+  async submitPR() {
+    const taskId = this._prDialogTaskId;
+    if (!taskId) return;
+
+    const title = (this.els.prTitle.value || '').trim();
+    if (!title) {
+      this.showToast('PR title is required', 'error');
+      return;
+    }
+
+    this.els.prDialogSubmit.disabled = true;
+    this.els.prDialogSubmit.textContent = 'Creating...';
+
+    try {
+      const labels = this.els.prLabels.value
+        .split(',').map(l => l.trim()).filter(Boolean);
+
+      const data = await this.api('POST', `/api/worktree-tasks/${taskId}/pr`, {
+        title,
+        body: this.els.prBody.value || '',
+        baseBranch: this.els.prBaseBranch.value || 'main',
+        draft: this.els.prDraft.checked,
+        labels,
+      });
+
+      this.closePRDialog();
+      if (data.pr && data.pr.url) {
+        this.showToast(`PR created: #${data.pr.number}`, 'success');
+        // Open the PR URL in a new tab
+        window.open(data.pr.url, '_blank');
+      } else {
+        this.showToast('PR created', 'success');
+      }
+      this.renderTasksView();
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create PR', 'error');
+    } finally {
+      this.els.prDialogSubmit.disabled = false;
+      this.els.prDialogSubmit.textContent = 'Create PR';
+    }
+  }
+
+  /** Refresh PR status for a task and update the cache */
+  async refreshPRStatus(taskId) {
+    try {
+      const data = await this.api('GET', `/api/worktree-tasks/${taskId}/pr`);
+      return data.pr;
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * Show a summary modal for a session with overall theme, recent tasking,
@@ -11834,11 +12015,14 @@ class CWMApp {
 
       let actionsHtml = '';
       if (task.status === 'review') {
+        const prAction = (task.pr && task.pr.url)
+          ? `<a href="${this.escapeHtml(task.pr.url)}" target="_blank" class="wt-review-btn" style="text-decoration:none;color:var(--green);" title="View PR #${task.pr.number}">PR #${task.pr.number}</a>`
+          : `<button class="wt-review-btn wt-review-btn-create-pr" data-task-id="${task.id}" title="Create a pull request">Create PR</button>`;
         actionsHtml = `
           <div class="wt-review-actions">
             <button class="wt-review-btn wt-review-btn-diff" data-task-id="${task.id}" title="View changes">View Diff</button>
             <button class="wt-review-btn wt-review-btn-merge" data-task-id="${task.id}" title="Merge branch and cleanup">Merge</button>
-            <button class="wt-review-btn wt-review-btn-push" data-task-id="${task.id}" title="Push branch to remote for PR">Push</button>
+            ${prAction}
             <button class="wt-review-btn wt-review-btn-reject" data-task-id="${task.id}" title="Reject and delete worktree">Reject</button>
             <button class="wt-review-btn wt-review-btn-resume" data-task-id="${task.id}" title="Resume working">Resume</button>
           </div>`;
@@ -11890,6 +12074,8 @@ class CWMApp {
             } catch (err) {
               this.showToast(err.message || 'Push failed', 'error');
             }
+          } else if (btn.classList.contains('wt-review-btn-create-pr')) {
+            this.openPRDialog(taskId);
           } else if (btn.classList.contains('wt-review-btn-resume')) {
             try {
               await this.api('PUT', `/api/worktree-tasks/${taskId}`, { status: 'running', completedAt: null });

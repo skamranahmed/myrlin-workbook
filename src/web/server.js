@@ -4394,6 +4394,200 @@ app.put('/api/worktree-init-hooks', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
+// ─── GitHub CLI helper ───────────────────────────────────
+/**
+ * Execute a `gh` CLI command with given args in the specified cwd.
+ * @param {string[]} args - Arguments for the gh command
+ * @param {string} cwd - Working directory
+ * @returns {Promise<string>} stdout
+ */
+function ghExec(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { cwd, timeout: 30000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
+      if (err) {
+        const msg = (stderr || err.message || '').trim();
+        return reject(new Error(msg || 'gh command failed'));
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+/**
+ * POST /api/worktree-tasks/:id/pr
+ * Create a GitHub pull request for the task's branch.
+ * Body: { title, body, baseBranch, draft, labels }
+ */
+app.post('/api/worktree-tasks/:id/pr', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  // Don't create if PR already exists
+  if (task.pr && task.pr.url) {
+    return res.status(400).json({ error: 'PR already exists', pr: task.pr });
+  }
+
+  const { title, body, baseBranch, draft, labels } = req.body || {};
+  const prTitle = (title || '').trim() || task.description || task.branch;
+  const prBody = (body || '').trim() || '';
+  const base = (baseBranch || '').trim() || task.baseBranch || 'main';
+
+  try {
+    // Ensure branch is pushed
+    const taskCwd = task.worktreePath || task.repoDir;
+    try {
+      await gitExec(['push', '-u', 'origin', task.branch], taskCwd);
+    } catch { /* may already be pushed */ }
+
+    // Build gh pr create command
+    const ghArgs = ['pr', 'create', '--title', prTitle, '--head', task.branch, '--base', base];
+    if (prBody) ghArgs.push('--body', prBody);
+    if (draft) ghArgs.push('--draft');
+    if (Array.isArray(labels) && labels.length > 0) {
+      for (const label of labels) ghArgs.push('--label', label);
+    }
+
+    const output = await ghExec(ghArgs, task.repoDir);
+    // gh pr create returns the PR URL on stdout
+    const prUrl = output.trim();
+
+    // Extract PR number from URL (e.g. https://github.com/org/repo/pull/42)
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+    const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
+
+    // Store PR metadata on the task
+    const prData = {
+      url: prUrl,
+      number: prNumber,
+      state: draft ? 'draft' : 'open',
+      title: prTitle,
+      createdAt: new Date().toISOString(),
+    };
+    store.updateWorktreeTask(task.id, { pr: prData });
+
+    broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
+    res.status(201).json({ pr: prData });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/worktree-tasks/:id/pr
+ * Get the current PR status for a task. Refreshes state from GitHub.
+ */
+app.get('/api/worktree-tasks/:id/pr', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  if (!task.pr || !task.pr.number) {
+    return res.json({ pr: null });
+  }
+
+  try {
+    // Fetch PR status from GitHub
+    const output = await ghExec(
+      ['pr', 'view', String(task.pr.number), '--json', 'state,title,url,isDraft,reviewDecision,additions,deletions,changedFiles'],
+      task.repoDir
+    );
+    const prInfo = JSON.parse(output);
+
+    // Map GitHub state to our state
+    let state = 'open';
+    if (prInfo.state === 'MERGED') state = 'merged';
+    else if (prInfo.state === 'CLOSED') state = 'closed';
+    else if (prInfo.isDraft) state = 'draft';
+
+    const prData = {
+      ...task.pr,
+      state,
+      title: prInfo.title || task.pr.title,
+      url: prInfo.url || task.pr.url,
+      reviewDecision: prInfo.reviewDecision || null,
+      additions: prInfo.additions,
+      deletions: prInfo.deletions,
+      changedFiles: prInfo.changedFiles,
+    };
+
+    // Update stored state if changed
+    if (state !== task.pr.state || prInfo.reviewDecision !== task.pr.reviewDecision) {
+      store.updateWorktreeTask(task.id, { pr: prData });
+      broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
+
+      // Auto-advance to completed if PR was merged
+      if (state === 'merged' && task.status !== 'completed' && task.status !== 'merged') {
+        store.updateWorktreeTask(task.id, { status: 'completed', completedAt: new Date().toISOString() });
+        broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
+      }
+    }
+
+    res.json({ pr: prData });
+  } catch (err) {
+    // gh CLI not installed or not authenticated -- return stored data
+    res.json({ pr: task.pr, error: err.message });
+  }
+});
+
+/**
+ * POST /api/worktree-tasks/:id/pr/generate-description
+ * Generate a PR description from the diff using Claude --print.
+ */
+app.post('/api/worktree-tasks/:id/pr/generate-description', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  try {
+    const base = task.baseBranch || 'main';
+    const taskCwd = task.worktreePath || task.repoDir;
+
+    // Get the diff summary
+    let diffSummary = '';
+    try {
+      diffSummary = await gitExec(['diff', '--stat', `${base}...${task.branch}`], taskCwd);
+    } catch { /* branch may not have diverged */ }
+
+    let commitLog = '';
+    try {
+      commitLog = await gitExec(['log', '--oneline', `${base}..${task.branch}`], taskCwd);
+    } catch { /* no commits yet */ }
+
+    // Use Claude --print for non-interactive description generation
+    const prompt = `Generate a concise GitHub pull request description in markdown for the following changes.
+Branch: ${task.branch}
+Base: ${base}
+Description: ${task.description || 'No description'}
+
+Commits:
+${commitLog || 'No commits yet'}
+
+Diff summary:
+${diffSummary || 'No changes'}
+
+Format: Start with a ## Summary section with 2-3 bullet points, then a ## Changes section. Keep it under 300 words. Do not include a title line.`;
+
+    const description = await new Promise((resolve, reject) => {
+      execFile('claude', ['--print', '-p', prompt], {
+        cwd: taskCwd,
+        timeout: 60000,
+        maxBuffer: 1024 * 256,
+      }, (err, stdout) => {
+        if (err) return reject(new Error('Failed to generate description. Is Claude CLI installed?'));
+        resolve(stdout.trim());
+      });
+    });
+
+    res.json({ description });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * GET /api/worktree-tasks/:id/changes
  * List changed files between the worktree branch and its base branch.
