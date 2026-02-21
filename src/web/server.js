@@ -104,9 +104,19 @@ app.use((req, res, next) => {
   ];
   // Allow any localhost port (e.g. http://localhost:3456, http://localhost:5173)
   const isAllowed = allowedOrigins.some(allowed => origin === allowed || origin.startsWith(allowed + ':'));
-  // Also allow requests from the same host (e.g. Tailscale IP)
+  // Also allow requests from the same host (e.g. Tailscale IP, LAN IP)
+  // Uses exact hostname comparison to prevent substring bypass attacks
+  // (e.g. 192.168.1.100.evil.com must NOT match 192.168.1.100)
   const reqHost = req.headers.host;
-  if (!isAllowed && reqHost && origin.includes(reqHost.split(':')[0])) {
+  let isSameHost = false;
+  if (!isAllowed && reqHost && origin) {
+    try {
+      const originHostname = new URL(origin).hostname;
+      const reqHostname = reqHost.split(':')[0];
+      isSameHost = originHostname === reqHostname;
+    } catch (_) { /* malformed origin -- deny */ }
+  }
+  if (isSameHost) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
