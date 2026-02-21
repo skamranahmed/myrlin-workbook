@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-Open-source workspace manager for Claude Code - cost tracking, conflict detection, 4-pane embedded terminals, per-project docs & kanban, session templates, costs dashboard, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into projects with focused work contexts. Runs in your browser, everything stays local.
+Open-source workspace manager for Claude Code - multi-pane embedded terminals, kanban task board with PR automation, cost tracking, conflict detection, per-project docs, session templates, model orchestration, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into projects with focused work contexts. Runs in your browser, everything stays local.
 </p>
 
 <p align="center">
@@ -96,6 +96,9 @@ There are good tools in this space. I tried them. Here's where Myrlin fits:
 | Themes | 13 (Catppuccin, Nord, Dracula, etc.) | No | No | No |
 | Session templates | Yes | No | No | No |
 | Conflict detection | Yes | No | No | No |
+| Kanban task board | Yes (5 columns + DnD) | No | No | Yes (basic) |
+| PR automation | Yes (AI descriptions + gh) | No | No | No |
+| Model orchestration | Yes (per stage) | No | No | No |
 | Embedded terminals | 4-pane grid | Single | No | No |
 | Tab grouping | Yes | No | No | No |
 | Windows native | Yes | Buggy | Yes (desktop) | No (tmux) |
@@ -268,11 +271,19 @@ A comprehensive list of everything Myrlin Workbook offers today.
 - **Conflict center UI** - per-file breakdown with session attribution
 - **Click session chips** - jump directly to the terminal pane for that session
 
-### Git & Worktree
+### Git, Worktree Tasks & PR Automation
 
 - **Git status per project** - current branch, dirty/clean, ahead/behind remote
 - **Branch listing and worktree CRUD** - create, switch, delete from the UI
 - **"New Feature Session"** - creates branch + worktree + Claude session in one click
+- **Kanban task board** - 5-column (Backlog, Planning, Running, Review, Done) drag-and-drop workflow
+- **PR automation** - create GitHub PRs via `gh` CLI, AI-generated descriptions from diffs
+- **PR state tracking** - badges on cards (open/draft/merged/closed), auto-advance on merge
+- **Multi-model orchestration** - assign models per task, default model per workflow stage
+- **Task dependencies** - blocking relationships with visual indicators on cards
+- **Cross-cutting tags** - color-coded tag badges, searchable, editable via context menu
+- **Concurrent task limits** - configurable max (1-8), enforced on create and column drag
+- **Worktree init hooks** - auto-copy files and run scripts after worktree creation
 - **Branch badges** - shown on session rows
 
 ### Themes
@@ -410,34 +421,44 @@ Same issue. node-pty is compiling. If it fails, install the C++ build tools firs
 
 ## Roadmap
 
+### Next Up: Task Spinoff from Sessions
+
+**The killer feature.** Right-click any running Claude session, select "Spinoff Tasks..." and AI extracts actionable tasks from the conversation. Each task gets a pre-filled creation form with context, relevant files, and acceptance criteria. Confirm, and each task spins off to its own worktree branch with a structured context handoff document -- not a raw conversation dump, but a spec (current state, desired state, file inventory, constraints). Tasks appear on the kanban board, run in parallel on isolated branches, and report back with PRs when done.
+
+No other tool extracts tasks from a running session's conversation. Cursor spawns agents from issues. Copilot Workspace goes issue-to-PR. Devin works sequentially. Myrlin is the first to let you take an in-progress conversation, break it into parallel autonomous tasks, and orchestrate them from a kanban board -- all with proper context engineering so each agent knows exactly what to build without the parent's full history polluting its context window.
+
 ### Coming Soon
 
-- **Kanban workflow view** - Backlog, Planning, Running, Review, Done columns with automated task lifecycle
-- **PR automation** - AI-generated PR descriptions, one-click creation via `gh`, state tracking
-- **Multi-model orchestration** - assign different AI models per workflow stage (plan, implement, review)
-- **Multi-agent detection** - auto-detect installed agents (Claude, Codex, Aider, Copilot)
-- **Cross-cutting tags** - tag sessions and tasks across projects for filtered views
-- **Task dependencies** - mark blocking relationships between tasks
-- Export/import projects
-- Push notifications for session events
+- **Task spinoff from sessions** - right-click -> extract tasks -> parallel worktree agents with structured context handoff
+- **Collapsible sidebar** - toggle for more terminal space
+- **6-pane grid** - smart layouts for 1-6 panes with no dead space
+- **Pane drag-and-drop** - reorder terminal panes by dragging headers
+- **Saveable layouts** - named pane configurations you can switch between
+- **Frosted glass permission prompts** - blur overlay with clickable buttons when Claude asks for input
+- **Per-action cost breakdown** - token usage per tool call, not just session totals
+- **Conflict detection v2** - file-level collision warnings across parallel agents
+- **Multi-provider support** - Claude + Codex + Aider in the same workspace
 
-### Shipped
+### Recently Shipped (alpha.6 - alpha.12)
 
-- ~~Project hierarchy~~ shipped (Category > Project > Focus > Sessions)
-- ~~3-pane grid layout~~ shipped (bottom pane spans full width)
-- ~~Worktree task system~~ shipped (create, diff, merge, push)
-- ~~Conflict center~~ shipped
-- ~~Session manager overlay~~ shipped
-- ~~Costs dashboard~~ shipped
-- ~~Tab grouping~~ shipped
-- ~~Session templates~~ shipped
-- ~~Session search~~ shipped
-- ~~13 themes~~ shipped (Catppuccin, Nord, Dracula, Tokyo Night, + 6 more)
-- ~~Cost tracking~~ shipped (per-session token + cost breakdown)
-- ~~Feature board~~ shipped (Kanban per project)
-- ~~Git worktree management~~ shipped (branch CRUD, "New Feature Session" flow)
-- ~~Port detection~~ shipped (auto-discover ports from running sessions)
-- ~~Mobile support~~ shipped (responsive layout, touch gestures, dedicated input)
+- **Kanban workflow board** - 5 columns (Backlog, Planning, Running, Review, Done) with drag-and-drop
+- **PR automation** - AI-generated descriptions via `claude --print`, create/track PRs via `gh`, auto-advance on merge
+- **Multi-model orchestration** - default model per stage, auto-assignment on column transitions
+- **Cross-cutting tags** - color-coded tag badges on tasks and sessions, searchable
+- **Agent teams UX** - workflow explanation, stage progress dots, model hints
+- **Task dependencies** - blocking relationships with visual indicators
+- **Concurrent task limits** - configurable max (1-8), enforced on create and drag
+- **Task search** - filter kanban by branch, description, model, status, tags
+- **Live terminal preview** - running task cards show last terminal line
+- **Worktree init hooks** - copy files and run scripts after worktree creation
+
+### Previously Shipped
+
+- Project hierarchy (Category > Project > Focus > Sessions)
+- 3-pane grid layout, worktree tasks, conflict center, session manager overlay
+- Costs dashboard, tab grouping, session templates, session search
+- 13 themes, cost tracking, feature board, git worktree management
+- Port detection, mobile support, auto-trust dialogs
 
 ---
 
