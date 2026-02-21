@@ -4133,6 +4133,8 @@ textarea.input {
 }
 /* Ensure hidden attribute works - author display:flex overrides UA [hidden] rule */
 .terminal-pane[hidden] { display: none !important; }
+/* Mobile-only input row - hidden on desktop, shown via styles-mobile.css */
+.terminal-mobile-input-row { display: none; }
 .terminal-pane-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 12px; background: var(--mantle);
