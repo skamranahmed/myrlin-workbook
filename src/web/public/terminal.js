@@ -245,6 +245,12 @@ class TerminalPane {
     // Callback for fatal connection failure (max retries exhausted or server error).
     // App.js uses this to auto-close dead panes so they don't occupy grid space.
     this.onFatalError = null;
+    // Auto-trust: rolling buffer of ANSI-stripped PTY output for pattern matching
+    this._autoTrustBuffer = '';      // 4KB rolling buffer
+    this._autoTrustCooldown = 0;     // Timestamp of last auto-trust action
+    this._needsInput = false;        // Whether a question was detected that wasn't auto-answered
+    this._needsInputTimer = null;    // Timer to clear needsInput after new output
+    this._autoTrustEnabled = false;  // Set by app layer for worktree task terminals
   }
 
   _log(msg) {
@@ -928,6 +934,7 @@ class TerminalPane {
         const sample = this._activitySample;
         this._activitySample = '';
         if (sample) this._detectActivity(sample);
+        this._analyzeForAutoTrust(sample);
       }, 200);
     }
   }
@@ -1009,6 +1016,17 @@ class TerminalPane {
    */
   _trackActivityForCompletion() {
     this._lastOutputTime = Date.now();
+    // Clear "needs input" indicator when new output arrives (agent moved past the prompt)
+    if (this._needsInput) {
+      clearTimeout(this._needsInputTimer);
+      this._needsInputTimer = setTimeout(() => {
+        if (this._needsInput) {
+          this._needsInput = false;
+          const el = document.getElementById(this.containerId);
+          if (el) el.dispatchEvent(new CustomEvent('terminal-needs-input', { bubbles: true, detail: { sessionId: this.sessionId, needsInput: false } }));
+        }
+      }, 5000);
+    }
     if (!this._isWorking) {
       this._isWorking = true;
     }
@@ -1062,12 +1080,111 @@ class TerminalPane {
     }
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     AUTO-TRUST / QUESTION DETECTION
+     Analyzes terminal output for interactive prompts (Y/n, trust,
+     permission dialogs). When auto-trust is enabled, automatically
+     accepts safe prompts. Dangerous prompts (delete, credentials)
+     are never auto-accepted — they raise a "needs input" event
+     so the app layer can alert the user.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Analyze recent terminal output for interactive question/dialog patterns.
+   * Strips ANSI codes, appends to a rolling 4KB buffer, then checks the
+   * tail for known prompt patterns. Safe prompts are auto-accepted when
+   * auto-trust is enabled; dangerous prompts always require human input.
+   * @param {string} data - Raw terminal output chunk (may contain ANSI)
+   */
+  _analyzeForAutoTrust(data) {
+    // Strip ANSI escape codes for clean pattern matching
+    const clean = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+    this._autoTrustBuffer += clean;
+    // Trim to last 4096 chars (4KB rolling window)
+    if (this._autoTrustBuffer.length > 4096) {
+      this._autoTrustBuffer = this._autoTrustBuffer.slice(-4096);
+    }
+
+    // Only check the most recent 200 chars for prompt patterns
+    const tail = this._autoTrustBuffer.slice(-200);
+
+    // Prompt/dialog detection patterns
+    const promptPatterns = [
+      /\(Y\/n\)/i,
+      /\(y\/N\)/i,
+      /trust this (folder|directory|project)/i,
+      /allow .*(tool|access|permission)/i,
+      /\bproceed\?/i,
+      /\bapprove\b.*\?/i,
+      /\bcontinue\?/i,
+      /\baccept\b.*\?/i,
+    ];
+
+    let matched = false;
+    let matchText = '';
+    for (const pattern of promptPatterns) {
+      const m = tail.match(pattern);
+      if (m) {
+        matched = true;
+        matchText = m[0];
+        break;
+      }
+    }
+
+    if (!matched) return;
+
+    // Check for danger keywords — never auto-accept these
+    const dangerKeywords = /\b(delete|remove|credential|secret|password|key|token|destroy|format|drop|wipe|overwrite)\b/i;
+    const contextWindow = tail; // Check entire tail for danger context
+    const isDangerous = dangerKeywords.test(contextWindow);
+
+    if (isDangerous) {
+      // Dangerous prompt: always require human input regardless of auto-trust setting
+      if (!this._needsInput) {
+        this._needsInput = true;
+        const el = document.getElementById(this.containerId);
+        if (el) {
+          el.dispatchEvent(new CustomEvent('terminal-needs-input', {
+            bubbles: true,
+            detail: { sessionId: this.sessionId, needsInput: true }
+          }));
+        }
+      }
+      return;
+    }
+
+    if (this._autoTrustEnabled) {
+      // Auto-trust enabled and prompt is safe: auto-accept after cooldown
+      const now = Date.now();
+      if (now - this._autoTrustCooldown >= 3000) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ type: 'input', data: '\r' }));
+          this._autoTrustCooldown = now;
+          this._log('Auto-trust: accepted dialog (' + matchText + ')');
+        }
+      }
+    } else {
+      // Auto-trust not enabled: flag as needing human input
+      if (!this._needsInput) {
+        this._needsInput = true;
+        const el = document.getElementById(this.containerId);
+        if (el) {
+          el.dispatchEvent(new CustomEvent('terminal-needs-input', {
+            bubbles: true,
+            detail: { sessionId: this.sessionId, needsInput: true }
+          }));
+        }
+      }
+    }
+  }
+
   dispose() {
     clearTimeout(this.reconnectTimer);
     clearTimeout(this._fitTimer);
     clearTimeout(this._idleCheckTimer);
     clearTimeout(this._activityDebounceTimer);
     clearTimeout(this._bgFlushTimer);
+    clearTimeout(this._needsInputTimer);
     if (this._writeRaf) cancelAnimationFrame(this._writeRaf);
     this._writeBuf = '';
     this._activitySample = '';

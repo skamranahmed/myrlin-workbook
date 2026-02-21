@@ -122,6 +122,7 @@ class CWMApp {
         sessionCountInHeader: true,
         confirmBeforeClose: true,
         autoOpenTerminal: true,
+        autoTrustDialogs: false,
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -805,6 +806,23 @@ class CWMApp {
       for (let i = 0; i < 4; i++) {
         if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
           this.updatePaneActivity(i, activity);
+          break;
+        }
+      }
+    });
+
+    // ─── Terminal Needs-Input Badge ─────────────────────────
+    // When auto-trust detects a question it won't auto-answer, show/hide
+    // an amber "Needs input" badge on the terminal pane header.
+    document.addEventListener('terminal-needs-input', (e) => {
+      const { sessionId, needsInput } = e.detail;
+      for (let i = 0; i < 4; i++) {
+        if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
+          const paneEl = document.getElementById(`terminal-pane-${i}`);
+          if (paneEl) {
+            const header = paneEl.querySelector('.terminal-pane-header');
+            if (header) header.dataset.needsInput = needsInput ? 'true' : 'false';
+          }
           break;
         }
       }
@@ -3040,6 +3058,7 @@ class CWMApp {
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
+      { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
     ];
   }
@@ -3364,6 +3383,15 @@ class CWMApp {
         action: () => this.openSettings(),
       },
       {
+        id: 'feature-auto-trust',
+        name: 'Auto-accept Trust Dialogs',
+        description: 'Automatically accept safe trust/permission prompts (Y/n, "trust this folder") in terminals. Dangerous prompts are never auto-accepted. Enable in Settings > Automation.',
+        category: 'feature',
+        tags: ['auto', 'trust', 'accept', 'permission', 'dialog', 'prompt', 'automation', 'autonomous'],
+        icon: '&#128274;',
+        action: () => this.openSettings(),
+      },
+      {
         id: 'shortcut-help',
         name: 'Help / Feature Discovery',
         description: 'Browse all features, actions, and keyboard shortcuts',
@@ -3587,6 +3615,12 @@ class CWMApp {
     if (headerStats) {
       headerStats.style.display = this.state.settings.sessionCountInHeader ? '' : 'none';
     }
+
+    // Sync auto-trust setting to all open terminals
+    const autoTrust = !!this.state.settings.autoTrustDialogs;
+    this.terminalPanes.forEach(tp => {
+      if (tp) tp._autoTrustEnabled = autoTrust;
+    });
 
     // Re-render sidebar to update pane color pips
     if (typeof this.renderWorkspaces === 'function') {
@@ -6636,6 +6670,9 @@ class CWMApp {
       const idx = this.terminalPanes.indexOf(tp);
       if (idx !== -1) this.closeTerminalPane(idx);
     };
+
+    // Enable auto-trust if the setting is on
+    tp._autoTrustEnabled = !!this.state.settings.autoTrustDialogs;
 
     // Apply grid layout FIRST so container dimensions are established,
     // then mount the terminal so fitAddon.fit() gets real dimensions.

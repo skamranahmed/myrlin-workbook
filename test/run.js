@@ -421,6 +421,82 @@ test('checkForRecovery detects stale sessions', () => {
 });
 
 // ──────────────────────────────────────────────────────
+suite('Auto-Trust - Pattern Matching');
+
+// Extracted patterns from terminal.js for testability
+const AUTO_TRUST_PATTERNS = [
+  /\(Y\/n\)/i, /\(y\/N\)/i,
+  /trust this (folder|directory|project)/i,
+  /allow .*(tool|access|permission)/i,
+  /\bproceed\?/i, /\bapprove\b.*\?/i,
+  /\bcontinue\?/i, /\baccept\b.*\?/i,
+];
+const DANGER_KEYWORDS = /\b(delete|remove|credential|secret|password|key|token|destroy|format|drop|wipe|overwrite)\b/i;
+
+function matchAutoTrust(text) {
+  for (const p of AUTO_TRUST_PATTERNS) {
+    if (p.test(text)) return { matched: true, dangerous: DANGER_KEYWORDS.test(text) };
+  }
+  return { matched: false, dangerous: false };
+}
+
+test('detects (Y/n) prompts', () => {
+  assert(matchAutoTrust('Do you want to trust this? (Y/n)').matched);
+});
+
+test('detects (y/N) prompts', () => {
+  assert(matchAutoTrust('Continue with installation? (y/N)').matched);
+});
+
+test('detects trust this folder/directory/project', () => {
+  assert(matchAutoTrust('trust this folder?').matched);
+  assert(matchAutoTrust('trust this directory?').matched);
+  assert(matchAutoTrust('trust this project?').matched);
+});
+
+test('detects allow tool access', () => {
+  assert(matchAutoTrust('Allow Claude to use tool access?').matched);
+});
+
+test('detects proceed/continue/approve/accept prompts', () => {
+  assert(matchAutoTrust('Proceed?').matched);
+  assert(matchAutoTrust('Do you want to continue?').matched);
+  assert(matchAutoTrust('Approve this?').matched);
+  assert(matchAutoTrust('Accept the terms?').matched);
+});
+
+test('does not match regular output', () => {
+  assert(!matchAutoTrust('Reading file src/index.js...').matched);
+  assert(!matchAutoTrust('const x = 42;').matched);
+});
+
+test('flags dangerous prompts with delete/remove/credential keywords', () => {
+  const r1 = matchAutoTrust('Delete 15 files? (Y/n)');
+  assert(r1.matched && r1.dangerous, 'delete should be dangerous');
+  const r2 = matchAutoTrust('Remove node_modules? Proceed?');
+  assert(r2.matched && r2.dangerous, 'remove should be dangerous');
+  const r3 = matchAutoTrust('Access credential store? (Y/n)');
+  assert(r3.matched && r3.dangerous, 'credential should be dangerous');
+});
+
+test('flags dangerous prompts with password/token/destroy keywords', () => {
+  assert(matchAutoTrust('Enter password to continue?').dangerous, 'password');
+  assert(matchAutoTrust('Overwrite token file? (Y/n)').dangerous, 'token');
+  assert(matchAutoTrust('Destroy the database. Proceed?').dangerous, 'destroy');
+});
+
+test('does not flag safe trust prompts as dangerous', () => {
+  const r = matchAutoTrust('Do you want to trust this folder? (Y/n)');
+  assert(r.matched && !r.dangerous, 'Safe trust should not be dangerous');
+});
+
+test('strips ANSI codes before matching', () => {
+  const ansi = '\x1b[32mProceed?\x1b[0m';
+  const clean = ansi.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  assert(matchAutoTrust(clean).matched, 'Should match after ANSI strip');
+});
+
+// ──────────────────────────────────────────────────────
 // Results
 
 console.log('\n  ' + '─'.repeat(42));

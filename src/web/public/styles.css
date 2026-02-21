@@ -4269,6 +4269,26 @@ html:not(.pane-colors-enabled) .pane-color-pip {
   display: none;
 }
 
+/* ─── Needs Input Badge ───────────────────────────────── */
+.terminal-pane-header[data-needs-input="true"]::after {
+  content: 'Needs input';
+  position: absolute;
+  right: 120px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(249, 226, 175, 0.15);
+  color: var(--peach);
+  animation: pulse-needs-input 2s ease-in-out infinite;
+}
+@keyframes pulse-needs-input {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ─── Activity Indicators toggle ───────────────────────── */
 html.activity-indicators-disabled .terminal-pane-activity {
   display: none !important;
