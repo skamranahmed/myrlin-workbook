@@ -1750,6 +1750,14 @@ class CWMApp {
       this.renderSessions();
       // Re-render workspace accordion to update session sub-items
       this.renderWorkspaces();
+
+      // Fetch worktree task data for tri-state dot rendering (best-effort)
+      if (this.state.settings.enableWorktreeTasks) {
+        try {
+          const wtData = await this.api('GET', '/api/worktree-tasks');
+          this._worktreeTaskCache = wtData.tasks || [];
+        } catch (_) { /* non-critical */ }
+      }
     } catch (err) {
       this.showToast('Failed to load sessions', 'error');
     }
@@ -5242,8 +5250,27 @@ class CWMApp {
 
       const renderSessionItem = (s) => {
         const isHidden = this.state.hiddenSessions.has(s.id);
-        const statusDot = s.status === 'running' ? 'var(--green)' : 'var(--overlay0)';
         const name = s.name || s.id.substring(0, 12);
+
+        // Tri-state dot for worktree task sessions, simple dot for regular sessions
+        let statusDot, tristateAttr = '';
+        const wtTask = s.worktreeTask ? (this._worktreeTaskCache || []).find(t => t.sessionId === s.id) : null;
+        if (wtTask) {
+          // Check if terminal pane is actively producing output
+          const tp = this.terminalPanes.find(p => p && p.sessionId === s.id);
+          const isOutputActive = tp && (Date.now() - tp._lastOutputTime) < 3000;
+          if (s.status === 'running' && isOutputActive) {
+            statusDot = 'var(--green)'; tristateAttr = ' data-tristate="busy"';
+          } else if (s.status === 'running') {
+            statusDot = 'var(--peach)'; tristateAttr = ' data-tristate="waiting"';
+          } else if (wtTask.branchAhead > 0) {
+            statusDot = 'var(--blue)'; tristateAttr = ' data-tristate="ready"';
+          } else {
+            statusDot = 'var(--overlay0)'; tristateAttr = '';
+          }
+        } else {
+          statusDot = s.status === 'running' ? 'var(--green)' : 'var(--overlay0)';
+        }
         const timeStr = s.lastActive ? this.relativeTime(s.lastActive) : '';
         // Look up JSONL file size via resumeSessionId
         const sizeBytes = s.resumeSessionId ? sessionSizeMap[s.resumeSessionId] : null;
@@ -5289,7 +5316,7 @@ class CWMApp {
         const metaRow = metaParts ? `<div class="ws-session-meta-row">${metaParts}</div>` : '';
 
         return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
-          <span class="ws-session-dot" style="background: ${statusDot}"></span>${pip}
+          <span class="ws-session-dot${tristateAttr}" style="background: ${statusDot}"></span>${pip}
           <span class="ws-session-name">${this.escapeHtml(name)}</span>
           ${metaRow}
         </div>`;

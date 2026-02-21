@@ -4057,10 +4057,35 @@ app.delete('/api/git/worktrees', requireAuth, async (req, res) => {
  * GET /api/worktree-tasks
  * List all worktree tasks, optionally filtered by workspaceId.
  */
-app.get('/api/worktree-tasks', requireAuth, (req, res) => {
+app.get('/api/worktree-tasks', requireAuth, async (req, res) => {
   const store = getStore();
   const tasks = store.getWorktreeTasks(req.query.workspaceId || undefined);
-  res.json({ tasks });
+
+  // Enrich tasks with git branch info (commits ahead, changed file count)
+  const enriched = await Promise.all(tasks.map(async (task) => {
+    const info = { ...task, branchAhead: 0, changedFiles: 0 };
+    if (!task.worktreePath || !task.branch) return info;
+    try {
+      const base = task.baseBranch || 'main';
+      // Count commits ahead of base branch
+      const ahead = await new Promise((resolve) => {
+        const p = require('child_process').execFile('git', ['rev-list', '--count', `${base}..${task.branch}`], { cwd: task.worktreePath, timeout: 5000 }, (err, stdout) => {
+          resolve(err ? 0 : parseInt(stdout.trim(), 10) || 0);
+        });
+      });
+      info.branchAhead = ahead;
+      // Count changed files (uncommitted + committed vs base)
+      const changed = await new Promise((resolve) => {
+        require('child_process').execFile('git', ['diff', '--name-only', base], { cwd: task.worktreePath, timeout: 5000 }, (err, stdout) => {
+          resolve(err ? 0 : stdout.trim().split('\n').filter(Boolean).length);
+        });
+      });
+      info.changedFiles = changed;
+    } catch (_) { /* git info is best-effort */ }
+    return info;
+  }));
+
+  res.json({ tasks: enriched });
 });
 
 /**
