@@ -497,6 +497,146 @@ test('strips ANSI codes before matching', () => {
 });
 
 // ──────────────────────────────────────────────────────
+// Diff Viewer - Diff Parsing
+// ──────────────────────────────────────────────────────
+
+suite('Diff Viewer - Diff Parsing');
+
+/**
+ * Parse unified diff text into structured format for testing.
+ * Mirrors the logic from app.js _renderDiffContent() method.
+ */
+function parseDiff(diffText) {
+  const lines = diffText.split('\n');
+  const hunks = [];
+  let currentHunk = null;
+
+  for (const line of lines) {
+    if (line.startsWith('diff --git') || line.startsWith('index ') ||
+        line.startsWith('---') || line.startsWith('+++') ||
+        line.startsWith('new file') || line.startsWith('deleted file')) continue;
+
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+    if (hunkMatch) {
+      currentHunk = { oldStart: parseInt(hunkMatch[1], 10), newStart: parseInt(hunkMatch[2], 10), lines: [] };
+      hunks.push(currentHunk);
+      continue;
+    }
+
+    if (!currentHunk) continue;
+    if (line.startsWith('+')) currentHunk.lines.push({ type: 'add', text: line.substring(1) });
+    else if (line.startsWith('-')) currentHunk.lines.push({ type: 'del', text: line.substring(1) });
+    else if (line.startsWith(' ') || line === '') currentHunk.lines.push({ type: 'ctx', text: line.substring(1) });
+  }
+  return hunks;
+}
+
+test('parses unified diff hunks', () => {
+  const diff = `diff --git a/file.js b/file.js
+index abc..def 100644
+--- a/file.js
++++ b/file.js
+@@ -1,3 +1,4 @@
+ const a = 1;
++const b = 2;
+ const c = 3;
+ const d = 4;`;
+  const hunks = parseDiff(diff);
+  assert(hunks.length === 1, 'Should have one hunk');
+  assert(hunks[0].oldStart === 1, 'Old start should be 1');
+  assert(hunks[0].newStart === 1, 'New start should be 1');
+  assert(hunks[0].lines.length === 4, 'Should have 4 lines');
+  assert(hunks[0].lines[1].type === 'add', 'Second line should be addition');
+  assert(hunks[0].lines[1].text === 'const b = 2;', 'Addition text should match');
+});
+
+test('parses deletions correctly', () => {
+  const diff = `diff --git a/file.js b/file.js
+--- a/file.js
++++ b/file.js
+@@ -5,4 +5,3 @@
+ line5
+-removed line
+ line7
+ line8`;
+  const hunks = parseDiff(diff);
+  assert(hunks[0].lines[1].type === 'del', 'Should be deletion');
+  assert(hunks[0].lines[1].text === 'removed line', 'Deletion text should match');
+});
+
+test('parses multiple hunks', () => {
+  const diff = `diff --git a/file.js b/file.js
+--- a/file.js
++++ b/file.js
+@@ -1,3 +1,3 @@
+ line1
+-old
++new
+ line3
+@@ -10,3 +10,3 @@
+ line10
+-oldB
++newB
+ line12`;
+  const hunks = parseDiff(diff);
+  assert(hunks.length === 2, 'Should have two hunks');
+  assert(hunks[0].oldStart === 1, 'First hunk starts at 1');
+  assert(hunks[1].oldStart === 10, 'Second hunk starts at 10');
+});
+
+test('handles empty diff', () => {
+  const hunks = parseDiff('');
+  assert(hunks.length === 0, 'Empty diff should have no hunks');
+});
+
+/**
+ * Parse git numstat output into file objects.
+ * Mirrors the backend /api/worktree-tasks/:id/changes logic.
+ */
+function parseNumstat(numstatText, nameStatusText) {
+  const statusMap = {};
+  nameStatusText.trim().split('\n').filter(Boolean).forEach(line => {
+    const parts = line.split('\t');
+    const statusCode = parts[0].charAt(0);
+    const filePath = parts.length > 2 ? parts[2] : parts[1];
+    statusMap[filePath] = { status: statusCode };
+  });
+
+  return numstatText.trim().split('\n').filter(Boolean).map(line => {
+    const [addStr, delStr, ...pathParts] = line.split('\t');
+    const filePath = pathParts.join('\t');
+    return {
+      path: filePath,
+      additions: addStr === '-' ? 0 : parseInt(addStr, 10) || 0,
+      deletions: delStr === '-' ? 0 : parseInt(delStr, 10) || 0,
+      status: (statusMap[filePath] || { status: 'M' }).status,
+    };
+  });
+}
+
+test('parses numstat with name-status', () => {
+  const numstat = '10\t5\tsrc/app.js\n3\t0\tsrc/new.js\n0\t8\tsrc/old.js';
+  const nameStatus = 'M\tsrc/app.js\nA\tsrc/new.js\nD\tsrc/old.js';
+  const files = parseNumstat(numstat, nameStatus);
+  assert(files.length === 3, 'Should have 3 files');
+  assert(files[0].status === 'M', 'First file should be Modified');
+  assert(files[0].additions === 10, 'First file should have 10 additions');
+  assert(files[0].deletions === 5, 'First file should have 5 deletions');
+  assert(files[1].status === 'A', 'Second file should be Added');
+  assert(files[2].status === 'D', 'Third file should be Deleted');
+  assert(files[2].deletions === 8, 'Third file should have 8 deletions');
+});
+
+test('handles binary files in numstat (- marks)', () => {
+  const numstat = '-\t-\timage.png';
+  const nameStatus = 'A\timage.png';
+  const files = parseNumstat(numstat, nameStatus);
+  assert(files[0].additions === 0, 'Binary file should have 0 additions');
+  assert(files[0].deletions === 0, 'Binary file should have 0 deletions');
+  assert(files[0].status === 'A', 'Binary file should be Added');
+});
+
+// ──────────────────────────────────────────────────────
 // Results
 
 console.log('\n  ' + '─'.repeat(42));

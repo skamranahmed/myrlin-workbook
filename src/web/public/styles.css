@@ -5186,6 +5186,314 @@ html.activity-indicators-disabled .terminal-pane-activity {
   border-color: var(--mauve);
 }
 
+/* ═══════════════════════════════════════════════════════════ */
+/* DIFF VIEWER                                                 */
+/* ═══════════════════════════════════════════════════════════ */
+
+.diff-viewer {
+  display: flex;
+  flex-direction: column;
+  width: 92vw;
+  max-width: 1100px;
+  height: 80vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.diff-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--surface0);
+  flex-shrink: 0;
+}
+
+.diff-viewer-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.diff-viewer-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-viewer-stats {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--subtext0);
+  white-space: nowrap;
+}
+
+.diff-viewer-stats .added { color: var(--green); }
+.diff-viewer-stats .removed { color: var(--red); }
+
+.diff-viewer-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── File list sidebar ──────────────────────────────── */
+
+.diff-viewer-files {
+  width: 260px;
+  min-width: 200px;
+  border-right: 1px solid var(--surface0);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.diff-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  border-left: 2px solid transparent;
+}
+
+.diff-file-item:hover {
+  background: var(--surface0);
+}
+
+.diff-file-item.active {
+  background: var(--surface0);
+  border-left-color: var(--mauve);
+}
+
+.diff-file-status {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.diff-file-status.status-M { color: var(--yellow); background: rgba(249, 226, 175, 0.1); }
+.diff-file-status.status-A { color: var(--green); background: rgba(166, 227, 161, 0.1); }
+.diff-file-status.status-D { color: var(--red); background: rgba(243, 139, 168, 0.1); }
+.diff-file-status.status-R { color: var(--blue); background: rgba(137, 180, 250, 0.1); }
+
+.diff-file-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.diff-file-dir {
+  color: var(--subtext0);
+}
+
+.diff-file-counts {
+  display: flex;
+  gap: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.diff-file-counts .added { color: var(--green); }
+.diff-file-counts .removed { color: var(--red); }
+
+/* ─── Diff content pane ──────────────────────────────── */
+
+.diff-viewer-content {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+.diff-viewer-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  color: var(--subtext0);
+}
+
+.diff-viewer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 13px;
+  color: var(--subtext0);
+}
+
+.diff-hunk {
+  border-bottom: 1px solid var(--surface0);
+}
+
+.diff-hunk-header {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--blue);
+  background: rgba(137, 180, 250, 0.06);
+  padding: 4px 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--surface0);
+}
+
+.diff-line {
+  display: flex;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  line-height: 20px;
+  white-space: pre;
+}
+
+.diff-line-num {
+  width: 48px;
+  min-width: 48px;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--overlay0);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.diff-line-content {
+  flex: 1;
+  padding-left: 8px;
+  min-width: 0;
+}
+
+.diff-line.diff-add {
+  background: rgba(166, 227, 161, 0.08);
+}
+
+.diff-line.diff-add .diff-line-content {
+  color: var(--green);
+}
+
+.diff-line.diff-del {
+  background: rgba(243, 139, 168, 0.08);
+}
+
+.diff-line.diff-del .diff-line-content {
+  color: var(--red);
+}
+
+.diff-line.diff-ctx .diff-line-content {
+  color: var(--subtext0);
+}
+
+/* ─── Changed files section in detail panel ──────────── */
+
+.detail-changes {
+  margin-top: 12px;
+  border-top: 1px solid var(--surface0);
+  padding-top: 10px;
+}
+
+.detail-changes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.detail-changes-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--subtext0);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-changes-toggle {
+  font-size: 10px;
+  color: var(--overlay0);
+  transition: transform var(--transition-fast);
+}
+
+.detail-changes-header[aria-expanded="true"] .detail-changes-toggle {
+  transform: rotate(90deg);
+}
+
+.detail-changes-list {
+  margin-top: 6px;
+}
+
+.detail-change-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.detail-change-item:hover {
+  background: var(--surface0);
+}
+
+.detail-change-status {
+  font-size: 9px;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.detail-change-status.status-M { color: var(--yellow); }
+.detail-change-status.status-A { color: var(--green); }
+.detail-change-status.status-D { color: var(--red); }
+.detail-change-status.status-R { color: var(--blue); }
+
+.detail-change-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-change-counts {
+  font-size: 10px;
+  flex-shrink: 0;
+  display: flex;
+  gap: 3px;
+}
+
+.detail-change-counts .added { color: var(--green); }
+.detail-change-counts .removed { color: var(--red); }
+
 
 /* ═══════════════════════════════════════════════════════════ */
 /* COSTS DASHBOARD                                             */

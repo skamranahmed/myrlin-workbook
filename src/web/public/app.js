@@ -406,6 +406,14 @@ class CWMApp {
       conflictRefreshBtn: document.getElementById('conflict-refresh-btn'),
       conflictCloseBtn: document.getElementById('conflict-close-btn'),
 
+      // Diff Viewer
+      diffViewerOverlay: document.getElementById('diff-viewer-overlay'),
+      diffViewerTitle: document.getElementById('diff-viewer-title'),
+      diffViewerStats: document.getElementById('diff-viewer-stats'),
+      diffViewerFiles: document.getElementById('diff-viewer-files'),
+      diffViewerContent: document.getElementById('diff-viewer-content'),
+      diffViewerClose: document.getElementById('diff-viewer-close'),
+
       // Settings
       settingsOverlay: document.getElementById('settings-overlay'),
       settingsBody: document.getElementById('settings-body'),
@@ -744,6 +752,16 @@ class CWMApp {
       this.els.settingsSearchInput.addEventListener('input', () => this.filterSettings());
     }
 
+    // Diff Viewer
+    if (this.els.diffViewerClose) {
+      this.els.diffViewerClose.addEventListener('click', () => this.closeDiffViewer());
+    }
+    if (this.els.diffViewerOverlay) {
+      this.els.diffViewerOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.diffViewerOverlay) this.closeDiffViewer();
+      });
+    }
+
     // New Task dialog
     if (this.els.newTaskBtn) {
       this.els.newTaskBtn.addEventListener('click', () => this.openNewTaskDialog());
@@ -821,6 +839,9 @@ class CWMApp {
       }
       // Escape
       if (e.key === 'Escape') {
+        if (this.els.diffViewerOverlay && !this.els.diffViewerOverlay.hidden) {
+          this.closeDiffViewer();
+        } else
         if (this.els.newTaskOverlay && !this.els.newTaskOverlay.hidden) {
           this.closeNewTaskDialog();
         } else
@@ -10914,8 +10935,10 @@ class CWMApp {
     }
 
     // Check if worktree tasks are enabled
+    const changedFilesEl = document.getElementById('wt-changed-files');
     if (!this.getSetting('enableWorktreeTasks')) {
       banner.hidden = true;
+      if (changedFilesEl) changedFilesEl.hidden = true;
       return;
     }
 
@@ -10926,6 +10949,7 @@ class CWMApp {
 
       if (!task) {
         banner.hidden = true;
+        if (changedFilesEl) changedFilesEl.hidden = true;
         return;
       }
 
@@ -10961,6 +10985,9 @@ class CWMApp {
           <span class="wt-review-branch">${this.escapeHtml(task.branch)}</span>
         </div>
         ${actionsHtml}`;
+
+      // Render changed files section below the banner
+      this._renderWorktreeChangedFiles(task);
 
       // Bind review action buttons
       banner.querySelectorAll('.wt-review-btn').forEach(btn => {
@@ -11017,19 +11044,242 @@ class CWMApp {
   }
 
   /**
-   * Show the diff for a worktree task in a modal.
+   * Open the diff viewer for a worktree task.
+   * Fetches changed files, renders file list sidebar and diff content.
    * @param {string} taskId - Worktree task ID
+   * @param {string} [preselectedFile] - Optional file path to auto-select
    */
-  async showWorktreeTaskDiff(taskId) {
+  async showWorktreeTaskDiff(taskId, preselectedFile) {
+    if (!this.els.diffViewerOverlay) return;
+    this._diffViewerTaskId = taskId;
+    this._diffViewerFiles = [];
+    this.els.diffViewerOverlay.hidden = false;
+    this.els.diffViewerTitle.textContent = 'Loading changes...';
+    this.els.diffViewerStats.textContent = '';
+    this.els.diffViewerFiles.innerHTML = '';
+    this.els.diffViewerContent.innerHTML = '<div class="diff-viewer-loading">Loading...</div>';
+
     try {
-      const data = await this.api('POST', `/api/worktree-tasks/${taskId}/diff`);
-      await this.showConfirmModal({
-        title: 'Worktree Task Diff',
-        message: (data.stat || 'No changes') + '\n\n' + (data.diff || '').slice(0, 5000),
-        confirmText: 'OK',
+      const data = await this.api('GET', `/api/worktree-tasks/${taskId}/changes`);
+      const files = data.files || [];
+      this._diffViewerFiles = files;
+
+      if (files.length === 0) {
+        this.els.diffViewerTitle.textContent = 'No changes';
+        this.els.diffViewerFiles.innerHTML = '<div class="diff-viewer-empty" style="height:auto;padding:20px">No changed files</div>';
+        this.els.diffViewerContent.innerHTML = '<div class="diff-viewer-empty">No changes to display</div>';
+        return;
+      }
+
+      // Compute totals
+      const totalAdd = files.reduce((s, f) => s + f.additions, 0);
+      const totalDel = files.reduce((s, f) => s + f.deletions, 0);
+      this.els.diffViewerTitle.textContent = `${files.length} file${files.length === 1 ? '' : 's'} changed`;
+      this.els.diffViewerStats.innerHTML = `<span class="added">+${totalAdd}</span> <span class="removed">-${totalDel}</span>`;
+
+      // Render file list
+      this.els.diffViewerFiles.innerHTML = files.map((f, i) => {
+        const dir = f.path.includes('/') ? f.path.substring(0, f.path.lastIndexOf('/') + 1) : '';
+        const name = f.path.includes('/') ? f.path.substring(f.path.lastIndexOf('/') + 1) : f.path;
+        return `<div class="diff-file-item" data-index="${i}" data-path="${this.escapeHtml(f.path)}">
+          <span class="diff-file-status status-${f.status}">${f.status}</span>
+          <span class="diff-file-name">${dir ? `<span class="diff-file-dir">${this.escapeHtml(dir)}</span>` : ''}${this.escapeHtml(name)}</span>
+          <span class="diff-file-counts">${f.additions ? `<span class="added">+${f.additions}</span>` : ''}${f.deletions ? `<span class="removed">-${f.deletions}</span>` : ''}</span>
+        </div>`;
+      }).join('');
+
+      // Bind file click handlers
+      this.els.diffViewerFiles.querySelectorAll('.diff-file-item').forEach(el => {
+        el.addEventListener('click', () => {
+          const idx = parseInt(el.dataset.index, 10);
+          this._selectDiffFile(idx);
+        });
       });
+
+      // Auto-select first file or preselected file
+      const preIdx = preselectedFile ? files.findIndex(f => f.path === preselectedFile) : 0;
+      this._selectDiffFile(preIdx >= 0 ? preIdx : 0);
     } catch (err) {
-      this.showToast(err.message || 'Failed to load diff', 'error');
+      this.els.diffViewerTitle.textContent = 'Error';
+      this.els.diffViewerContent.innerHTML = `<div class="diff-viewer-empty">${this.escapeHtml(err.message || 'Failed to load changes')}</div>`;
+    }
+  }
+
+  /**
+   * Select and display a file's diff in the diff viewer.
+   * @param {number} index - Index in _diffViewerFiles array
+   */
+  async _selectDiffFile(index) {
+    if (!this._diffViewerFiles || !this._diffViewerFiles[index]) return;
+    const file = this._diffViewerFiles[index];
+
+    // Update active state in file list
+    this.els.diffViewerFiles.querySelectorAll('.diff-file-item').forEach((el, i) => {
+      el.classList.toggle('active', i === index);
+    });
+
+    this.els.diffViewerContent.innerHTML = '<div class="diff-viewer-loading">Loading diff...</div>';
+
+    try {
+      const data = await this.api('POST', `/api/worktree-tasks/${this._diffViewerTaskId}/diff`, { file: file.path });
+      const diffText = data.diff || '';
+
+      if (!diffText) {
+        this.els.diffViewerContent.innerHTML = '<div class="diff-viewer-empty">No diff content (binary file or empty change)</div>';
+        return;
+      }
+
+      this.els.diffViewerContent.innerHTML = this._renderDiffContent(diffText);
+    } catch (err) {
+      this.els.diffViewerContent.innerHTML = `<div class="diff-viewer-empty">${this.escapeHtml(err.message || 'Failed to load diff')}</div>`;
+    }
+  }
+
+  /**
+   * Parse unified diff text and render it as HTML with line numbers and colors.
+   * @param {string} diffText - Raw unified diff output from git
+   * @returns {string} HTML string for the diff content
+   */
+  _renderDiffContent(diffText) {
+    const lines = diffText.split('\n');
+    let html = '';
+    let inHunk = false;
+    let oldLine = 0;
+    let newLine = 0;
+
+    for (const line of lines) {
+      // Skip diff header lines (diff --git, index, ---, +++)
+      if (line.startsWith('diff --git') || line.startsWith('index ') ||
+          line.startsWith('---') || line.startsWith('+++') ||
+          line.startsWith('new file') || line.startsWith('deleted file') ||
+          line.startsWith('similarity') || line.startsWith('rename') ||
+          line.startsWith('old mode') || line.startsWith('new mode')) {
+        continue;
+      }
+
+      // Hunk header: @@ -old,count +new,count @@
+      const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+      if (hunkMatch) {
+        if (inHunk) html += '</div>'; // close previous hunk
+        oldLine = parseInt(hunkMatch[1], 10);
+        newLine = parseInt(hunkMatch[2], 10);
+        const context = hunkMatch[3] || '';
+        html += `<div class="diff-hunk"><div class="diff-hunk-header">@@ -${hunkMatch[1]} +${hunkMatch[2]} @@${this.escapeHtml(context)}</div>`;
+        inHunk = true;
+        continue;
+      }
+
+      if (!inHunk) continue;
+
+      const escaped = this.escapeHtml(line.substring(1));
+      if (line.startsWith('+')) {
+        html += `<div class="diff-line diff-add"><span class="diff-line-num">${newLine}</span><span class="diff-line-content">+${escaped}</span></div>`;
+        newLine++;
+      } else if (line.startsWith('-')) {
+        html += `<div class="diff-line diff-del"><span class="diff-line-num">${oldLine}</span><span class="diff-line-content">-${escaped}</span></div>`;
+        oldLine++;
+      } else if (line.startsWith(' ') || line === '') {
+        html += `<div class="diff-line diff-ctx"><span class="diff-line-num">${newLine}</span><span class="diff-line-content"> ${this.escapeHtml(line.substring(1))}</span></div>`;
+        oldLine++;
+        newLine++;
+      }
+    }
+
+    if (inHunk) html += '</div>'; // close last hunk
+    return html || '<div class="diff-viewer-empty">No displayable diff content</div>';
+  }
+
+  /**
+   * Close the diff viewer overlay.
+   */
+  closeDiffViewer() {
+    if (this.els.diffViewerOverlay) {
+      this.els.diffViewerOverlay.hidden = true;
+    }
+    this._diffViewerTaskId = null;
+    this._diffViewerFiles = [];
+  }
+
+  /**
+   * Render a collapsible "Changed Files" section in the detail panel for worktree tasks.
+   * Shows the list of files changed on the branch with click-to-diff functionality.
+   * @param {Object} task - Worktree task object with id, branch, etc.
+   */
+  async _renderWorktreeChangedFiles(task) {
+    const detailBody = this.els.detailPanel?.querySelector('.detail-body');
+    if (!detailBody) return;
+
+    // Find or create the changes container
+    let section = document.getElementById('wt-changed-files');
+    if (!section) {
+      section = document.createElement('div');
+      section.id = 'wt-changed-files';
+      section.className = 'detail-changes';
+      // Insert after the banner
+      const banner = document.getElementById('wt-review-banner');
+      if (banner && banner.nextSibling) {
+        detailBody.insertBefore(section, banner.nextSibling);
+      } else if (banner) {
+        detailBody.appendChild(section);
+      } else {
+        detailBody.prepend(section);
+      }
+    }
+
+    // Don't show for completed/rejected tasks
+    if (task.status === 'merged' || task.status === 'rejected') {
+      section.hidden = true;
+      return;
+    }
+
+    section.hidden = false;
+    section.innerHTML = '<div class="detail-changes-header" aria-expanded="false"><span class="detail-changes-title">Changed Files <span style="font-weight:400;color:var(--overlay0)">loading...</span></span><span class="detail-changes-toggle">&#9654;</span></div>';
+
+    try {
+      const data = await this.api('GET', `/api/worktree-tasks/${task.id}/changes`);
+      const files = data.files || [];
+
+      if (files.length === 0) {
+        section.innerHTML = '<div class="detail-changes-header" aria-expanded="false"><span class="detail-changes-title">Changed Files <span style="font-weight:400;color:var(--overlay0)">(0)</span></span><span class="detail-changes-toggle">&#9654;</span></div>';
+        return;
+      }
+
+      const totalAdd = files.reduce((s, f) => s + f.additions, 0);
+      const totalDel = files.reduce((s, f) => s + f.deletions, 0);
+
+      section.innerHTML = `
+        <div class="detail-changes-header" aria-expanded="true">
+          <span class="detail-changes-title">Changed Files <span style="font-weight:400;color:var(--overlay0)">(${files.length})</span></span>
+          <span class="detail-changes-toggle">&#9654;</span>
+        </div>
+        <div class="detail-changes-list">
+          ${files.map(f => {
+            const name = f.path.includes('/') ? f.path.substring(f.path.lastIndexOf('/') + 1) : f.path;
+            return `<div class="detail-change-item" data-task-id="${task.id}" data-path="${this.escapeHtml(f.path)}">
+              <span class="detail-change-status status-${f.status}">${f.status}</span>
+              <span class="detail-change-path" title="${this.escapeHtml(f.path)}">${this.escapeHtml(name)}</span>
+              <span class="detail-change-counts">${f.additions ? `<span class="added">+${f.additions}</span>` : ''}${f.deletions ? `<span class="removed">-${f.deletions}</span>` : ''}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+
+      // Bind toggle
+      const header = section.querySelector('.detail-changes-header');
+      const list = section.querySelector('.detail-changes-list');
+      header.addEventListener('click', () => {
+        const expanded = header.getAttribute('aria-expanded') === 'true';
+        header.setAttribute('aria-expanded', !expanded);
+        list.style.display = expanded ? 'none' : '';
+      });
+
+      // Bind file click → open diff viewer at that file
+      section.querySelectorAll('.detail-change-item').forEach(el => {
+        el.addEventListener('click', () => {
+          this.showWorktreeTaskDiff(el.dataset.taskId, el.dataset.path);
+        });
+      });
+    } catch {
+      section.querySelector('.detail-changes-title').innerHTML = 'Changed Files <span style="font-weight:400;color:var(--overlay0)">(error)</span>';
     }
   }
 

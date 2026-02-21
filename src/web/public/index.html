@@ -1058,6 +1058,29 @@
   </div>
 
   <!-- ═══════════════════════════════════════════ -->
+  <!-- DIFF VIEWER                                 -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="diff-viewer-overlay" hidden>
+    <div class="diff-viewer" role="dialog" aria-modal="true" aria-label="Diff Viewer">
+      <div class="diff-viewer-header">
+        <div class="diff-viewer-title-row">
+          <h3 class="diff-viewer-title" id="diff-viewer-title">Changes</h3>
+          <span class="diff-viewer-stats" id="diff-viewer-stats"></span>
+        </div>
+        <button class="btn btn-ghost btn-icon btn-sm" id="diff-viewer-close" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="diff-viewer-body">
+        <div class="diff-viewer-files" id="diff-viewer-files"></div>
+        <div class="diff-viewer-content" id="diff-viewer-content">
+          <div class="diff-viewer-empty">Select a file to view changes</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
   <!-- SETTINGS OVERLAY                            -->
   <!-- ═══════════════════════════════════════════ -->
   <div class="modal-overlay" id="settings-overlay" hidden>

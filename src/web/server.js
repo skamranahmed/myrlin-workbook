@@ -4238,8 +4238,66 @@ app.delete('/api/worktree-tasks/:id', requireAuth, (req, res) => {
 });
 
 /**
+ * GET /api/worktree-tasks/:id/changes
+ * List changed files between the worktree branch and its base branch.
+ * Returns per-file additions, deletions, and status (A/M/D/R).
+ */
+app.get('/api/worktree-tasks/:id/changes', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  try {
+    const base = task.baseBranch || 'main';
+    const range = `${base}...${task.branch}`;
+
+    // Get per-file additions/deletions counts
+    const numstat = await gitExec(['diff', '--numstat', range], task.repoDir);
+    // Get per-file status (Added/Modified/Deleted/Renamed)
+    const nameStatus = await gitExec(['diff', '--name-status', range], task.repoDir);
+
+    // Parse --name-status into { path: status } map
+    const statusMap = {};
+    nameStatus.trim().split('\n').filter(Boolean).forEach(line => {
+      const parts = line.split('\t');
+      const statusCode = parts[0].charAt(0); // M, A, D, R, C
+      const filePath = parts.length > 2 ? parts[2] : parts[1]; // renamed: old → new
+      const oldPath = parts.length > 2 ? parts[1] : undefined;
+      statusMap[filePath] = { status: statusCode, oldPath };
+    });
+
+    // Parse --numstat into file objects
+    const files = numstat.trim().split('\n').filter(Boolean).map(line => {
+      const [addStr, delStr, ...pathParts] = line.split('\t');
+      const filePath = pathParts.join('\t'); // handles paths with tabs (rare)
+      const additions = addStr === '-' ? 0 : parseInt(addStr, 10) || 0;
+      const deletions = delStr === '-' ? 0 : parseInt(delStr, 10) || 0;
+      const info = statusMap[filePath] || { status: 'M' };
+      return {
+        path: filePath,
+        additions,
+        deletions,
+        status: info.status,
+        oldPath: info.oldPath || undefined,
+      };
+    });
+
+    res.json({ files });
+  } catch (err) {
+    if (err.message.includes('unknown revision')) {
+      // Branch may not have diverged yet
+      res.json({ files: [] });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+/**
  * POST /api/worktree-tasks/:id/diff
  * Get the diff between the worktree branch and its base branch.
+ * Optional body.file to get diff for a single file.
  */
 app.post('/api/worktree-tasks/:id/diff', requireAuth, async (req, res) => {
   const store = getStore();
@@ -4248,9 +4306,20 @@ app.post('/api/worktree-tasks/:id/diff', requireAuth, async (req, res) => {
   if (!task) return res.status(404).json({ error: 'Worktree task not found' });
 
   try {
-    const diff = await gitExec(['diff', `${task.baseBranch || 'main'}...${task.branch}`, '--stat'], task.repoDir);
-    const fullDiff = await gitExec(['diff', `${task.baseBranch || 'main'}...${task.branch}`], task.repoDir);
-    res.json({ stat: diff.trim(), diff: fullDiff.trim() });
+    const base = task.baseBranch || 'main';
+    const range = `${base}...${task.branch}`;
+    const { file } = req.body || {};
+
+    if (file) {
+      // Single file diff
+      const fileDiff = await gitExec(['diff', range, '--', file], task.repoDir);
+      res.json({ diff: fileDiff.trim(), file });
+    } else {
+      // Full diff with stat summary
+      const stat = await gitExec(['diff', '--stat', range], task.repoDir);
+      const fullDiff = await gitExec(['diff', range], task.repoDir);
+      res.json({ stat: stat.trim(), diff: fullDiff.trim() });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
