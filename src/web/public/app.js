@@ -7460,6 +7460,24 @@ class CWMApp {
       }
     }
 
+    // For 3-pane layout: make the last visible pane span both columns
+    // so it fills the entire bottom row instead of leaving an empty quadrant.
+    // Reset any previous span for all panes first.
+    for (let i = 0; i < 4; i++) {
+      const paneEl = document.getElementById(`term-pane-${i}`);
+      if (paneEl) paneEl.style.gridColumn = '';
+    }
+    if (filledCount === 3) {
+      // Find the last filled pane slot and make it span 2 columns
+      for (let i = 3; i >= 0; i--) {
+        if (this.terminalPanes[i]) {
+          const paneEl = document.getElementById(`term-pane-${i}`);
+          if (paneEl) paneEl.style.gridColumn = 'span 2';
+          break;
+        }
+      }
+    }
+
     // Apply dynamic grid sizes and position resize handles
     this._applyGridSizes();
 
