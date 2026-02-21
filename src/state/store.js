@@ -829,6 +829,7 @@ class Store extends EventEmitter {
   createWorktreeTask({ workspaceId, sessionId, branch, worktreePath, repoDir, description, baseBranch = 'main', featureId = null }) {
     if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
     const id = 'wt_' + crypto.randomUUID().slice(0, 8);
+    const now = new Date().toISOString();
     const task = {
       id,
       workspaceId,
@@ -840,7 +841,9 @@ class Store extends EventEmitter {
       baseBranch,
       description,
       status: 'running',
-      createdAt: new Date().toISOString(),
+      blockedBy: [],
+      history: [{ status: 'running', at: now }],
+      createdAt: now,
       completedAt: null,
     };
     this._state.worktreeTasks[id] = task;
@@ -851,6 +854,7 @@ class Store extends EventEmitter {
 
   /**
    * Update a worktree task's fields (typically status transitions).
+   * Records status changes in the task's history array for audit trail.
    * @param {string} id - Worktree task ID
    * @param {Object} updates - Fields to update
    * @returns {Object|null} Updated task or null if not found
@@ -859,6 +863,13 @@ class Store extends EventEmitter {
     if (!this._state.worktreeTasks) this._state.worktreeTasks = {};
     const task = this._state.worktreeTasks[id];
     if (!task) return null;
+
+    // Record status transitions in history
+    if (updates.status && updates.status !== task.status) {
+      if (!task.history) task.history = [];
+      task.history.push({ status: updates.status, at: new Date().toISOString() });
+    }
+
     Object.assign(task, updates);
     this._debouncedSave();
     this.emit('worktreeTask:updated', task);

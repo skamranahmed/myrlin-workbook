@@ -5338,6 +5338,33 @@ html.activity-indicators-disabled .terminal-pane-activity {
   padding: 2px 8px;
 }
 
+/* Blocked card indicator */
+.kanban-card-blocked {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--red);
+  opacity: 0.9;
+}
+
+.kanban-card-blocked svg {
+  flex-shrink: 0;
+}
+
+.kanban-card-blocked-state {
+  opacity: 0.65;
+}
+
+/* Task timeline (compact audit trail) */
+.kanban-card-timeline {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--overlay0);
+  font-style: italic;
+}
+
 /* Empty column state */
 .kanban-column-empty {
   display: flex;

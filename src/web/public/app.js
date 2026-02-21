@@ -4100,15 +4100,42 @@ class CWMApp {
     // Rejected badge for tasks in done column that were rejected
     const rejectedBadge = task.status === 'rejected' ? '<span class="session-badge" style="background:var(--red);color:var(--base);">rejected</span>' : '';
 
-    return `<div class="kanban-card" draggable="true" data-task-id="${task.id}" data-session-id="${task.sessionId || ''}">
+    // Blocked-by indicator
+    let blockedHtml = '';
+    if (task.blockedBy && task.blockedBy.length > 0) {
+      const blockerNames = task.blockedBy.map(bid => {
+        const blocker = (this._worktreeTaskCache || []).find(t => t.id === bid);
+        return blocker ? (blocker.branch || blocker.description || bid) : bid;
+      });
+      blockedHtml = `<div class="kanban-card-blocked" title="Blocked by: ${blockerNames.map(n => this.escapeHtml(n)).join(', ')}">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M4 12L12 4"/></svg>
+        Blocked by ${task.blockedBy.length} task${task.blockedBy.length > 1 ? 's' : ''}
+      </div>`;
+    }
+
+    // Compact timeline for completed tasks
+    let timelineHtml = '';
+    if (task.history && task.history.length > 1 && (columnStatus === 'completed' || columnStatus === 'review')) {
+      const first = task.history[0];
+      const last = task.history[task.history.length - 1];
+      const durationMs = new Date(last.at) - new Date(first.at);
+      const hours = Math.floor(durationMs / 3600000);
+      const mins = Math.floor((durationMs % 3600000) / 60000);
+      const durationStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+      timelineHtml = `<div class="kanban-card-timeline">${task.history.length} transitions -- ${durationStr} total</div>`;
+    }
+
+    return `<div class="kanban-card${task.blockedBy && task.blockedBy.length > 0 ? ' kanban-card-blocked-state' : ''}" draggable="true" data-task-id="${task.id}" data-session-id="${task.sessionId || ''}">
       <div class="kanban-card-title">${this.escapeHtml(task.branch || task.description || task.id)}</div>
       <div class="kanban-card-meta">
         ${modelShort ? `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>` : ''}
         ${rejectedBadge}
         ${timeStr ? `<span>${timeStr}</span>` : ''}
       </div>
+      ${blockedHtml}
       ${previewHtml}
       ${changesHtml}
+      ${timelineHtml}
       ${actionsHtml}
     </div>`;
   }
@@ -4159,6 +4186,14 @@ class CWMApp {
             this.renderSessionDetail();
           }
         }
+      });
+
+      // Right-click context menu for kanban card
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const taskId = card.dataset.taskId;
+        this._showKanbanCardContextMenu(taskId, e.clientX, e.clientY);
       });
 
       // Drag start
@@ -4227,6 +4262,97 @@ class CWMApp {
 
     // Wire up action buttons (same as list view)
     this._wireTaskListEvents(this.els.kanbanBoard);
+  }
+
+  /** Show context menu for a kanban card with dependency management and actions */
+  _showKanbanCardContextMenu(taskId, x, y) {
+    const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+    if (!task) return;
+
+    const allTasks = this._worktreeTaskCache || [];
+    const otherTasks = allTasks.filter(t => t.id !== taskId);
+    const currentBlockers = task.blockedBy || [];
+
+    const items = [];
+
+    // Set blocker submenu
+    if (otherTasks.length > 0) {
+      items.push({ label: 'Set Blocked By...', icon: '&#128683;', disabled: true });
+      otherTasks.forEach(other => {
+        const isBlocker = currentBlockers.includes(other.id);
+        items.push({
+          label: `${isBlocker ? '\u2713 ' : ''}${other.branch || other.description || other.id}`,
+          icon: isBlocker ? '&#9745;' : '&#9744;',
+          action: async () => {
+            const newBlockers = isBlocker
+              ? currentBlockers.filter(bid => bid !== other.id)
+              : [...currentBlockers, other.id];
+            try {
+              await this.api('PUT', `/api/worktree-tasks/${taskId}`, { blockedBy: newBlockers });
+              this.showToast(isBlocker ? 'Dependency removed' : 'Dependency added', 'success');
+              this.renderTasksView();
+            } catch (err) {
+              this.showToast(err.message || 'Failed to update', 'error');
+            }
+          }
+        });
+      });
+      items.push({ type: 'sep' });
+    }
+
+    // Clear all dependencies
+    if (currentBlockers.length > 0) {
+      items.push({
+        label: 'Clear All Dependencies',
+        icon: '&#10005;',
+        action: async () => {
+          try {
+            await this.api('PUT', `/api/worktree-tasks/${taskId}`, { blockedBy: [] });
+            this.showToast('Dependencies cleared', 'success');
+            this.renderTasksView();
+          } catch (err) {
+            this.showToast(err.message || 'Failed to clear', 'error');
+          }
+        }
+      });
+      items.push({ type: 'sep' });
+    }
+
+    // View history
+    if (task.history && task.history.length > 0) {
+      items.push({
+        label: `View Timeline (${task.history.length} events)`,
+        icon: '&#128340;',
+        action: () => {
+          const rows = task.history.map(h => {
+            const d = new Date(h.at);
+            return `${d.toLocaleTimeString()} -- ${h.status}`;
+          }).join('\n');
+          alert(`Task Timeline\n\n${rows}`);
+        }
+      });
+    }
+
+    // Delete task
+    items.push({ type: 'sep' });
+    items.push({
+      label: 'Delete Task',
+      icon: '&#128465;',
+      danger: true,
+      action: async () => {
+        if (!confirm(`Delete task "${task.branch || task.description}"?`)) return;
+        try {
+          await this.api('DELETE', `/api/worktree-tasks/${taskId}`);
+          this.showToast('Task deleted', 'success');
+          this.renderTasksView();
+        } catch (err) {
+          this.showToast(err.message || 'Failed to delete', 'error');
+        }
+      }
+    });
+
+    const title = task.branch || task.description || task.id;
+    this._renderContextItems(title, items, x, y);
   }
 
   /* ═══════════════════════════════════════════════════════════
