@@ -772,12 +772,56 @@
         <div class="tasks-panel" id="tasks-panel" hidden>
           <div class="tasks-panel-header">
             <h3>Worktree Tasks</h3>
-            <button class="btn btn-primary btn-sm" id="new-task-btn">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
-              New Task
-            </button>
+            <div class="tasks-header-actions">
+              <div class="tasks-layout-toggle" id="tasks-layout-toggle" title="Toggle list/board view">
+                <button class="tasks-layout-btn active" data-layout="board" title="Board view">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1" y="1" width="4" height="14" rx="1"/><rect x="6" y="1" width="4" height="10" rx="1"/><rect x="11" y="1" width="4" height="7" rx="1"/></svg>
+                </button>
+                <button class="tasks-layout-btn" data-layout="list" title="List view">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h8"/></svg>
+                </button>
+              </div>
+              <button class="btn btn-primary btn-sm" id="new-task-btn">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 2v8M2 6h8"/></svg>
+                New Task
+              </button>
+            </div>
           </div>
           <div class="tasks-list" id="tasks-list"></div>
+          <div class="kanban-board" id="kanban-board" style="display:none">
+            <div class="kanban-column" data-status="backlog">
+              <div class="kanban-column-header">
+                <span class="kanban-column-dot backlog"></span>
+                <span class="kanban-column-title">Backlog</span>
+                <span class="kanban-column-count">0</span>
+              </div>
+              <div class="kanban-column-body" data-status="backlog"></div>
+            </div>
+            <div class="kanban-column" data-status="running">
+              <div class="kanban-column-header">
+                <span class="kanban-column-dot running"></span>
+                <span class="kanban-column-title">Running</span>
+                <span class="kanban-column-count">0</span>
+              </div>
+              <div class="kanban-column-body" data-status="running"></div>
+            </div>
+            <div class="kanban-column" data-status="review">
+              <div class="kanban-column-header">
+                <span class="kanban-column-dot review"></span>
+                <span class="kanban-column-title">Review</span>
+                <span class="kanban-column-count">0</span>
+              </div>
+              <div class="kanban-column-body" data-status="review"></div>
+            </div>
+            <div class="kanban-column" data-status="completed">
+              <div class="kanban-column-header">
+                <span class="kanban-column-dot completed"></span>
+                <span class="kanban-column-title">Done</span>
+                <span class="kanban-column-count">0</span>
+              </div>
+              <div class="kanban-column-body" data-status="completed"></div>
+            </div>
+          </div>
         </div>
 
         <!-- Costs Panel -->

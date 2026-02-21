@@ -348,6 +348,8 @@ class CWMApp {
       // Tasks
       tasksPanel: document.getElementById('tasks-panel'),
       tasksList: document.getElementById('tasks-list'),
+      kanbanBoard: document.getElementById('kanban-board'),
+      tasksLayoutToggle: document.getElementById('tasks-layout-toggle'),
       newTaskBtn: document.getElementById('new-task-btn'),
       newTaskOverlay: document.getElementById('new-task-overlay'),
       newTaskClose: document.getElementById('new-task-close'),
@@ -759,6 +761,16 @@ class CWMApp {
     if (this.els.diffViewerOverlay) {
       this.els.diffViewerOverlay.addEventListener('click', (e) => {
         if (e.target === this.els.diffViewerOverlay) this.closeDiffViewer();
+      });
+    }
+
+    // Tasks layout toggle (board vs list)
+    if (this.els.tasksLayoutToggle) {
+      this.els.tasksLayoutToggle.querySelectorAll('.tasks-layout-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const layout = btn.dataset.layout;
+          this.setTasksLayout(layout);
+        });
       });
     }
 
@@ -3789,13 +3801,53 @@ class CWMApp {
 
   /* ═══════════════════════════════════════════════════════════
      TASKS VIEW
-     Renders worktree tasks grouped by status (Active, Review,
-     Completed) with tri-state dots and quick actions.
+     Renders worktree tasks in two layout modes:
+     - List: vertical groups (Active, Review, Completed)
+     - Board: horizontal kanban columns (Backlog, Running, Review, Done)
+     Supports drag-and-drop between kanban columns.
      ═══════════════════════════════════════════════════════════ */
 
-  /** Render the Tasks view panel with all worktree tasks grouped by status */
+  /** Toggle between board and list layout for the tasks view */
+  setTasksLayout(layout) {
+    this._tasksLayout = layout;
+    localStorage.setItem('cwm_tasksLayout', layout);
+
+    // Update toggle buttons
+    if (this.els.tasksLayoutToggle) {
+      this.els.tasksLayoutToggle.querySelectorAll('.tasks-layout-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.layout === layout);
+      });
+    }
+
+    // Show/hide the right container
+    if (this.els.tasksList) this.els.tasksList.style.display = layout === 'list' ? '' : 'none';
+    if (this.els.kanbanBoard) this.els.kanbanBoard.style.display = layout === 'board' ? '' : 'none';
+
+    // Re-render with cached data if available
+    if (this._worktreeTaskCache) {
+      if (layout === 'board') {
+        this._renderKanbanBoard(this._worktreeTaskCache);
+      } else {
+        this._renderTasksList(this._worktreeTaskCache);
+      }
+    }
+  }
+
+  /** Fetch tasks and render in the active layout */
   async renderTasksView() {
-    if (!this.els.tasksList) return;
+    // Initialize layout from localStorage (default: board)
+    if (!this._tasksLayout) {
+      this._tasksLayout = localStorage.getItem('cwm_tasksLayout') || 'board';
+      // Sync toggle UI
+      if (this.els.tasksLayoutToggle) {
+        this.els.tasksLayoutToggle.querySelectorAll('.tasks-layout-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.layout === this._tasksLayout);
+        });
+      }
+      // Show/hide containers
+      if (this.els.tasksList) this.els.tasksList.style.display = this._tasksLayout === 'list' ? '' : 'none';
+      if (this.els.kanbanBoard) this.els.kanbanBoard.style.display = this._tasksLayout === 'board' ? '' : 'none';
+    }
 
     try {
       const data = await this.api('GET', '/api/worktree-tasks');
@@ -3803,89 +3855,103 @@ class CWMApp {
       this._worktreeTaskCache = tasks;
 
       if (tasks.length === 0) {
-        this.els.tasksList.innerHTML = `
+        // Show empty state in whichever container is visible
+        const emptyHtml = `
           <div class="tasks-empty">
             <div class="tasks-empty-icon">&#128736;</div>
             <div class="tasks-empty-title">No worktree tasks</div>
             <div class="tasks-empty-desc">Create a task to have Claude work on a feature in an isolated git branch. Click "New Task" above to get started.</div>
           </div>`;
+        if (this._tasksLayout === 'board' && this.els.kanbanBoard) {
+          this.els.kanbanBoard.innerHTML = emptyHtml;
+        } else if (this.els.tasksList) {
+          this.els.tasksList.innerHTML = emptyHtml;
+        }
         return;
       }
 
-      // Group by status
-      const groups = { running: [], review: [], completed: [], rejected: [] };
-      tasks.forEach(t => {
-        const key = (t.status === 'running' || t.status === 'active') ? 'running' : (groups[t.status] ? t.status : 'running');
-        groups[key].push(t);
-      });
-
-      let html = '';
-
-      // Active tasks
-      if (groups.running.length > 0) {
-        html += this._renderTaskGroup('Active', groups.running, 'running');
+      if (this._tasksLayout === 'board') {
+        this._renderKanbanBoard(tasks);
+      } else {
+        this._renderTasksList(tasks);
       }
-
-      // Review tasks
-      if (groups.review.length > 0) {
-        html += this._renderTaskGroup('Review', groups.review, 'review');
-      }
-
-      // Completed tasks
-      if (groups.completed.length > 0) {
-        html += this._renderTaskGroup('Completed', groups.completed, 'completed');
-      }
-
-      this.els.tasksList.innerHTML = html;
-
-      // Wire up task item clicks
-      this.els.tasksList.querySelectorAll('.task-item').forEach(el => {
-        el.addEventListener('click', () => {
-          const sessionId = el.dataset.sessionId;
-          if (sessionId) {
-            const session = (this.state.allSessions || []).find(s => s.id === sessionId);
-            if (session) {
-              this.state.selectedSession = session;
-              this.setViewMode('workspace');
-              this.renderSessionDetail();
-            }
-          }
-        });
-      });
-
-      // Wire up quick action buttons
-      this.els.tasksList.querySelectorAll('[data-action]').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const taskId = btn.dataset.taskId;
-          const action = btn.dataset.action;
-          if (action === 'merge') this.mergeWorktreeTask(taskId);
-          else if (action === 'diff') this.showWorktreeTaskDiff(taskId);
-          else if (action === 'push') {
-            try {
-              const res = await this.api('POST', `/api/worktree-tasks/${taskId}/push`);
-              this.showToast(res.message || 'Pushed to remote', 'success');
-            } catch (err) {
-              this.showToast(err.message || 'Push failed', 'error');
-            }
-          } else if (action === 'open') {
-            const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
-            if (task && task.sessionId) {
-              const emptySlot = this.terminalPanes.findIndex(p => p === null);
-              if (emptySlot !== -1) {
-                this.setViewMode('terminal');
-                this.openTerminalInPane(emptySlot, task.sessionId, task.branch, { cwd: task.worktreePath });
-              }
-            }
-          }
-        });
-      });
     } catch (err) {
-      this.els.tasksList.innerHTML = `<div class="tasks-empty"><div class="tasks-empty-desc">Failed to load tasks</div></div>`;
+      const errHtml = `<div class="tasks-empty"><div class="tasks-empty-desc">Failed to load tasks</div></div>`;
+      if (this._tasksLayout === 'board' && this.els.kanbanBoard) {
+        this.els.kanbanBoard.innerHTML = errHtml;
+      } else if (this.els.tasksList) {
+        this.els.tasksList.innerHTML = errHtml;
+      }
     }
   }
 
-  /** Render a group of tasks (Active/Review/Completed) */
+  /** Render tasks in the list layout (original vertical grouped view) */
+  _renderTasksList(tasks) {
+    if (!this.els.tasksList) return;
+
+    // Group by status
+    const groups = { running: [], review: [], completed: [], rejected: [] };
+    tasks.forEach(t => {
+      const key = (t.status === 'running' || t.status === 'active') ? 'running' : (groups[t.status] ? t.status : 'running');
+      groups[key].push(t);
+    });
+
+    let html = '';
+    if (groups.running.length > 0) html += this._renderTaskGroup('Active', groups.running, 'running');
+    if (groups.review.length > 0) html += this._renderTaskGroup('Review', groups.review, 'review');
+    if (groups.completed.length > 0) html += this._renderTaskGroup('Completed', groups.completed, 'completed');
+
+    this.els.tasksList.innerHTML = html;
+    this._wireTaskListEvents(this.els.tasksList);
+  }
+
+  /** Wire up click handlers on task list items and action buttons */
+  _wireTaskListEvents(container) {
+    // Task item click -> navigate to session detail
+    container.querySelectorAll('.task-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const sessionId = el.dataset.sessionId;
+        if (sessionId) {
+          const session = (this.state.allSessions || []).find(s => s.id === sessionId);
+          if (session) {
+            this.state.selectedSession = session;
+            this.setViewMode('workspace');
+            this.renderSessionDetail();
+          }
+        }
+      });
+    });
+
+    // Quick action buttons (merge, diff, push, open)
+    container.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const taskId = btn.dataset.taskId;
+        const action = btn.dataset.action;
+        if (action === 'merge') this.mergeWorktreeTask(taskId);
+        else if (action === 'diff') this.showWorktreeTaskDiff(taskId);
+        else if (action === 'push') {
+          try {
+            const res = await this.api('POST', `/api/worktree-tasks/${taskId}/push`);
+            this.showToast(res.message || 'Pushed to remote', 'success');
+          } catch (err) {
+            this.showToast(err.message || 'Push failed', 'error');
+          }
+        } else if (action === 'open') {
+          const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+          if (task && task.sessionId) {
+            const emptySlot = this.terminalPanes.findIndex(p => p === null);
+            if (emptySlot !== -1) {
+              this.setViewMode('terminal');
+              this.openTerminalInPane(emptySlot, task.sessionId, task.branch, { cwd: task.worktreePath });
+            }
+          }
+        }
+      });
+    });
+  }
+
+  /** Render a group of tasks (Active/Review/Completed) for list view */
   _renderTaskGroup(label, tasks, groupType) {
     const items = tasks.map(t => {
       // Determine dot state
@@ -3927,6 +3993,181 @@ class CWMApp {
       <div class="tasks-group-header">${label} <span class="tasks-group-count">(${tasks.length})</span></div>
       ${items}
     </div>`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     KANBAN BOARD
+     Horizontal column layout: Backlog | Running | Review | Done
+     Cards are draggable between columns to change task status.
+     ═══════════════════════════════════════════════════════════ */
+
+  /** Render the kanban board with tasks in columns by status */
+  _renderKanbanBoard(tasks) {
+    if (!this.els.kanbanBoard) return;
+
+    // Categorize tasks into kanban columns
+    const columns = { backlog: [], running: [], review: [], completed: [] };
+    tasks.forEach(t => {
+      if (t.status === 'backlog' || t.status === 'pending') {
+        columns.backlog.push(t);
+      } else if (t.status === 'running' || t.status === 'active') {
+        columns.running.push(t);
+      } else if (t.status === 'review') {
+        columns.review.push(t);
+      } else if (t.status === 'completed' || t.status === 'merged') {
+        columns.completed.push(t);
+      } else if (t.status === 'rejected') {
+        columns.completed.push(t); // rejected goes to done column
+      } else {
+        columns.backlog.push(t); // unknown status defaults to backlog
+      }
+    });
+
+    // Render each column's cards
+    Object.entries(columns).forEach(([status, statusTasks]) => {
+      const body = this.els.kanbanBoard.querySelector(`.kanban-column-body[data-status="${status}"]`);
+      const count = this.els.kanbanBoard.querySelector(`.kanban-column[data-status="${status}"] .kanban-column-count`);
+      if (!body) return;
+
+      if (count) count.textContent = statusTasks.length;
+
+      if (statusTasks.length === 0) {
+        body.innerHTML = '<div class="kanban-column-empty">No tasks</div>';
+      } else {
+        body.innerHTML = statusTasks.map(t => this._renderKanbanCard(t, status)).join('');
+      }
+    });
+
+    // Wire up events on all cards
+    this._wireKanbanEvents();
+  }
+
+  /** Render a single kanban card */
+  _renderKanbanCard(task, columnStatus) {
+    const timeStr = task.createdAt ? this.relativeTime(task.createdAt) : '';
+    const modelShort = task.model ? (task.model.includes('opus') ? 'opus' : task.model.includes('sonnet') ? 'sonnet' : task.model.includes('haiku') ? 'haiku' : task.model) : '';
+
+    // Changes info for review/completed
+    const changesHtml = (task.changedFiles > 0) ? `
+      <div class="kanban-card-changes">
+        <span class="added">+${task.branchAhead || 0}</span> commits -- ${task.changedFiles} files changed
+      </div>` : '';
+
+    // Actions vary by column
+    let actionsHtml = '';
+    if (columnStatus === 'running') {
+      actionsHtml = `<div class="kanban-card-actions">
+        <button class="btn btn-ghost btn-sm" data-action="open" data-task-id="${task.id}">Open Terminal</button>
+      </div>`;
+    } else if (columnStatus === 'review') {
+      actionsHtml = `<div class="kanban-card-actions">
+        <button class="btn btn-primary btn-sm" data-action="merge" data-task-id="${task.id}">Merge</button>
+        <button class="btn btn-ghost btn-sm" data-action="diff" data-task-id="${task.id}">Diff</button>
+        <button class="btn btn-ghost btn-sm" data-action="push" data-task-id="${task.id}" style="color:var(--teal)">Push</button>
+      </div>`;
+    }
+
+    // Rejected badge for tasks in done column that were rejected
+    const rejectedBadge = task.status === 'rejected' ? '<span class="session-badge" style="background:var(--red);color:var(--base);">rejected</span>' : '';
+
+    return `<div class="kanban-card" draggable="true" data-task-id="${task.id}" data-session-id="${task.sessionId || ''}">
+      <div class="kanban-card-title">${this.escapeHtml(task.branch || task.description || task.id)}</div>
+      <div class="kanban-card-meta">
+        ${modelShort ? `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>` : ''}
+        ${rejectedBadge}
+        ${timeStr ? `<span>${timeStr}</span>` : ''}
+      </div>
+      ${changesHtml}
+      ${actionsHtml}
+    </div>`;
+  }
+
+  /** Wire up drag-and-drop and click events on kanban cards */
+  _wireKanbanEvents() {
+    if (!this.els.kanbanBoard) return;
+
+    // Card click -> navigate to session detail
+    this.els.kanbanBoard.querySelectorAll('.kanban-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        // Don't navigate if clicking an action button
+        if (e.target.closest('[data-action]')) return;
+        const sessionId = card.dataset.sessionId;
+        if (sessionId) {
+          const session = (this.state.allSessions || []).find(s => s.id === sessionId);
+          if (session) {
+            this.state.selectedSession = session;
+            this.setViewMode('workspace');
+            this.renderSessionDetail();
+          }
+        }
+      });
+
+      // Drag start
+      card.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', card.dataset.taskId);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+        // Highlight all drop zones
+        this.els.kanbanBoard.querySelectorAll('.kanban-column-body').forEach(col => {
+          col.classList.add('kanban-drop-target');
+        });
+      });
+
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        this.els.kanbanBoard.querySelectorAll('.kanban-column-body').forEach(col => {
+          col.classList.remove('kanban-drop-target', 'drag-over');
+        });
+      });
+    });
+
+    // Column body drop zones
+    this.els.kanbanBoard.querySelectorAll('.kanban-column-body').forEach(colBody => {
+      colBody.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        colBody.classList.add('drag-over');
+      });
+
+      colBody.addEventListener('dragleave', (e) => {
+        // Only remove if leaving the column body itself (not entering a child)
+        if (!colBody.contains(e.relatedTarget)) {
+          colBody.classList.remove('drag-over');
+        }
+      });
+
+      colBody.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        colBody.classList.remove('drag-over');
+        const taskId = e.dataTransfer.getData('text/plain');
+        const newStatus = colBody.dataset.status;
+        if (!taskId || !newStatus) return;
+
+        // Find the task to check current status
+        const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+        if (!task) return;
+
+        // Map kanban column to API status
+        const statusMap = { backlog: 'backlog', running: 'running', review: 'review', completed: 'completed' };
+        const apiStatus = statusMap[newStatus];
+        if (!apiStatus) return;
+
+        // Don't update if same column
+        const currentColumn = (task.status === 'active') ? 'running' : (task.status === 'pending' ? 'backlog' : task.status);
+        if (currentColumn === newStatus) return;
+
+        try {
+          await this.api('PUT', `/api/worktree-tasks/${taskId}`, { status: apiStatus });
+          this.showToast(`Task moved to ${newStatus}`, 'success');
+          this.renderTasksView(); // Re-fetch and render
+        } catch (err) {
+          this.showToast(err.message || 'Failed to move task', 'error');
+        }
+      });
+    });
+
+    // Wire up action buttons (same as list view)
+    this._wireTaskListEvents(this.els.kanbanBoard);
   }
 
   /* ═══════════════════════════════════════════════════════════
