@@ -5399,6 +5399,13 @@ html.activity-indicators-disabled .terminal-pane-activity {
   opacity: 0.65;
 }
 
+/* Stage progress dots (workflow progression) */
+.kanban-card-stages {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
 /* Task timeline (compact audit trail) */
 .kanban-card-timeline {
   margin-top: 6px;

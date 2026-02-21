@@ -1139,8 +1139,17 @@
           <div class="form-checkboxes" id="new-task-flags">
             <label class="form-checkbox"><input type="checkbox" value="--dangerously-skip-permissions" /> Skip Permissions</label>
             <label class="form-checkbox"><input type="checkbox" value="--verbose" /> Verbose</label>
+            <label class="form-checkbox"><input type="checkbox" value="--agent-teams" id="new-task-agent-teams" /> Agent Teams</label>
           </div>
         </div>
+        <details class="form-help-details" style="margin-top: 4px; margin-bottom: 8px;">
+          <summary style="cursor: pointer; color: var(--overlay0); font-size: 11px; user-select: none;">How agent workflows work</summary>
+          <div style="font-size: 11px; color: var(--subtext0); padding: 8px 0 4px 0; line-height: 1.5;">
+            <p style="margin: 0 0 6px 0;"><strong style="color: var(--text);">Single agent</strong> -- One model handles everything. Full conversation context preserved. Best for complex tasks where the agent needs to remember all decisions.</p>
+            <p style="margin: 0 0 6px 0;"><strong style="color: var(--text);">Model per stage</strong> -- Use Haiku for planning (fast/cheap exploration), Sonnet for running (good balance), Opus for review (thorough analysis). Configure defaults in Settings > Advanced.</p>
+            <p style="margin: 0;"><strong style="color: var(--text);">Agent teams</strong> -- Multiple agents work in parallel on sub-tasks. Each gets focused context. Enable the flag above to let Claude spawn subagents. Monitor progress in the session detail panel.</p>
+          </div>
+        </details>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" id="new-task-cancel">Cancel</button>

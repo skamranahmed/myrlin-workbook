@@ -3265,8 +3265,8 @@ class CWMApp {
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
-      { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign this model when tasks enter the Planning column. Leave empty for no default.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku' }, { value: 'claude-sonnet-4-6', label: 'Sonnet' }, { value: 'claude-opus-4-6', label: 'Opus' }] },
-      { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign this model when tasks enter the Running column. Leave empty for no default.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku' }, { value: 'claude-sonnet-4-6', label: 'Sonnet' }, { value: 'claude-opus-4-6', label: 'Opus' }] },
+      { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
+      { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
     ];
   }
 
@@ -4287,6 +4287,18 @@ class CWMApp {
       </div>`;
     }
 
+    // Stage transition indicator -- show how many stages this task has progressed through
+    let stageProgressHtml = '';
+    if (task.history && task.history.length > 1) {
+      const stages = task.history.map(h => h.status);
+      const uniqueStages = [...new Set(stages)];
+      if (uniqueStages.length > 1) {
+        const stageIcons = { backlog: '\u25CB', planning: '\u25D4', running: '\u25D1', review: '\u25D5', completed: '\u25CF' };
+        const dots = uniqueStages.map(s => `<span title="${s}" style="color:var(--overlay1)">${stageIcons[s] || '\u25CB'}</span>`).join(' ');
+        stageProgressHtml = `<div class="kanban-card-stages">${dots}</div>`;
+      }
+    }
+
     // Compact timeline for completed tasks
     let timelineHtml = '';
     if (task.history && task.history.length > 1 && (columnStatus === 'completed' || columnStatus === 'review')) {
@@ -4315,6 +4327,7 @@ class CWMApp {
         ${timeStr ? `<span>${timeStr}</span>` : ''}
       </div>
       ${blockedHtml}
+      ${stageProgressHtml}
       ${previewHtml}
       ${changesHtml}
       ${timelineHtml}
