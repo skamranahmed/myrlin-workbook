@@ -485,7 +485,7 @@ class CWMApp {
         this.loadWorkspaces();
         this.loadSessions();
         this.loadStats();
-        this.showToast('Refreshing workspaces...', 'info');
+        this.showToast('Refreshing projects...', 'info');
       });
     }
 
@@ -1832,7 +1832,7 @@ class CWMApp {
       }
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast('Failed to load workspaces', 'error');
+      this.showToast('Failed to load projects', 'error');
     }
   }
 
@@ -1938,10 +1938,10 @@ class CWMApp {
 
   async createWorkspace() {
     const result = await this.showPromptModal({
-      title: 'New Workspace',
+      title: 'New Project',
       fields: [
         { key: 'name', label: 'Name', placeholder: 'my-project', required: true },
-        { key: 'description', label: 'Description', placeholder: 'What is this workspace for?', type: 'textarea' },
+        { key: 'description', label: 'Description', placeholder: 'What is this project for?', type: 'textarea' },
         { key: 'color', label: 'Color', type: 'color' },
       ],
       confirmText: 'Create',
@@ -1952,11 +1952,11 @@ class CWMApp {
 
     try {
       await this.api('POST', '/api/workspaces', result);
-      this.showToast('Workspace created', 'success');
+      this.showToast('Project created', 'success');
       await this.loadWorkspaces();
       await this.loadStats();
     } catch (err) {
-      this.showToast(err.message || 'Failed to create workspace', 'error');
+      this.showToast(err.message || 'Failed to create project', 'error');
     }
   }
 
@@ -1965,7 +1965,7 @@ class CWMApp {
     if (!ws) return;
 
     const result = await this.showPromptModal({
-      title: 'Edit Workspace',
+      title: 'Edit Project',
       fields: [
         { key: 'name', label: 'Name', value: ws.name, required: true },
         { key: 'description', label: 'Description', value: ws.description || '', type: 'textarea' },
@@ -1979,10 +1979,10 @@ class CWMApp {
 
     try {
       await this.api('PUT', `/api/workspaces/${id}`, result);
-      this.showToast('Workspace updated', 'success');
+      this.showToast('Project updated', 'success');
       await this.loadWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to update workspace', 'error');
+      this.showToast(err.message || 'Failed to update project', 'error');
     }
   }
 
@@ -1991,8 +1991,8 @@ class CWMApp {
     if (!ws) return;
 
     const confirmed = await this.showConfirmModal({
-      title: 'Delete Workspace',
-      message: `Are you sure you want to delete <strong>${this.escapeHtml(ws.name)}</strong>? This will remove the workspace and unlink all its sessions.`,
+      title: 'Delete Project',
+      message: `Are you sure you want to delete <strong>${this.escapeHtml(ws.name)}</strong>? This will remove the project and unlink all its sessions.`,
       confirmText: 'Delete',
       confirmClass: 'btn-danger',
     });
@@ -2001,7 +2001,7 @@ class CWMApp {
 
     try {
       await this.api('DELETE', `/api/workspaces/${id}`);
-      this.showToast('Workspace deleted', 'success');
+      this.showToast('Project deleted', 'success');
       if (this.state.activeWorkspace && this.state.activeWorkspace.id === id) {
         this.state.activeWorkspace = null;
       }
@@ -2009,7 +2009,7 @@ class CWMApp {
       await this.loadSessions();
       await this.loadStats();
     } catch (err) {
-      this.showToast(err.message || 'Failed to delete workspace', 'error');
+      this.showToast(err.message || 'Failed to delete project', 'error');
     }
   }
 
@@ -2136,7 +2136,7 @@ class CWMApp {
     } else if (this.state.workspaces.length > 0) {
       fields.push({
         key: 'workspaceId',
-        label: 'Workspace',
+        label: 'Project',
         type: 'select',
         options: this.state.workspaces.map(w => ({ value: w.id, label: w.name })),
         required: true,
@@ -2349,7 +2349,7 @@ class CWMApp {
 
     const confirmed = await this.showConfirmModal({
       title: 'Remove Session',
-      message: `Remove "${session.name}" from this workspace? This deletes the session record (your Claude conversation files are not affected).`,
+      message: `Remove "${session.name}" from this project? This deletes the session record (your Claude conversation files are not affected).`,
       confirmText: 'Remove',
       confirmClass: 'btn-danger',
     });
@@ -2553,7 +2553,7 @@ class CWMApp {
     }
 
     // Remove from workspace (actually deletes the session record)
-    items.push({ label: 'Remove from Workspace', icon: '&#10005;', danger: true, action: () => this.removeSessionFromWorkspace(sessionId) });
+    items.push({ label: 'Remove from Project', icon: '&#10005;', danger: true, action: () => this.removeSessionFromWorkspace(sessionId) });
 
     return items;
   }
@@ -2679,9 +2679,9 @@ class CWMApp {
 
     // Add to active workspace (without opening terminal)
     items.push({
-      label: 'Add to Workspace', icon: '&#43;', action: () => {
+      label: 'Add to Project', icon: '&#43;', action: () => {
         if (!this.state.activeWorkspace) {
-          this.showToast('Select or create a workspace first', 'warning');
+          this.showToast('Select or create a project first', 'warning');
           return;
         }
         // Use project folder name as friendly default name instead of raw UUID
@@ -3216,7 +3216,7 @@ class CWMApp {
       {
         id: 'new-session',
         name: 'New Session',
-        description: 'Create a new Claude Code session in a workspace',
+        description: 'Create a new Claude Code session in a project',
         category: 'action',
         tags: ['create', 'session', 'start', 'launch', 'claude', 'add'],
         shortcut: 'Ctrl+N',
@@ -3225,10 +3225,10 @@ class CWMApp {
       },
       {
         id: 'new-workspace',
-        name: 'New Workspace',
-        description: 'Create a new workspace to organize sessions',
+        name: 'New Project',
+        description: 'Create a new project to organize sessions',
         category: 'action',
-        tags: ['create', 'workspace', 'group', 'organize', 'add'],
+        tags: ['create', 'workspace', 'project', 'category', 'focus', 'group', 'organize', 'add'],
         icon: '&#43;',
         action: () => this.createWorkspace(),
       },
@@ -3255,7 +3255,7 @@ class CWMApp {
       {
         id: 'discover-sessions',
         name: 'Discover Local Sessions',
-        description: 'Scan this PC for existing Claude Code sessions not yet in a workspace',
+        description: 'Scan this PC for existing Claude Code sessions not yet in a project',
         category: 'action',
         tags: ['discover', 'import', 'scan', 'local', 'projects', 'find'],
         icon: '&#128269;',
@@ -3292,11 +3292,11 @@ class CWMApp {
       // ── Features ─────────────────────────────────────
       {
         id: 'workspaces',
-        name: 'Workspaces',
-        description: 'Organize sessions into named, color-coded groups',
-        detail: 'Workspaces let you group related Claude sessions. Create, rename, color-code, archive, and delete workspaces. Sessions belong to exactly one workspace. Right-click a workspace for all options.',
+        name: 'Projects',
+        description: 'Organize sessions into named, color-coded categories',
+        detail: 'Projects let you group related Claude sessions. Create, rename, color-code, archive, and delete projects. Sessions belong to exactly one project. Right-click a project for all options.',
         category: 'feature',
-        tags: ['workspace', 'group', 'organize', 'color', 'archive', 'rename'],
+        tags: ['workspace', 'project', 'category', 'focus', 'group', 'organize', 'color', 'archive', 'rename'],
         icon: '&#9638;',
         navigateTo: 'workspace',
       },
@@ -3332,7 +3332,7 @@ class CWMApp {
       {
         id: 'feature-board',
         name: 'Feature Board',
-        description: 'Kanban board to track planned/active/review/done features per workspace',
+        description: 'Kanban board to track planned/active/review/done features per project',
         detail: 'Available in the Docs tab under the Board sub-tab. Create feature cards, set priority and tags, drag between columns.',
         category: 'feature',
         tags: ['board', 'kanban', 'track', 'feature', 'plan', 'roadmap', 'project'],
@@ -3341,9 +3341,9 @@ class CWMApp {
       },
       {
         id: 'workspace-docs',
-        name: 'Workspace Docs',
-        description: 'Per-workspace Notes, Goals, Tasks, Roadmap, and Rules in markdown',
-        detail: 'Each workspace has its own documentation sections. Edit inline or toggle raw markdown mode. Available in the Docs tab.',
+        name: 'Project Docs',
+        description: 'Per-project Notes, Goals, Tasks, Roadmap, and Rules in markdown',
+        detail: 'Each project has its own documentation sections. Edit inline or toggle raw markdown mode. Available in the Docs tab.',
         category: 'feature',
         tags: ['docs', 'documentation', 'notes', 'goals', 'tasks', 'rules', 'roadmap', 'markdown'],
         icon: '&#128221;',
@@ -3380,8 +3380,8 @@ class CWMApp {
       {
         id: 'drag-and-drop',
         name: 'Drag & Drop',
-        description: 'Reorder sessions, move between workspaces, arrange terminal panes by dragging',
-        detail: 'Drag session cards to reorder or move to different workspaces. Drag sessions into terminal pane slots for split view.',
+        description: 'Reorder sessions, move between projects, arrange terminal panes by dragging',
+        detail: 'Drag session cards to reorder or move to different projects. Drag sessions into terminal pane slots for split view.',
         category: 'feature',
         tags: ['drag', 'drop', 'reorder', 'move', 'arrange', 'layout'],
         icon: '&#8597;',
@@ -3409,7 +3409,7 @@ class CWMApp {
         id: 'worktrees',
         name: 'Git Worktrees',
         description: 'Create and manage git worktrees for parallel branch work',
-        detail: 'Right-click a workspace to "Create Worktree". Worktrees let you have multiple branches checked out simultaneously, each in its own directory with its own session.',
+        detail: 'Right-click a project to "Create Worktree". Worktrees let you have multiple branches checked out simultaneously, each in its own directory with its own session.',
         category: 'feature',
         tags: ['worktree', 'git', 'branch', 'parallel', 'checkout', 'repository', 'isolation'],
         icon: '&#128268;',
@@ -3473,7 +3473,7 @@ class CWMApp {
         id: 'feature-sessions',
         name: 'Feature Sessions',
         description: 'Dedicated sessions on isolated git branches for building features',
-        detail: 'Right-click a workspace > "New Feature Session". Creates a worktree branch and session in one step. The session works in isolation on that branch.',
+        detail: 'Right-click a project > "New Feature Session". Creates a worktree branch and session in one step. The session works in isolation on that branch.',
         category: 'feature',
         tags: ['feature', 'session', 'branch', 'worktree', 'isolation', 'git'],
         icon: '&#9733;',
@@ -3483,7 +3483,7 @@ class CWMApp {
       {
         id: 'shortcut-quick-switcher',
         name: 'Command Palette',
-        description: 'Search sessions, workspaces, features, actions, and settings',
+        description: 'Search sessions, projects, features, actions, and settings',
         category: 'shortcut',
         tags: ['shortcut', 'command', 'palette', 'search', 'quick', 'switcher'],
         shortcut: 'Ctrl+K',
@@ -4045,7 +4045,7 @@ class CWMApp {
       workspaceId = this.state.workspaces[0].id;
     }
     if (!workspaceId) {
-      this.showToast('No workspace available', 'error');
+      this.showToast('No project available', 'error');
       return;
     }
 
@@ -4122,12 +4122,12 @@ class CWMApp {
           </div>` : ''}
           <div style="font-size:11px;color:var(--overlay0);">File size: ${this.formatSize(data.fileSize)}</div>
           ${this.state.workspaces.length > 0 ? `<div style="border-top:1px solid var(--border-subtle);padding-top:12px;">
-            <div style="font-size:11px;text-transform:uppercase;color:var(--overlay0);font-weight:600;margin-bottom:8px;">Send to Workspace</div>
+            <div style="font-size:11px;text-transform:uppercase;color:var(--overlay0);font-weight:600;margin-bottom:8px;">Send to Project</div>
             <div style="display:flex;gap:8px;">
               <select id="summary-ws-select" style="flex:1;padding:8px;border-radius:6px;background:var(--surface0);color:var(--text-primary);border:1px solid var(--surface1);font-size:13px;">
                 ${wsOptions}
               </select>
-              <button class="btn btn-primary btn-sm" id="summary-send-btn" style="white-space:nowrap;">Add to Workspace</button>
+              <button class="btn btn-primary btn-sm" id="summary-send-btn" style="white-space:nowrap;">Add to Project</button>
             </div>
           </div>` : ''}
         </div>
@@ -4160,7 +4160,7 @@ class CWMApp {
             await this.loadStats();
             this.renderWorkspaces();
             this.closeModal(null);
-            this.showToast(`Added to ${ws ? ws.name : 'workspace'}`, 'success');
+            this.showToast(`Added to ${ws ? ws.name : 'project'}`, 'success');
           } catch (err) {
             this.showToast(err.message || 'Failed to add session', 'error');
           }
@@ -4405,7 +4405,7 @@ class CWMApp {
       this.els.modalTitle.textContent = 'Discover Claude Sessions';
       this.els.modalBody.innerHTML = `
         <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 13px;">
-          Found <strong>${projects.length}</strong> Claude projects on this PC. Select which ones to import as sessions into the current workspace.
+          Found <strong>${projects.length}</strong> Claude projects on this PC. Select which ones to import as sessions into the current project.
         </p>
         <div class="discover-actions" style="display: flex; gap: 8px; margin-bottom: 12px;">
           <button class="btn btn-ghost btn-sm" id="discover-select-all">Select All</button>
@@ -4462,7 +4462,7 @@ class CWMApp {
 
       // Need an active workspace to import into
       if (!this.state.activeWorkspace) {
-        this.showToast('Select or create a workspace first', 'warning');
+        this.showToast('Select or create a project first', 'warning');
         return;
       }
 
@@ -4943,7 +4943,7 @@ class CWMApp {
 
     // Group labels for display
     const groupLabels = {
-      workspace: 'Workspaces', session: 'Sessions', action: 'Actions',
+      workspace: 'Projects', session: 'Sessions', action: 'Actions',
       feature: 'Features', shortcut: 'Shortcuts', setting: 'Settings',
     };
 
@@ -4971,7 +4971,7 @@ class CWMApp {
               <div class="qs-result-name">${this.escapeHtml(r.item.name)}</div>
               <div class="qs-result-detail">${r.item.sessions ? r.item.sessions.length : 0} sessions</div>
             </div>
-            <span class="qs-result-type qs-result-type-workspace">workspace</span>
+            <span class="qs-result-type qs-result-type-workspace">project</span>
           </div>`;
       } else if (r.type === 'session') {
         html += `
@@ -5656,12 +5656,12 @@ class CWMApp {
     if (workspaces.length === 0) {
       list.innerHTML = `
         <div style="padding: 24px 12px; text-align: center;">
-          <p style="font-size: 12px; color: var(--overlay0); margin-bottom: 8px;">No workspaces</p>
+          <p style="font-size: 12px; color: var(--overlay0); margin-bottom: 8px;">No projects</p>
           <button class="btn btn-ghost btn-sm" id="sidebar-create-ws">Create one</button>
         </div>`;
       const btn = document.getElementById('sidebar-create-ws');
       if (btn) btn.addEventListener('click', () => this.createWorkspace());
-      this.els.workspaceCount.textContent = '0 workspaces';
+      this.els.workspaceCount.textContent = '0 projects';
       return;
     }
 
@@ -5868,7 +5868,7 @@ class CWMApp {
       const isCollapsed = this._groupCollapseState && this._groupCollapseState[group.id] === true;
       const groupItemsHtml = groupCount > 0
         ? groupWorkspaces.map(ws => renderWorkspaceItem(ws)).join('')
-        : '<div class="workspace-group-empty">Drag workspaces here</div>';
+        : '<div class="workspace-group-empty">Drag projects here</div>';
 
       html += `
         <div class="workspace-group" data-group-id="${group.id}">
@@ -5898,7 +5898,7 @@ class CWMApp {
     }
 
 
-    this.els.workspaceCount.textContent = `${workspaces.length} workspace${workspaces.length !== 1 ? 's' : ''}`;
+    this.els.workspaceCount.textContent = `${workspaces.length} project${workspaces.length !== 1 ? 's' : ''}`;
   }
 
   showWorkspaceContextMenu(workspaceId, x, y) {
@@ -5958,7 +5958,7 @@ class CWMApp {
       ...(ws.parentId ? [{ label: 'Remove Parent', icon: '&#8592;', action: () => this.removeWorkspaceParent(workspaceId) }] : []),
       { type: 'sep' },
       ...(groupItems.length > 0 ? [
-        { label: 'Move to Group', icon: '&#8594;', disabled: true },
+        { label: 'Move to Category', icon: '&#8594;', disabled: true },
         ...groupItems,
         { type: 'sep' },
       ] : []),
@@ -5970,7 +5970,7 @@ class CWMApp {
         }
         return [];
       })(),
-      { label: 'New Group...', icon: '&#43;', action: () => this.createGroup() },
+      { label: 'New Category...', icon: '&#43;', action: () => this.createGroup() },
     ];
 
     // Hide all sessions
@@ -5986,16 +5986,16 @@ class CWMApp {
     }
 
     items.push({ type: 'sep' });
-    items.push({ label: 'Delete Workspace', icon: '&#10005;', action: () => this.deleteWorkspace(workspaceId), danger: true });
+    items.push({ label: 'Delete Project', icon: '&#10005;', action: () => this.deleteWorkspace(workspaceId), danger: true });
 
     this._renderContextItems(ws.name, items, x, y);
   }
 
   async createGroup() {
     const result = await this.showPromptModal({
-      title: 'New Group',
+      title: 'New Category',
       fields: [
-        { key: 'name', label: 'Group Name', placeholder: 'My Group', required: true },
+        { key: 'name', label: 'Category Name', placeholder: 'My Category', required: true },
         { key: 'color', label: 'Color', type: 'color' },
       ],
       confirmText: 'Create',
@@ -6006,22 +6006,22 @@ class CWMApp {
 
     try {
       await this.api('POST', '/api/groups', { name: result.name, color: result.color || 'mauve' });
-      this.showToast('Group created', 'success');
+      this.showToast('Category created', 'success');
       await this.loadGroups();
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to create group', 'error');
+      this.showToast(err.message || 'Failed to create category', 'error');
     }
   }
 
   async moveWorkspaceToGroup(workspaceId, groupId) {
     try {
       await this.api('POST', `/api/groups/${groupId}/add`, { workspaceId });
-      this.showToast('Workspace moved to group', 'success');
+      this.showToast('Project added to category', 'success');
       await this.loadGroups();
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to move workspace', 'error');
+      this.showToast(err.message || 'Failed to move project', 'error');
     }
   }
 
@@ -6034,11 +6034,11 @@ class CWMApp {
     const newIds = (group.workspaceIds || []).filter(id => id !== workspaceId);
     try {
       await this.api('PUT', `/api/groups/${group.id}`, { workspaceIds: newIds });
-      this.showToast('Workspace removed from group', 'info');
+      this.showToast('Project removed from category', 'info');
       await this.loadGroups();
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to remove workspace', 'error');
+      this.showToast(err.message || 'Failed to remove project', 'error');
     }
   }
 
@@ -6059,15 +6059,15 @@ class CWMApp {
     );
 
     if (others.length === 0) {
-      this.showToast('No available parent workspaces', 'info');
+      this.showToast('No available parent projects', 'info');
       return;
     }
 
     const options = others.map(w => ({ value: w.id, label: w.name }));
     const result = await this.showPromptModal({
-      title: 'Set Parent Workspace',
+      title: 'Set Parent Project',
       fields: [
-        { key: 'parentId', label: 'Parent Workspace', type: 'select', options, required: true },
+        { key: 'parentId', label: 'Parent Project', type: 'select', options, required: true },
       ],
       confirmText: 'Set Parent',
     });
@@ -6093,7 +6093,7 @@ class CWMApp {
       await this.api('PUT', `/api/workspaces/${workspaceId}`, { parentId: null });
       await this.loadWorkspaces();
       this.renderWorkspaces();
-      this.showToast('Workspace is now top-level', 'success');
+      this.showToast('Project is now top-level', 'success');
     } catch (err) {
       this.showToast(err.message || 'Failed to remove parent', 'error');
     }
@@ -6108,7 +6108,7 @@ class CWMApp {
       this.showToast('Summarizing session...', 'info');
       const data = await this.api('POST', `/api/sessions/${sessionId}/summarize`);
       if (data && data.summary) {
-        this.showToast('Summary added to workspace docs', 'success');
+        this.showToast('Summary added to project docs', 'success');
         // Refresh docs if currently in docs view
         if (this.state.viewMode === 'docs') {
           this.loadDocs();
@@ -6127,8 +6127,8 @@ class CWMApp {
     if (!group) return;
 
     const confirmed = await this.showConfirmModal({
-      title: 'Delete Group',
-      message: `Delete "${group.name}"? Workspaces inside will become ungrouped.`,
+      title: 'Delete Category',
+      message: `Delete "${group.name}"? Projects inside will become uncategorized.`,
       confirmText: 'Delete',
       confirmClass: 'btn-danger',
     });
@@ -6136,11 +6136,11 @@ class CWMApp {
 
     try {
       await this.api('DELETE', `/api/groups/${groupId}`);
-      this.showToast('Group deleted', 'info');
+      this.showToast('Category deleted', 'info');
       await this.loadGroups();
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to delete group', 'error');
+      this.showToast(err.message || 'Failed to delete category', 'error');
     }
   }
 
@@ -6150,9 +6150,9 @@ class CWMApp {
     if (!group) return;
 
     const result = await this.showPromptModal({
-      title: 'Edit Group',
+      title: 'Edit Category',
       fields: [
-        { key: 'name', label: 'Group Name', value: group.name, required: true },
+        { key: 'name', label: 'Category Name', value: group.name, required: true },
         { key: 'color', label: 'Color', type: 'color', value: group.color },
       ],
       confirmText: 'Save',
@@ -6162,11 +6162,11 @@ class CWMApp {
 
     try {
       await this.api('PUT', `/api/groups/${groupId}`, { name: result.name, color: result.color || group.color });
-      this.showToast('Group updated', 'success');
+      this.showToast('Category updated', 'success');
       await this.loadGroups();
       this.renderWorkspaces();
     } catch (err) {
-      this.showToast(err.message || 'Failed to update group', 'error');
+      this.showToast(err.message || 'Failed to update category', 'error');
     }
   }
 
@@ -6176,9 +6176,9 @@ class CWMApp {
     if (!group) return;
 
     const items = [
-      { label: 'Edit Group', icon: '&#9998;', action: () => this.renameGroup(groupId) },
+      { label: 'Edit Category', icon: '&#9998;', action: () => this.renameGroup(groupId) },
       { type: 'sep' },
-      { label: 'Delete Group', icon: '&#10005;', danger: true, action: () => this.deleteGroup(groupId) },
+      { label: 'Delete Category', icon: '&#10005;', danger: true, action: () => this.deleteGroup(groupId) },
     ];
 
     this._renderContextItems(group.name, items, x, y);
@@ -6948,7 +6948,7 @@ class CWMApp {
                 resumeSessionId: claudeSessionId,
                 command: 'claude',
               });
-              this.showToast('Opening session - drag to a workspace to save it', 'info');
+              this.showToast('Opening session - drag to a project to save it', 'info');
             } catch (err) {
               this.showToast(err.message || 'Failed to open session', 'error');
             }
@@ -6966,7 +6966,7 @@ class CWMApp {
                 cwd: project.path,
                 command: 'claude',
               });
-              this.showToast('Opening project - drag to a workspace to save it', 'info');
+              this.showToast('Opening project - drag to a project to save it', 'info');
             } catch (err) {
               this.showToast(err.message || 'Failed to open project', 'error');
             }
@@ -6989,7 +6989,7 @@ class CWMApp {
             console.log('[DnD] Workspace drop:', workspaceId);
             try {
               const ws = this.state.workspaces.find(w => w.id === workspaceId);
-              const wsName = ws ? ws.name : 'Workspace';
+              const wsName = ws ? ws.name : 'Project';
               const data = await this.api('POST', '/api/sessions', {
                 name: `${wsName} terminal`,
                 workspaceId: workspaceId,
@@ -8428,7 +8428,7 @@ class CWMApp {
 
     // Update header
     if (this.els.docsWorkspaceName) {
-      this.els.docsWorkspaceName.textContent = ws ? ws.name : 'No workspace selected';
+      this.els.docsWorkspaceName.textContent = ws ? ws.name : 'No project selected';
     }
 
     if (!docs || docs.raw === null) {
@@ -8569,7 +8569,7 @@ class CWMApp {
 
   async addDocsItem(section) {
     if (!this.state.activeWorkspace) {
-      this.showToast('Select a workspace first', 'warning');
+      this.showToast('Select a project first', 'warning');
       return;
     }
     this.showNotesEditor(section);
@@ -9814,7 +9814,7 @@ class CWMApp {
     // Get sessions for this workspace
     const wsSessions = this.state.sessions.filter(s => s.workspaceId === wsId);
     if (wsSessions.length === 0) {
-      container.innerHTML = '<div class="ai-insights-empty">No sessions in this workspace</div>';
+      container.innerHTML = '<div class="ai-insights-empty">No sessions in this project</div>';
       return;
     }
 
@@ -10024,9 +10024,9 @@ class CWMApp {
     html += '</div>';
 
     // By Workspace
-    html += '<div class="costs-breakdown-card"><h3 class="costs-breakdown-title">By Workspace</h3>';
+    html += '<div class="costs-breakdown-card"><h3 class="costs-breakdown-title">By Project</h3>';
     if (byWorkspace.length === 0) {
-      html += '<div class="costs-breakdown-empty">No workspace data</div>';
+      html += '<div class="costs-breakdown-empty">No project data</div>';
     } else {
       const maxWsPct = Math.max(...byWorkspace.map(w => w.pct), 1);
       byWorkspace.forEach((w, i) => {
@@ -10055,7 +10055,7 @@ class CWMApp {
       html += `<table class="costs-sessions-table">
         <thead><tr>
           <th data-sort="name">Name</th>
-          <th data-sort="workspace">Workspace</th>
+          <th data-sort="workspace">Project</th>
           <th data-sort="cost" class="sort-active">Cost</th>
           <th data-sort="messages">Msgs</th>
           <th data-sort="model">Model</th>
@@ -10756,7 +10756,7 @@ class CWMApp {
     html += `<table class="claude-session-table">
       <thead><tr>
         <th>Session</th>
-        <th>Workspace</th>
+        <th>Project</th>
         <th>Context</th>
         <th>Cost</th>
         <th>Messages</th>
