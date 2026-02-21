@@ -4165,6 +4165,7 @@ app.put('/api/worktree-tasks/:id', requireAuth, (req, res) => {
 /**
  * POST /api/worktree-tasks/:id/merge
  * Merge the worktree branch back to the base branch, cleanup worktree and branch.
+ * Accepts optional body: { squash, commitMessage, pushToRemote }
  */
 app.post('/api/worktree-tasks/:id/merge', requireAuth, async (req, res) => {
   const store = getStore();
@@ -4173,18 +4174,39 @@ app.post('/api/worktree-tasks/:id/merge', requireAuth, async (req, res) => {
   if (!task) return res.status(404).json({ error: 'Worktree task not found' });
   if (task.status !== 'review') return res.status(400).json({ error: 'Task must be in review status to merge' });
 
+  const { squash, commitMessage, pushToRemote } = req.body || {};
+
   try {
     const repoDir = task.repoDir;
     const baseBranch = task.baseBranch || 'main';
+    const defaultMsg = `Merge worktree task: ${task.description}`;
+    const msg = commitMessage && commitMessage.trim() ? commitMessage.trim() : defaultMsg;
 
     // Checkout base branch
     await gitExec(['checkout', baseBranch], repoDir);
-    // Merge with no-ff for clean history
-    await gitExec(['merge', '--no-ff', '-m', `Merge worktree task: ${task.description}`, task.branch], repoDir);
+
+    if (squash) {
+      // Squash merge: combines all commits into one
+      await gitExec(['merge', '--squash', task.branch], repoDir);
+      await gitExec(['commit', '-m', msg], repoDir);
+    } else {
+      // Regular merge with no-ff for clean history
+      await gitExec(['merge', '--no-ff', '-m', msg, task.branch], repoDir);
+    }
+
+    // Push to remote if requested
+    let pushed = false;
+    if (pushToRemote) {
+      try {
+        await gitExec(['push'], repoDir);
+        pushed = true;
+      } catch { /* push failure is non-fatal */ }
+    }
+
     // Remove worktree
     try { await gitExec(['worktree', 'remove', task.worktreePath], repoDir); } catch { /* may already be removed */ }
-    // Delete branch
-    try { await gitExec(['branch', '-d', task.branch], repoDir); } catch { /* branch may not exist */ }
+    // Delete branch (force if squash since -d may not recognize merge)
+    try { await gitExec(['branch', squash ? '-D' : '-d', task.branch], repoDir); } catch { /* branch may not exist */ }
 
     // Update task status
     store.updateWorktreeTask(task.id, { status: 'merged', completedAt: new Date().toISOString() });
@@ -4195,7 +4217,25 @@ app.post('/api/worktree-tasks/:id/merge', requireAuth, async (req, res) => {
     }
 
     broadcastSSE('worktreeTask:updated', { task: store.getWorktreeTasks().find(t => t.id === task.id) });
-    res.json({ success: true, message: `Merged ${task.branch} into ${baseBranch}` });
+    res.json({ success: true, message: `Merged ${task.branch} into ${baseBranch}${pushed ? ' and pushed' : ''}`, pushed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/worktree-tasks/:id/push
+ * Push the worktree branch to remote (for PR workflows).
+ */
+app.post('/api/worktree-tasks/:id/push', requireAuth, async (req, res) => {
+  const store = getStore();
+  const tasks = store.getWorktreeTasks();
+  const task = tasks.find(t => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: 'Worktree task not found' });
+
+  try {
+    await gitExec(['push', '-u', 'origin', task.branch], task.worktreePath || task.repoDir);
+    res.json({ success: true, message: `Pushed ${task.branch} to origin` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

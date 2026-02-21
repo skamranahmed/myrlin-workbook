@@ -3809,7 +3809,14 @@ class CWMApp {
           const action = btn.dataset.action;
           if (action === 'merge') this.mergeWorktreeTask(taskId);
           else if (action === 'diff') this.showWorktreeTaskDiff(taskId);
-          else if (action === 'open') {
+          else if (action === 'push') {
+            try {
+              const res = await this.api('POST', `/api/worktree-tasks/${taskId}/push`);
+              this.showToast(res.message || 'Pushed to remote', 'success');
+            } catch (err) {
+              this.showToast(err.message || 'Push failed', 'error');
+            }
+          } else if (action === 'open') {
             const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
             if (task && task.sessionId) {
               const emptySlot = this.terminalPanes.findIndex(p => p === null);
@@ -3846,6 +3853,7 @@ class CWMApp {
         <div class="task-item-actions">
           <button class="btn btn-primary btn-sm" data-action="merge" data-task-id="${t.id}">Merge</button>
           <button class="btn btn-ghost btn-sm" data-action="diff" data-task-id="${t.id}">Diff</button>
+          <button class="btn btn-ghost btn-sm" data-action="push" data-task-id="${t.id}" style="color:var(--teal)">Push</button>
         </div>` : '';
 
       const openBtn = groupType === 'running' ? `<button class="btn btn-ghost btn-sm" data-action="open" data-task-id="${t.id}" style="font-size:10px;padding:1px 6px;margin-left:auto;">Open</button>` : '';
@@ -10969,6 +10977,7 @@ class CWMApp {
           <div class="wt-review-actions">
             <button class="wt-review-btn wt-review-btn-diff" data-task-id="${task.id}" title="View changes">View Diff</button>
             <button class="wt-review-btn wt-review-btn-merge" data-task-id="${task.id}" title="Merge branch and cleanup">Merge</button>
+            <button class="wt-review-btn wt-review-btn-push" data-task-id="${task.id}" title="Push branch to remote for PR">Push</button>
             <button class="wt-review-btn wt-review-btn-reject" data-task-id="${task.id}" title="Reject and delete worktree">Reject</button>
             <button class="wt-review-btn wt-review-btn-resume" data-task-id="${task.id}" title="Resume working">Resume</button>
           </div>`;
@@ -10996,20 +11005,7 @@ class CWMApp {
           if (btn.classList.contains('wt-review-btn-diff')) {
             await this.showWorktreeTaskDiff(taskId);
           } else if (btn.classList.contains('wt-review-btn-merge')) {
-            const ok = await this.showConfirmModal({
-              title: 'Merge Worktree Task',
-              message: `Merge branch "${task.branch}" into "${task.baseBranch || 'main'}" and clean up the worktree?`,
-              confirmText: 'Merge',
-            });
-            if (ok) {
-              try {
-                await this.api('POST', `/api/worktree-tasks/${taskId}/merge`);
-                this.showToast(`Merged ${task.branch} into ${task.baseBranch || 'main'}`, 'success');
-                this.renderSessionDetail();
-              } catch (err) {
-                this.showToast(err.message || 'Merge failed', 'error');
-              }
-            }
+            await this.openMergeDialog(task);
           } else if (btn.classList.contains('wt-review-btn-reject')) {
             const ok = await this.showConfirmModal({
               title: 'Reject Worktree Task',
@@ -11025,6 +11021,13 @@ class CWMApp {
               } catch (err) {
                 this.showToast(err.message || 'Reject failed', 'error');
               }
+            }
+          } else if (btn.classList.contains('wt-review-btn-push')) {
+            try {
+              const res = await this.api('POST', `/api/worktree-tasks/${taskId}/push`);
+              this.showToast(res.message || `Pushed ${task.branch} to origin`, 'success');
+            } catch (err) {
+              this.showToast(err.message || 'Push failed', 'error');
             }
           } else if (btn.classList.contains('wt-review-btn-resume')) {
             try {
@@ -11198,6 +11201,60 @@ class CWMApp {
     }
     this._diffViewerTaskId = null;
     this._diffViewerFiles = [];
+  }
+
+  /**
+   * Open the merge dialog for a worktree task (by task ID lookup from cache).
+   * Used by the Tasks view quick-action buttons.
+   * @param {string} taskId - Worktree task ID
+   */
+  async mergeWorktreeTask(taskId) {
+    const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
+    if (!task) {
+      this.showToast('Task not found', 'error');
+      return;
+    }
+    await this.openMergeDialog(task);
+  }
+
+  /**
+   * Open a merge dialog with squash toggle, commit message, and push option.
+   * Replaces the simple confirm modal with a full merge configuration form.
+   * @param {Object} task - Worktree task object
+   */
+  async openMergeDialog(task) {
+    const baseBranch = task.baseBranch || 'main';
+    const defaultMsg = `Merge worktree task: ${task.description}`;
+
+    const result = await this.showPromptModal({
+      title: `Merge ${task.branch}`,
+      fields: [
+        { key: 'commitMessage', label: 'Commit Message', value: defaultMsg, type: 'textarea' },
+        { key: 'squash', label: 'Squash commits into one', type: 'checkbox', value: false },
+        { key: 'pushToRemote', label: 'Push to remote after merge', type: 'checkbox', value: false },
+      ],
+      confirmText: 'Merge',
+      confirmClass: 'btn-primary',
+    });
+
+    if (!result) return; // cancelled
+
+    try {
+      const res = await this.api('POST', `/api/worktree-tasks/${task.id}/merge`, {
+        squash: !!result.squash,
+        commitMessage: result.commitMessage || defaultMsg,
+        pushToRemote: !!result.pushToRemote,
+      });
+      this.showToast(res.message || `Merged ${task.branch} into ${baseBranch}`, 'success');
+      // Refresh views
+      if (this.state.viewMode === 'tasks') {
+        this.renderTasksView();
+      } else {
+        this.renderSessionDetail();
+      }
+    } catch (err) {
+      this.showToast(err.message || 'Merge failed', 'error');
+    }
   }
 
   /**
