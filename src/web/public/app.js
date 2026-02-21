@@ -350,6 +350,9 @@ class CWMApp {
       tasksPanel: document.getElementById('tasks-panel'),
       tasksList: document.getElementById('tasks-list'),
       kanbanBoard: document.getElementById('kanban-board'),
+      sidebarViewToggle: document.getElementById('sidebar-view-toggle'),
+      sidebarProjectsHeader: document.getElementById('sidebar-projects-header'),
+      sidebarTasksList: document.getElementById('sidebar-tasks-list'),
       tasksLayoutToggle: document.getElementById('tasks-layout-toggle'),
       tasksSearch: document.getElementById('tasks-search'),
       newTaskBtn: document.getElementById('new-task-btn'),
@@ -765,6 +768,15 @@ class CWMApp {
     if (this.els.diffViewerOverlay) {
       this.els.diffViewerOverlay.addEventListener('click', (e) => {
         if (e.target === this.els.diffViewerOverlay) this.closeDiffViewer();
+      });
+    }
+
+    // Sidebar view toggle (Projects vs Tasks)
+    if (this.els.sidebarViewToggle) {
+      this.els.sidebarViewToggle.querySelectorAll('.sidebar-view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.setSidebarView(btn.dataset.sidebarView);
+        });
       });
     }
 
@@ -3828,6 +3840,73 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   /** Toggle between board and list layout for the tasks view */
+  /** Switch sidebar between Projects and Tasks views */
+  setSidebarView(view) {
+    this._sidebarView = view;
+
+    // Update toggle buttons
+    if (this.els.sidebarViewToggle) {
+      this.els.sidebarViewToggle.querySelectorAll('.sidebar-view-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.sidebarView === view);
+      });
+    }
+
+    const isProjects = view === 'projects';
+
+    // Toggle Projects section visibility
+    if (this.els.sidebarProjectsHeader) this.els.sidebarProjectsHeader.hidden = !isProjects;
+    if (this.els.workspaceList) this.els.workspaceList.hidden = !isProjects;
+    if (document.getElementById('sidebar-meta')) document.getElementById('sidebar-meta').hidden = !isProjects;
+
+    // Toggle sidebar tasks visibility
+    if (this.els.sidebarTasksList) {
+      this.els.sidebarTasksList.hidden = isProjects;
+      if (!isProjects) this.renderSidebarTasks();
+    }
+  }
+
+  /** Render a compact task list in the sidebar */
+  async renderSidebarTasks() {
+    if (!this.els.sidebarTasksList) return;
+
+    try {
+      const data = await this.api('GET', '/api/worktree-tasks');
+      const tasks = data.tasks || [];
+
+      if (tasks.length === 0) {
+        this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;text-align:center;">No tasks yet</div>';
+        return;
+      }
+
+      // Sort: running first, then review, then backlog, then completed
+      const order = { running: 0, active: 0, planning: 1, review: 2, backlog: 3, pending: 3, completed: 4, merged: 4, rejected: 5 };
+      tasks.sort((a, b) => (order[a.status] || 4) - (order[b.status] || 4));
+
+      this.els.sidebarTasksList.innerHTML = tasks.map(t => {
+        let dotClass = 'completed';
+        if (t.status === 'running' || t.status === 'active') dotClass = 'busy';
+        else if (t.status === 'planning') dotClass = 'waiting';
+        else if (t.status === 'review') dotClass = 'review';
+        else if (t.status === 'backlog' || t.status === 'pending') dotClass = 'ready';
+
+        const name = t.branch ? t.branch.replace(/^feat\//, '') : (t.description || t.id);
+        return `<div class="task-item" data-task-id="${t.id}" data-session-id="${t.sessionId || ''}" style="padding:6px 12px;">
+          <span class="task-item-dot ${dotClass}"></span>
+          <span class="task-item-branch" style="font-size:12px;">${this.escapeHtml(name)}</span>
+        </div>`;
+      }).join('');
+
+      // Wire click to switch to kanban
+      this.els.sidebarTasksList.querySelectorAll('.task-item').forEach(el => {
+        el.addEventListener('click', () => {
+          this.setViewMode('tasks');
+        });
+      });
+    } catch (_) {
+      this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:11px;">Failed to load tasks</div>';
+    }
+  }
+
   setTasksLayout(layout) {
     this._tasksLayout = layout;
     localStorage.setItem('cwm_tasksLayout', layout);
@@ -4075,6 +4154,15 @@ class CWMApp {
         <span class="added">+${task.branchAhead || 0}</span> commits -- ${task.changedFiles} files changed
       </div>` : '';
 
+    // Show agent count badge for running tasks (from cached subagent data)
+    let agentBadge = '';
+    if (columnStatus === 'running' && task.sessionId && this._subagentCache) {
+      const cached = this._subagentCache[task.sessionId];
+      if (cached && cached.running > 0) {
+        agentBadge = `<span class="session-badge" style="background:var(--teal);color:var(--base);font-size:9px;">${cached.running} agent${cached.running > 1 ? 's' : ''}</span>`;
+      }
+    }
+
     // Live session preview -- show last terminal line for running tasks
     let previewHtml = '';
     if (columnStatus === 'running' && task.sessionId) {
@@ -4133,6 +4221,7 @@ class CWMApp {
       <div class="kanban-card-title">${this.escapeHtml(task.branch || task.description || task.id)}</div>
       <div class="kanban-card-meta">
         ${modelShort ? `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>` : ''}
+        ${agentBadge}
         ${rejectedBadge}
         ${timeStr ? `<span>${timeStr}</span>` : ''}
       </div>

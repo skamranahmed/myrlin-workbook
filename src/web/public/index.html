@@ -268,7 +268,11 @@
 
       <!-- Sidebar -->
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
+        <div class="sidebar-view-toggle" id="sidebar-view-toggle">
+          <button class="sidebar-view-btn active" data-sidebar-view="projects">Projects</button>
+          <button class="sidebar-view-btn" data-sidebar-view="tasks">Tasks</button>
+        </div>
+        <div class="sidebar-header" id="sidebar-projects-header">
           <h2 class="sidebar-title">Projects</h2>
           <button class="btn btn-ghost btn-icon btn-sm" id="workspaces-refresh" title="Refresh projects">
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
@@ -284,6 +288,9 @@
         </div>
         <div class="sidebar-list" id="workspace-list">
           <!-- Project items rendered here -->
+        </div>
+        <div class="sidebar-list sidebar-tasks-list" id="sidebar-tasks-list" hidden>
+          <!-- Sidebar task items rendered here -->
         </div>
         <div class="sidebar-footer">
           <div class="sidebar-meta" id="sidebar-meta">

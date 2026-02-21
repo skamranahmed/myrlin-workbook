@@ -860,6 +860,37 @@ textarea.input {
   display: none;
 }
 
+/* ─── Sidebar view toggle (Projects/Tasks) ──────────── */
+.sidebar-view-toggle {
+  display: flex;
+  padding: 8px 12px 4px;
+  gap: 2px;
+}
+
+.sidebar-view-btn {
+  flex: 1;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--overlay0);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sidebar-view-btn:hover {
+  color: var(--text-primary);
+}
+
+.sidebar-view-btn.active {
+  background: var(--surface0);
+  color: var(--text-primary);
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;
