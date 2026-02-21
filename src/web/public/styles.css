@@ -4131,6 +4131,8 @@ textarea.input {
   background: var(--base); overflow: hidden;
   min-height: 0;
 }
+/* Ensure hidden attribute works - author display:flex overrides UA [hidden] rule */
+.terminal-pane[hidden] { display: none !important; }
 .terminal-pane-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 12px; background: var(--mantle);

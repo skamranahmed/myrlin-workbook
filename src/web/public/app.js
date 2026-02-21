@@ -9174,6 +9174,8 @@ class CWMApp {
           this.terminalPanes[i] = cached.panes[i];
           const paneEl = document.getElementById(`term-pane-${i}`);
           if (paneEl) {
+            // Explicitly unhide -- belt-and-suspenders with updateTerminalGridLayout()
+            paneEl.hidden = false;
             paneEl.classList.remove('terminal-pane-empty');
             const titleEl = paneEl.querySelector('.terminal-pane-title');
             if (titleEl) titleEl.textContent = cached.panes[i].sessionName || cached.panes[i].sessionId;

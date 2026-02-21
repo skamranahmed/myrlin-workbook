@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0-alpha.3] - 2026-02-20
+
+### Fixed
+
+- **Tab group pane layout bleeding** -- Switching from a multi-pane tab group to a single-pane tab group and back no longer collapses all panes to one. Root cause: CSS `.terminal-pane { display: flex }` overrode the browser UA `[hidden] { display: none }` rule, making `paneEl.hidden = true` ineffective for hiding grid slots during tab switches. Added `.terminal-pane[hidden] { display: none !important; }` override and explicit `paneEl.hidden = false` in the restore-from-cache path.
+
+### Added (merged from PR #6 by @jfrostad)
+
+- **Mobile scrollbar hiding** -- Hides scrollbars on mobile to prevent layout interference.
+- **Dedicated mobile input field** -- Touch-friendly input row with Send button replaces unreliable virtual keyboard interaction.
+- **IME composition guard** -- Prevents partial input submission during autocorrect/IME composition.
+- **xterm textarea attributes** -- Sets `autocomplete=off, autocorrect=off, autocapitalize=off, spellcheck=false` on xterm textareas.
+- **LAN/Tailscale CORS** -- Dynamic CORS and CSP headers for local network access.
+
 ## [0.7.0-alpha.2] - 2026-02-20
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "myrlin-workbook",
-  "version": "0.7.0-alpha.2",
+  "version": "0.7.0-alpha.3",
   "description": "Browser-based workspace manager for Claude Code sessions - session discovery, multi-terminal, cost tracking, docs, and kanban board",
   "main": "src/index.js",
   "bin": {
@@ -18,7 +18,8 @@
     "test": "node test/run.js",
     "mcp:visual-qa": "node src/mcp/visual-qa.js",
     "gui:cdp": "node src/supervisor.js --cdp",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "restart": "bash scripts/restart-gui.sh"
   },
   "repository": {
     "type": "git",
