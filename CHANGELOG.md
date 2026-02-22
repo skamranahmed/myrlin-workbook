@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0-alpha.13] - 2026-02-21
+
+### Added
+
+- **Task Spinoff** -- Right-click any session and select "Spinoff Tasks" to AI-extract independent, actionable tasks from the session's conversation history. The AI analyzes the conversation (via `claude --print`) and returns structured task specs with title, description, relevant files, acceptance criteria, and suggested branch names. Review and edit tasks in a modal with select/deselect checkboxes, inline-editable titles and descriptions, file badges, and criteria lists. Batch-create as worktree tasks (immediate start or backlog). Each spinoff task gets the "spinoff" tag for tracking.
+- **Backend endpoints**: `POST /api/sessions/:id/extract-tasks` (AI conversation analysis), `POST /api/sessions/:id/spinoff-context` (rich context package generation with file snippets, project structure, CLAUDE.md, and git history), `POST /api/sessions/:id/spinoff-batch` (batch worktree task creation with worktree init hooks).
+- **Spinoff dialog CSS**: Animated loading dots, task cards with deselected state, editable inputs, file badges, acceptance criteria lists.
+
 ## [0.7.0-alpha.12] - 2026-02-21
 
 ### Added

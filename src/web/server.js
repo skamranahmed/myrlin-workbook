@@ -2653,6 +2653,479 @@ app.get('/api/sessions/:id/export-context', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
+//  TASK SPINOFF: EXTRACT TASKS + GENERATE CONTEXT PACKAGES
+// ──────────────────────────────────────────────────────────
+
+/**
+ * Read conversation text from a session's JSONL file for task extraction.
+ * Returns the last ~150KB of conversation as user/assistant message pairs.
+ * Filters system reminders and very short messages.
+ * @param {string} jsonlPath - Path to the JSONL file
+ * @param {number} [maxBytes=153600] - Maximum bytes to read from tail
+ * @returns {{ messages: Array<{role: string, text: string}>, filesTouched: string[] }}
+ */
+function readConversationForExtraction(jsonlPath, maxBytes = 150 * 1024) {
+  const stat = fs.statSync(jsonlPath);
+  let content;
+
+  if (stat.size <= maxBytes) {
+    content = fs.readFileSync(jsonlPath, 'utf-8');
+  } else {
+    // Read only the tail for recent context
+    const fd = fs.openSync(jsonlPath, 'r');
+    try {
+      const buf = Buffer.alloc(maxBytes);
+      fs.readSync(fd, buf, 0, maxBytes, stat.size - maxBytes);
+      content = buf.toString('utf-8');
+      // Drop partial first line from seeking mid-file
+      const firstNewline = content.indexOf('\n');
+      if (firstNewline > 0) content = content.slice(firstNewline + 1);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  const lines = content.split('\n').filter(l => l.trim());
+  const messages = [];
+  const allText = [];
+
+  for (const line of lines) {
+    const parsed = extractExportMessageText(line);
+    if (parsed) {
+      messages.push(parsed);
+      allText.push(parsed.text.substring(0, 2000));
+    }
+  }
+
+  // Extract file paths from all message content
+  const filesTouched = extractFilePaths(allText.join('\n'));
+
+  return { messages, filesTouched };
+}
+
+/**
+ * Build a condensed conversation summary for the AI task extraction prompt.
+ * Keeps total under ~8000 chars to fit within Claude --print context.
+ * @param {Array<{role: string, text: string}>} messages - Parsed conversation messages
+ * @returns {string} Condensed conversation text
+ */
+function buildConversationSummary(messages) {
+  const MAX_CHARS = 8000;
+  const parts = [];
+  let charCount = 0;
+
+  // Include first 3 user messages in full (establish original intent)
+  let userCount = 0;
+  for (const msg of messages) {
+    if (msg.role === 'user' && userCount < 3) {
+      const line = `USER: ${msg.text.substring(0, 800)}`;
+      parts.push(line);
+      charCount += line.length;
+      userCount++;
+    }
+    if (userCount >= 3) break;
+  }
+
+  // Include last 15 messages (recent context) with truncation
+  const recentMessages = messages.slice(-15);
+  for (const msg of recentMessages) {
+    if (charCount >= MAX_CHARS) break;
+    const prefix = msg.role === 'user' ? 'USER' : 'ASSISTANT';
+    const truncated = msg.text.substring(0, 500);
+    const line = `${prefix}: ${truncated}`;
+    parts.push(line);
+    charCount += line.length;
+  }
+
+  return parts.join('\n\n');
+}
+
+/**
+ * POST /api/sessions/:id/extract-tasks
+ * AI-extracts actionable tasks from a session's conversation history.
+ * Uses claude --print to analyze the conversation and return structured tasks.
+ * Returns: { tasks: Array<{ title, description, relevantFiles, acceptanceCriteria, branch }> }
+ */
+app.post('/api/sessions/:id/extract-tasks', requireAuth, async (req, res) => {
+  const store = getStore();
+  const session = store.getSession(req.params.id);
+  const claudeSessionId = (session && session.resumeSessionId) || req.params.id;
+
+  if (!claudeSessionId) {
+    return res.status(400).json({ error: 'No Claude session ID available' });
+  }
+
+  const jsonlPath = findJsonlFile(claudeSessionId);
+  if (!jsonlPath) {
+    return res.status(404).json({ error: 'No conversation data found for this session' });
+  }
+
+  try {
+    // Read and parse conversation
+    const { messages, filesTouched } = readConversationForExtraction(jsonlPath);
+    if (messages.length < 2) {
+      return res.status(400).json({ error: 'Session has too few messages to extract tasks from' });
+    }
+
+    // Build condensed conversation for the prompt
+    const conversationSummary = buildConversationSummary(messages);
+
+    const prompt = `You are analyzing a Claude Code session conversation to extract independent, actionable tasks that can be spun off as separate worktree branches.
+
+CONVERSATION:
+${conversationSummary}
+
+FILES REFERENCED IN SESSION:
+${filesTouched.slice(0, 30).join('\n') || 'None detected'}
+
+INSTRUCTIONS:
+1. Identify 1-6 independent, actionable tasks discussed or implied in this conversation
+2. Each task should be a self-contained unit of work suitable for a separate git branch
+3. Focus on tasks that were discussed but not yet completed, or improvements mentioned
+4. Include enough context in each description for a fresh Claude session to understand and execute
+5. Generate a short kebab-case branch name for each (e.g., "add-user-auth", "fix-sidebar-layout")
+
+Respond ONLY with a JSON array (no markdown, no explanation). Each element must have exactly these fields:
+- "title": string (short, imperative, under 60 chars)
+- "description": string (2-4 sentences describing what to build/fix and why)
+- "relevantFiles": string[] (file paths likely involved, from the conversation)
+- "acceptanceCriteria": string[] (2-4 concrete conditions for "done")
+- "branch": string (kebab-case branch name, no "feat/" prefix)
+
+Example:
+[{"title":"Add error handling to API endpoints","description":"Several API routes lack proper error handling...","relevantFiles":["src/web/server.js"],"acceptanceCriteria":["All routes return proper error codes","Error responses follow {error: string} shape"],"branch":"add-api-error-handling"}]
+
+JSON array:`;
+
+    const result = await new Promise((resolve, reject) => {
+      execFile('claude', ['--print', '-p', prompt], {
+        cwd: session ? (session.workingDir || process.cwd()) : process.cwd(),
+        timeout: 90000,
+        maxBuffer: 1024 * 512,
+      }, (err, stdout) => {
+        if (err) return reject(new Error('Failed to extract tasks. Is Claude CLI installed? ' + (err.message || '')));
+        resolve(stdout.trim());
+      });
+    });
+
+    // Parse the JSON response -- handle potential markdown wrapping
+    let tasks;
+    try {
+      // Strip markdown code fences if present
+      let cleaned = result;
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      tasks = JSON.parse(cleaned);
+    } catch (parseErr) {
+      // Try to extract JSON array from the response
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          tasks = JSON.parse(jsonMatch[0]);
+        } catch {
+          return res.status(500).json({ error: 'Failed to parse AI response as JSON', raw: result.substring(0, 500) });
+        }
+      } else {
+        return res.status(500).json({ error: 'AI did not return valid JSON', raw: result.substring(0, 500) });
+      }
+    }
+
+    // Validate and sanitize the task array
+    if (!Array.isArray(tasks)) {
+      return res.status(500).json({ error: 'AI returned non-array response' });
+    }
+
+    const sanitized = tasks.slice(0, 6).map(t => ({
+      title: String(t.title || '').substring(0, 100),
+      description: String(t.description || '').substring(0, 1000),
+      relevantFiles: Array.isArray(t.relevantFiles) ? t.relevantFiles.map(f => String(f)).slice(0, 20) : [],
+      acceptanceCriteria: Array.isArray(t.acceptanceCriteria) ? t.acceptanceCriteria.map(c => String(c)).slice(0, 6) : [],
+      branch: String(t.branch || '').replace(/[^a-z0-9-]/gi, '-').substring(0, 60).toLowerCase(),
+    })).filter(t => t.title && t.description);
+
+    res.json({
+      tasks: sanitized,
+      sessionId: req.params.id,
+      sessionName: session ? session.name : claudeSessionId,
+      filesTouched,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Task extraction failed: ' + err.message });
+  }
+});
+
+/**
+ * POST /api/sessions/:id/spinoff-context
+ * Generate a rich context package for a spinoff task.
+ * Takes a task spec and produces a structured handoff document
+ * that gives a fresh Claude session full context to execute the task.
+ *
+ * Body: { title, description, relevantFiles, acceptanceCriteria, repoDir }
+ * Returns: { contextPackage: string } -- a markdown document for the new session
+ */
+app.post('/api/sessions/:id/spinoff-context', requireAuth, async (req, res) => {
+  const store = getStore();
+  const session = store.getSession(req.params.id);
+  const { title, description, relevantFiles, acceptanceCriteria, repoDir } = req.body || {};
+
+  if (!title || !description) {
+    return res.status(400).json({ error: 'title and description are required' });
+  }
+
+  const claudeSessionId = (session && session.resumeSessionId) || req.params.id;
+  const workingDir = repoDir || (session && session.workingDir) || process.cwd();
+
+  try {
+    // Gather file snippets for relevant files (first 80 lines each, max 5 files)
+    const fileSnippets = [];
+    const filesToRead = (relevantFiles || []).slice(0, 5);
+    for (const relPath of filesToRead) {
+      try {
+        // Try both the path as-is and resolved against workingDir
+        let fullPath = path.resolve(workingDir, relPath);
+        if (!fs.existsSync(fullPath)) {
+          // Try without leading src/ or with different base
+          fullPath = relPath;
+        }
+        if (fs.existsSync(fullPath)) {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const lines = content.split('\n');
+          const snippet = lines.slice(0, 80).join('\n');
+          const truncated = lines.length > 80 ? `\n... (${lines.length - 80} more lines)` : '';
+          fileSnippets.push(`### ${relPath}\n\`\`\`\n${snippet}${truncated}\n\`\`\``);
+        }
+      } catch { /* skip unreadable files */ }
+    }
+
+    // Get project structure (top-level + src/ listing)
+    let projectStructure = '';
+    try {
+      const topLevel = fs.readdirSync(workingDir).filter(f => !f.startsWith('.')).slice(0, 30);
+      projectStructure = topLevel.join('\n');
+      const srcDir = path.join(workingDir, 'src');
+      if (fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory()) {
+        const srcFiles = fs.readdirSync(srcDir, { withFileTypes: true }).slice(0, 20);
+        projectStructure += '\n\nsrc/\n' + srcFiles.map(f => `  ${f.name}${f.isDirectory() ? '/' : ''}`).join('\n');
+      }
+    } catch { /* best effort */ }
+
+    // Read CLAUDE.md if it exists in the project
+    let claudeMd = '';
+    try {
+      const claudeMdPath = path.join(workingDir, 'CLAUDE.md');
+      if (fs.existsSync(claudeMdPath)) {
+        const content = fs.readFileSync(claudeMdPath, 'utf-8');
+        claudeMd = content.substring(0, 2000);
+      }
+    } catch { /* optional */ }
+
+    // Get recent git log for context on what's been changing
+    let recentCommits = '';
+    try {
+      recentCommits = await gitExec(['log', '--oneline', '-10'], workingDir);
+    } catch { /* not a git repo or no commits */ }
+
+    // Build the context package markdown
+    const pkg = [];
+    pkg.push(`# Task: ${title}`);
+    pkg.push('');
+    pkg.push('## What to Build');
+    pkg.push(description);
+    pkg.push('');
+
+    if (acceptanceCriteria && acceptanceCriteria.length > 0) {
+      pkg.push('## Acceptance Criteria');
+      for (const ac of acceptanceCriteria) {
+        pkg.push(`- [ ] ${ac}`);
+      }
+      pkg.push('');
+    }
+
+    if (relevantFiles && relevantFiles.length > 0) {
+      pkg.push('## Key Files');
+      for (const f of relevantFiles) {
+        pkg.push(`- \`${f}\``);
+      }
+      pkg.push('');
+    }
+
+    if (fileSnippets.length > 0) {
+      pkg.push('## File Context');
+      pkg.push(fileSnippets.join('\n\n'));
+      pkg.push('');
+    }
+
+    if (projectStructure) {
+      pkg.push('## Project Structure');
+      pkg.push('```');
+      pkg.push(projectStructure);
+      pkg.push('```');
+      pkg.push('');
+    }
+
+    if (claudeMd) {
+      pkg.push('## Project Instructions (CLAUDE.md)');
+      pkg.push(claudeMd);
+      pkg.push('');
+    }
+
+    if (recentCommits) {
+      pkg.push('## Recent Commits');
+      pkg.push('```');
+      pkg.push(recentCommits.trim());
+      pkg.push('```');
+      pkg.push('');
+    }
+
+    pkg.push('## Constraints');
+    pkg.push('- Do NOT modify files outside the scope listed above unless necessary');
+    pkg.push('- Keep changes modular -- this is a feature branch that will be merged');
+    pkg.push('- Run tests after changes if a test suite exists');
+    pkg.push('- Commit your work with descriptive messages');
+    pkg.push('');
+
+    const contextPackage = pkg.join('\n');
+
+    res.json({
+      contextPackage,
+      sessionId: req.params.id,
+      title,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate context package: ' + err.message });
+  }
+});
+
+/**
+ * POST /api/sessions/:id/spinoff-batch
+ * Create multiple worktree tasks from extracted tasks in one request.
+ * Each task gets a worktree, session, and optional context prompt injection.
+ * Body: { tasks: Array<{ title, description, relevantFiles, acceptanceCriteria, branch, tags, model }>, repoDir, workspaceId, startImmediately }
+ * Returns: { created: Array<{ task, session? }>, errors: Array<{ index, error }> }
+ */
+app.post('/api/sessions/:id/spinoff-batch', requireAuth, async (req, res) => {
+  const store = getStore();
+  const session = store.getSession(req.params.id);
+  const { tasks, repoDir, workspaceId, startImmediately } = req.body || {};
+
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return res.status(400).json({ error: 'tasks array is required' });
+  }
+  if (!workspaceId) {
+    return res.status(400).json({ error: 'workspaceId is required' });
+  }
+
+  const dir = repoDir || (session && session.workingDir) || process.cwd();
+  const created = [];
+  const errors = [];
+
+  // Process tasks sequentially to avoid git conflicts
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const branch = 'feat/' + (t.branch || '').replace(/^feat\//, '');
+    const safeTags = Array.isArray(t.tags) ? t.tags.filter(tg => typeof tg === 'string' && tg.length <= 30).slice(0, 10) : [];
+    const desc = `${t.title}\n\n${t.description || ''}${t.acceptanceCriteria && t.acceptanceCriteria.length > 0 ? '\n\nAcceptance Criteria:\n' + t.acceptanceCriteria.map(c => '- ' + c).join('\n') : ''}`;
+
+    if (startImmediately) {
+      // Create worktree + session immediately
+      try {
+        const root = await gitRepoRoot(dir);
+        if (!root) {
+          errors.push({ index: i, error: 'Not a git repository' });
+          continue;
+        }
+        const repoName = path.basename(root);
+        const worktreePath = path.join(path.dirname(root), `${repoName}-wt`, branch.replace(/\//g, '-'));
+
+        let branchExists = false;
+        try {
+          await gitExec(['rev-parse', '--verify', branch], root);
+          branchExists = true;
+        } catch {}
+
+        const args = ['worktree', 'add'];
+        if (!branchExists) args.push('-b', branch);
+        args.push(worktreePath);
+        if (branchExists) args.push(branch);
+        await gitExec(args, root);
+
+        // Run init hooks if configured
+        const initHooks = store.getWorktreeInitHooks();
+        if (initHooks) {
+          if (Array.isArray(initHooks.copy_files)) {
+            for (const relPath of initHooks.copy_files) {
+              try {
+                const src = path.join(root, relPath);
+                const dest = path.join(worktreePath, relPath);
+                const destDir = path.dirname(dest);
+                if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+                fs.copyFileSync(src, dest);
+              } catch { /* skip */ }
+            }
+          }
+          if (initHooks.init_script && typeof initHooks.init_script === 'string') {
+            try {
+              const { execSync } = require('child_process');
+              execSync(initHooks.init_script, { cwd: worktreePath, timeout: 30000, stdio: 'pipe' });
+            } catch { /* non-fatal */ }
+          }
+        }
+
+        // Create session
+        const sessionName = (t.branch || t.title).replace(/^feat\//, '') + ' (spinoff)';
+        const newSession = store.createSession(workspaceId, {
+          name: sessionName,
+          workingDir: worktreePath,
+          command: 'claude',
+          model: t.model || undefined,
+        });
+
+        // Create worktree task record
+        const task = store.createWorktreeTask({
+          workspaceId,
+          sessionId: newSession ? newSession.id : null,
+          branch,
+          worktreePath,
+          repoDir: root,
+          description: desc,
+          baseBranch: 'main',
+          model: t.model || null,
+          tags: safeTags,
+        });
+
+        broadcastSSE('worktreeTask:created', { task });
+        created.push({ task, session: newSession, index: i });
+      } catch (err) {
+        errors.push({ index: i, error: err.message });
+      }
+    } else {
+      // Backlog mode -- just create the task record
+      try {
+        const task = store.createWorktreeTask({
+          workspaceId,
+          sessionId: null,
+          branch,
+          worktreePath: null,
+          repoDir: dir,
+          description: desc,
+          baseBranch: 'main',
+          model: t.model || null,
+          tags: safeTags,
+        });
+        store.updateWorktreeTask(task.id, { status: 'backlog' });
+        broadcastSSE('worktreeTask:created', { task });
+        created.push({ task, index: i });
+      } catch (err) {
+        errors.push({ index: i, error: err.message });
+      }
+    }
+  }
+
+  res.json({ created, errors, total: tasks.length });
+});
+
+// ──────────────────────────────────────────────────────────
 //  SESSION REFOCUS (DISTILL + RESET/COMPACT)
 // ──────────────────────────────────────────────────────────
 

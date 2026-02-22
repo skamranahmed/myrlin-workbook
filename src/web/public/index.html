@@ -1204,6 +1204,46 @@
   </div>
 
   <!-- ═══════════════════════════════════════════ -->
+  <!-- TASK SPINOFF DIALOG                         -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="spinoff-overlay" hidden>
+    <div class="modal-panel" style="max-width: 680px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div>
+          <h3 id="spinoff-title">Spinoff Tasks</h3>
+          <div id="spinoff-subtitle" style="font-size: 11px; color: var(--overlay0); margin-top: 2px;"></div>
+        </div>
+        <button class="modal-close" id="spinoff-close">&times;</button>
+      </div>
+      <div class="modal-body" id="spinoff-body" style="padding: 16px; overflow-y: auto; flex: 1;">
+        <!-- Populated dynamically: extraction loading state, then task cards -->
+        <div id="spinoff-loading" style="text-align: center; padding: 32px 0;">
+          <div class="loading-dots" style="margin-bottom: 12px;">
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--lavender); animation: spinoff-dot 1.2s infinite; animation-delay: 0s;"></span>
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--lavender); animation: spinoff-dot 1.2s infinite; animation-delay: 0.2s;"></span>
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--lavender); animation: spinoff-dot 1.2s infinite; animation-delay: 0.4s;"></span>
+          </div>
+          <div style="color: var(--subtext0); font-size: 13px;">Analyzing session conversation...</div>
+          <div style="color: var(--overlay0); font-size: 11px; margin-top: 4px;">AI is extracting actionable tasks</div>
+        </div>
+        <div id="spinoff-tasks" hidden></div>
+        <div id="spinoff-error" hidden style="text-align: center; padding: 24px 0; color: var(--red);"></div>
+      </div>
+      <div class="modal-footer" id="spinoff-footer" hidden>
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1;">
+          <label class="form-checkbox" style="margin: 0; font-size: 12px;">
+            <input type="checkbox" id="spinoff-start-now" checked />
+            Start immediately
+          </label>
+          <span id="spinoff-selected-count" style="font-size: 11px; color: var(--overlay0);"></span>
+        </div>
+        <button class="btn btn-ghost" id="spinoff-cancel">Cancel</button>
+        <button class="btn btn-primary" id="spinoff-create">Create Selected Tasks</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
   <!-- DIFF VIEWER                                 -->
   <!-- ═══════════════════════════════════════════ -->
   <div class="modal-overlay" id="diff-viewer-overlay" hidden>

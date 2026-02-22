@@ -385,6 +385,21 @@ class CWMApp {
       prDraft: document.getElementById('pr-draft'),
       prGenerateDesc: document.getElementById('pr-generate-desc'),
 
+      // Spinoff dialog
+      spinoffOverlay: document.getElementById('spinoff-overlay'),
+      spinoffClose: document.getElementById('spinoff-close'),
+      spinoffCancel: document.getElementById('spinoff-cancel'),
+      spinoffCreate: document.getElementById('spinoff-create'),
+      spinoffTitle: document.getElementById('spinoff-title'),
+      spinoffSubtitle: document.getElementById('spinoff-subtitle'),
+      spinoffBody: document.getElementById('spinoff-body'),
+      spinoffLoading: document.getElementById('spinoff-loading'),
+      spinoffTasks: document.getElementById('spinoff-tasks'),
+      spinoffError: document.getElementById('spinoff-error'),
+      spinoffFooter: document.getElementById('spinoff-footer'),
+      spinoffStartNow: document.getElementById('spinoff-start-now'),
+      spinoffSelectedCount: document.getElementById('spinoff-selected-count'),
+
       // Costs
       costsPanel: document.getElementById('costs-panel'),
       costsBody: document.getElementById('costs-body'),
@@ -866,6 +881,22 @@ class CWMApp {
     }
     if (this.els.prGenerateDesc) {
       this.els.prGenerateDesc.addEventListener('click', () => this.generatePRDescription());
+    }
+
+    // Spinoff dialog bindings
+    if (this.els.spinoffClose) {
+      this.els.spinoffClose.addEventListener('click', () => this.closeSpinoffDialog());
+    }
+    if (this.els.spinoffCancel) {
+      this.els.spinoffCancel.addEventListener('click', () => this.closeSpinoffDialog());
+    }
+    if (this.els.spinoffCreate) {
+      this.els.spinoffCreate.addEventListener('click', () => this.submitSpinoffTasks());
+    }
+    if (this.els.spinoffOverlay) {
+      this.els.spinoffOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.spinoffOverlay) this.closeSpinoffDialog();
+      });
     }
 
     // Update button
@@ -2615,6 +2646,12 @@ class CWMApp {
           this.showToast('Session ID copied', 'success');
         }},
       ],
+    });
+
+    // Spinoff Tasks — AI-extract tasks from conversation and create worktree branches
+    items.push({
+      label: 'Spinoff Tasks', icon: '&#10547;',
+      action: () => this.openSpinoffDialog(sessionId),
     });
 
     // Advanced submenu — templates, context, refocus, worktrees
@@ -4995,6 +5032,258 @@ class CWMApp {
       return data.pr;
     } catch {
       return null;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  //  TASK SPINOFF DIALOG
+  // ──────────────────────────────────────────────────────────
+
+  /**
+   * Open the spinoff dialog for a session. Calls the backend to
+   * AI-extract tasks from the session conversation, then renders
+   * editable task cards for review before batch creation.
+   * @param {string} sessionId - The session to extract tasks from
+   */
+  async openSpinoffDialog(sessionId) {
+    this._spinoffSessionId = sessionId;
+    this._spinoffTasks = [];
+
+    // Get session info for display
+    const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+    const sessionName = session ? session.name : sessionId;
+
+    // Show dialog in loading state
+    this.els.spinoffOverlay.hidden = false;
+    this.els.spinoffTitle.textContent = 'Spinoff Tasks';
+    this.els.spinoffSubtitle.textContent = `Analyzing: ${sessionName}`;
+    this.els.spinoffLoading.hidden = false;
+    this.els.spinoffTasks.hidden = true;
+    this.els.spinoffError.hidden = true;
+    this.els.spinoffFooter.hidden = true;
+
+    try {
+      const data = await this.api('POST', `/api/sessions/${sessionId}/extract-tasks`);
+
+      if (!data.tasks || data.tasks.length === 0) {
+        this.els.spinoffLoading.hidden = true;
+        this.els.spinoffError.hidden = false;
+        this.els.spinoffError.innerHTML = `
+          <div style="font-size: 14px; margin-bottom: 6px;">No actionable tasks found</div>
+          <div style="font-size: 12px; color: var(--overlay0);">The AI could not identify independent tasks from this session's conversation.</div>
+        `;
+        return;
+      }
+
+      this._spinoffTasks = data.tasks.map((t, i) => ({ ...t, selected: true, index: i }));
+      this._spinoffFilesTouched = data.filesTouched || [];
+      this.els.spinoffLoading.hidden = true;
+      this._renderSpinoffTasks();
+      this.els.spinoffTasks.hidden = false;
+      this.els.spinoffFooter.hidden = false;
+      this._updateSpinoffSelectedCount();
+    } catch (err) {
+      this.els.spinoffLoading.hidden = true;
+      this.els.spinoffError.hidden = false;
+      this.els.spinoffError.innerHTML = `
+        <div style="font-size: 14px; margin-bottom: 6px;">Task extraction failed</div>
+        <div style="font-size: 12px; color: var(--overlay0);">${this.escapeHtml(err.message || 'Unknown error')}</div>
+      `;
+    }
+  }
+
+  /** Close the spinoff dialog and clean up state */
+  closeSpinoffDialog() {
+    this.els.spinoffOverlay.hidden = true;
+    this._spinoffSessionId = null;
+    this._spinoffTasks = [];
+    this._spinoffFilesTouched = [];
+  }
+
+  /** Render the extracted task cards in the spinoff dialog */
+  _renderSpinoffTasks() {
+    const container = this.els.spinoffTasks;
+    const tasks = this._spinoffTasks;
+
+    // Select all row
+    const allSelected = tasks.every(t => t.selected);
+    let html = `
+      <div class="spinoff-select-all">
+        <input type="checkbox" id="spinoff-select-all-cb" ${allSelected ? 'checked' : ''} />
+        <label for="spinoff-select-all-cb">Select all (${tasks.length} tasks)</label>
+      </div>
+    `;
+
+    for (let i = 0; i < tasks.length; i++) {
+      const t = tasks[i];
+      const selectedClass = t.selected ? '' : ' spinoff-deselected';
+
+      // File badges (max 5)
+      const fileBadges = (t.relevantFiles || []).slice(0, 5).map(f => {
+        const shortName = f.split('/').pop();
+        return `<span class="spinoff-task-file" title="${this.escapeHtml(f)}">${this.escapeHtml(shortName)}</span>`;
+      }).join('');
+
+      // Acceptance criteria list
+      const criteriaHtml = (t.acceptanceCriteria || []).map(c =>
+        `<li>${this.escapeHtml(c)}</li>`
+      ).join('');
+
+      html += `
+        <div class="spinoff-task-card${selectedClass}" data-spinoff-index="${i}">
+          <div class="spinoff-task-card-header">
+            <input type="checkbox" class="spinoff-task-cb" data-index="${i}" ${t.selected ? 'checked' : ''} />
+            <div class="spinoff-task-title">
+              <input type="text" class="spinoff-task-title-input" data-index="${i}" value="${this.escapeHtml(t.title)}" />
+            </div>
+            <span class="spinoff-task-branch">feat/${this.escapeHtml(t.branch)}</span>
+          </div>
+          <div class="spinoff-task-desc">
+            <textarea class="spinoff-task-desc-input" data-index="${i}" rows="2">${this.escapeHtml(t.description)}</textarea>
+          </div>
+          ${fileBadges ? `<div class="spinoff-task-files">${fileBadges}</div>` : ''}
+          ${criteriaHtml ? `<ul class="spinoff-task-criteria">${criteriaHtml}</ul>` : ''}
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
+
+    // Wire up event listeners
+    const selectAllCb = container.querySelector('#spinoff-select-all-cb');
+    if (selectAllCb) {
+      selectAllCb.addEventListener('change', (e) => {
+        this._spinoffTasks.forEach(t => t.selected = e.target.checked);
+        this._renderSpinoffTasks();
+        this._updateSpinoffSelectedCount();
+      });
+    }
+
+    container.querySelectorAll('.spinoff-task-cb').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        if (this._spinoffTasks[idx]) {
+          this._spinoffTasks[idx].selected = e.target.checked;
+          const card = e.target.closest('.spinoff-task-card');
+          if (card) card.classList.toggle('spinoff-deselected', !e.target.checked);
+          this._updateSpinoffSelectedCount();
+        }
+      });
+    });
+
+    // Sync edits back to task data
+    container.querySelectorAll('.spinoff-task-title-input').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        if (this._spinoffTasks[idx]) this._spinoffTasks[idx].title = e.target.value;
+      });
+    });
+
+    container.querySelectorAll('.spinoff-task-desc-input').forEach(textarea => {
+      textarea.addEventListener('input', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        if (this._spinoffTasks[idx]) this._spinoffTasks[idx].description = e.target.value;
+      });
+    });
+  }
+
+  /** Update the selected count display in the footer */
+  _updateSpinoffSelectedCount() {
+    const selected = (this._spinoffTasks || []).filter(t => t.selected).length;
+    const total = (this._spinoffTasks || []).length;
+    this.els.spinoffSelectedCount.textContent = `${selected} of ${total} selected`;
+    this.els.spinoffCreate.disabled = selected === 0;
+  }
+
+  /**
+   * Submit the selected spinoff tasks for batch creation.
+   * Creates worktree tasks via the spinoff-batch endpoint.
+   */
+  async submitSpinoffTasks() {
+    const selected = (this._spinoffTasks || []).filter(t => t.selected);
+    if (selected.length === 0) {
+      this.showToast('No tasks selected', 'warning');
+      return;
+    }
+
+    const sessionId = this._spinoffSessionId;
+    const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+    const repoDir = session ? session.workingDir : '';
+    const workspaceId = (session && session.workspaceId) || (this.state.activeWorkspace && this.state.activeWorkspace.id);
+
+    if (!workspaceId) {
+      this.showToast('No workspace available to create tasks in', 'error');
+      return;
+    }
+
+    const startImmediately = this.els.spinoffStartNow.checked;
+
+    // Enforce concurrent limit if starting immediately
+    if (startImmediately) {
+      const maxConcurrent = this.state.settings.maxConcurrentTasks || 4;
+      const runningCount = (this._worktreeTaskCache || []).filter(t =>
+        t.status === 'running' || t.status === 'active'
+      ).length;
+      if (runningCount + selected.length > maxConcurrent) {
+        this.showToast(`Would exceed concurrent task limit (${maxConcurrent}). Reduce selection or add to backlog.`, 'warning');
+        return;
+      }
+    }
+
+    this.els.spinoffCreate.disabled = true;
+    this.els.spinoffCreate.textContent = 'Creating...';
+
+    try {
+      const data = await this.api('POST', `/api/sessions/${sessionId}/spinoff-batch`, {
+        tasks: selected.map(t => ({
+          title: t.title,
+          description: t.description,
+          relevantFiles: t.relevantFiles,
+          acceptanceCriteria: t.acceptanceCriteria,
+          branch: t.branch,
+          tags: ['spinoff'],
+        })),
+        repoDir,
+        workspaceId,
+        startImmediately,
+      });
+
+      this.closeSpinoffDialog();
+
+      const createdCount = data.created ? data.created.length : 0;
+      const errorCount = data.errors ? data.errors.length : 0;
+
+      if (createdCount > 0) {
+        this.showToast(`${createdCount} task${createdCount > 1 ? 's' : ''} created${errorCount > 0 ? ` (${errorCount} failed)` : ''}`, 'success');
+
+        // If tasks were started immediately, open them in terminal panes
+        if (startImmediately && data.created) {
+          for (const item of data.created) {
+            if (item.session) {
+              const emptySlot = this.terminalPanes.findIndex(p => p === null);
+              if (emptySlot !== -1) {
+                this.openTerminalInPane(emptySlot, item.session.id, item.task.branch || item.session.name, {
+                  cwd: item.task.worktreePath,
+                });
+              }
+            }
+          }
+          this.setViewMode('terminal');
+        } else {
+          // Switch to tasks view to see the backlog
+          this.setViewMode('tasks');
+        }
+
+        await this.loadSessions();
+        this.renderTasksView();
+      } else if (errorCount > 0) {
+        this.showToast(`Failed to create tasks: ${data.errors[0].error}`, 'error');
+      }
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create spinoff tasks', 'error');
+    } finally {
+      this.els.spinoffCreate.disabled = false;
+      this.els.spinoffCreate.textContent = 'Create Selected Tasks';
     }
   }
 
