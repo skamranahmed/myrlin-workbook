@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-02-23
+
+### Added
+
+- **6-pane terminal grid** -- Expanded from 4 to 6 terminal panes with smart CSS grid layouts. Pane count auto-adapts: 1x1, 2x1, 2+1span, 2x2, 3+2span, 3x2. New `MAX_PANES` constant replaces all hardcoded loop bounds. Slot colors extended with red and pink for panes 5-6.
+- **Launch New Session button** -- Sidebar button opens a frecency-ranked project launcher modal. Shows Pinned/Recent/All sections, fuzzy search across project names and paths, pin persistence via localStorage, CLAUDE.md badges, session name input, and model selector. Creates sessions directly and opens them in a terminal pane.
+- **Voice/mic input** -- Web Speech API integration for Chrome/Edge. Mic button on each terminal pane header starts speech recognition, shows live interim transcript overlay, and sends final transcript to the terminal WebSocket. Pulses red while listening. Respects `prefers-reduced-motion`. Gracefully hidden on unsupported browsers.
+- **Conflict detection** -- JSONL-based global conflict detection across all active sessions. Backend scans the last 50KB of each session's JSONL for `Write` and `Edit` tool_use blocks, identifies overlapping file modifications across sessions. Amber pill badges on terminal pane headers show conflict count. Toast notifications for new conflicts (deduplicated). Context menu "Conflicts (N)" item shows file details. 30-second backend cache, 60-second frontend polling.
+
+### Fixed
+
+- **Tab pane layout bleeding** -- Switching to a new empty tab group no longer shows the previous group's multi-pane grid layout. Added `updateTerminalGridLayout()` call after cache restore/fresh-connect to always reset grid for the new group's pane count.
+
 ## [0.7.0] - 2026-02-23
 
 ### Added

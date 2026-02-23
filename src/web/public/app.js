@@ -10818,6 +10818,11 @@ class CWMApp {
       }
     }
 
+    // Always reset grid layout for the new group's pane count.
+    // Without this, switching to an empty tab group keeps the
+    // previous group's data-panes attribute and pane visibility.
+    this.updateTerminalGridLayout();
+
     this.renderTerminalGroupTabs();
 
     // Clear notification dot on the now-active tab AFTER render, since
