@@ -438,6 +438,19 @@ class PtySessionManager {
       }
     }
 
+    // spawnSession returns null on failure (e.g. posix_spawnp) without throwing.
+    // Guard here so null doesn't propagate to session.clients.add() below.
+    if (!session) {
+      const reason = 'PTY spawn failed: process could not be started';
+      try {
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'error', message: reason }));
+        }
+      } catch (_) {}
+      try { ws.close(1011, reason.substring(0, 123)); } catch (_) {}
+      return;
+    }
+
     // Add client to the session's client set
     session.clients.add(ws);
 
