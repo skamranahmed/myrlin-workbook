@@ -90,6 +90,9 @@ window.addEventListener('error', function _cwmFallbackHandler(e) {
 });
 
 class CWMApp {
+  /** Maximum number of terminal pane slots in the grid */
+  static MAX_PANES = 6;
+
   constructor() {
     // ─── State ─────────────────────────────────────────────────
     this.state = {
@@ -133,14 +136,18 @@ class CWMApp {
     try { this._groupCollapseState = JSON.parse(localStorage.getItem('cwm_groupCollapseState') || '{}'); } catch (_) { this._groupCollapseState = {}; }
 
     // ─── Terminal panes ──────────────────────────────────────────
-    this.terminalPanes = [null, null, null, null];
+    this.terminalPanes = new Array(CWMApp.MAX_PANES).fill(null);
     this._activeTerminalSlot = null;
     // Cache of TerminalPane instances per group to avoid reconnection on tab switch.
-    // Key: groupId, Value: { panes: [TerminalPane|null x4], domFragments: [DocumentFragment|null x4] }
+    // Key: groupId, Value: { panes: [TerminalPane|null x MAX_PANES], domFragments: [DocumentFragment|null x MAX_PANES] }
     this._groupPaneCache = {};
-    this.PANE_SLOT_COLORS = ['mauve', 'blue', 'green', 'peach'];
+    this.PANE_SLOT_COLORS = ['mauve', 'blue', 'green', 'peach', 'red', 'pink'];
     this._gridColSizes = [1, 1];  // fr ratios for column widths
     this._gridRowSizes = [1, 1];  // fr ratios for row heights
+    // Voice recognition instances per slot (for mic-to-terminal input)
+    this._voiceRecognitions = {};
+    // Feature detection: check if Web Speech API (SpeechRecognition) is available
+    this._speechRecognitionAvailable = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
     // ─── Quick Switcher state ──────────────────────────────────
     this.qsHighlightIndex = -1;
@@ -152,6 +159,9 @@ class CWMApp {
     // ─── Conflict Detection state ────────────────────────────
     this._conflictCheckInterval = null;
     this._lastConflictKeys = new Set();  // Dedup: tracks conflicts already toasted
+    this._jsonlConflicts = [];           // Global JSONL-based conflicts from GET /api/conflicts
+    this._lastJsonlConflictKeys = new Set(); // Dedup for JSONL conflict toasts
+    this._paneConflictMap = new Map();   // sessionId -> [{ file, sessions }] for per-pane badges
 
     // ─── SSE ───────────────────────────────────────────────────
     this.eventSource = null;
@@ -400,6 +410,18 @@ class CWMApp {
       spinoffStartNow: document.getElementById('spinoff-start-now'),
       spinoffSelectedCount: document.getElementById('spinoff-selected-count'),
 
+      // Launcher
+      launcherOverlay: document.getElementById('launcher-overlay'),
+      launcherClose: document.getElementById('launcher-close'),
+      launcherSearch: document.getElementById('launcher-search'),
+      launcherList: document.getElementById('launcher-list'),
+      launcherForm: document.getElementById('launcher-form'),
+      launcherFormSelected: document.getElementById('launcher-form-selected'),
+      launcherSessionName: document.getElementById('launcher-session-name'),
+      launcherModel: document.getElementById('launcher-model'),
+      launcherSubmit: document.getElementById('launcher-submit'),
+      sidebarLaunchBtn: document.getElementById('sidebar-launch-btn'),
+
       // Costs
       costsPanel: document.getElementById('costs-panel'),
       costsBody: document.getElementById('costs-body'),
@@ -554,6 +576,25 @@ class CWMApp {
     const findConvoBtn = document.getElementById('find-conversation-btn');
     if (findConvoBtn) {
       findConvoBtn.addEventListener('click', () => this.openFindConversation());
+    }
+
+    // Launcher button and overlay
+    if (this.els.sidebarLaunchBtn) {
+      this.els.sidebarLaunchBtn.addEventListener('click', () => this.openLauncher());
+    }
+    if (this.els.launcherClose) {
+      this.els.launcherClose.addEventListener('click', () => this.closeLauncher());
+    }
+    if (this.els.launcherOverlay) {
+      this.els.launcherOverlay.addEventListener('click', (e) => {
+        if (e.target === this.els.launcherOverlay) this.closeLauncher();
+      });
+    }
+    if (this.els.launcherSearch) {
+      this.els.launcherSearch.addEventListener('input', () => this.filterLauncherProjects());
+    }
+    if (this.els.launcherSubmit) {
+      this.els.launcherSubmit.addEventListener('click', () => this.launchSelectedProject());
     }
 
     // Toggle hidden sessions
@@ -985,7 +1026,7 @@ class CWMApp {
     document.addEventListener('terminal-activity', (e) => {
       const { sessionId, activity } = e.detail;
       // Find which slot has this session
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
           this.updatePaneActivity(i, activity);
           break;
@@ -998,7 +1039,7 @@ class CWMApp {
     // an amber "Needs input" badge on the terminal pane header.
     document.addEventListener('terminal-needs-input', (e) => {
       const { sessionId, needsInput } = e.detail;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
           const paneEl = document.getElementById(`terminal-pane-${i}`);
           if (paneEl) {
@@ -3442,8 +3483,8 @@ class CWMApp {
       {
         id: 'terminal-panes',
         name: 'Terminal Panes',
-        description: 'Up to 4 split terminal panes with drag-and-drop layout',
-        detail: 'The Terminal view supports up to 4 panes. Drag sessions from the sidebar into panes. Panes show real-time activity indicators. Double-click a pane header to maximize.',
+        description: 'Up to 6 split terminal panes with drag-and-drop layout',
+        detail: 'The Terminal view supports up to 6 panes. Drag sessions from the sidebar into panes. Panes show real-time activity indicators. Double-click a pane header to maximize.',
         category: 'feature',
         tags: ['terminal', 'pane', 'split', 'layout', 'drag', 'drop', 'resize', 'maximize', 'grid'],
         icon: '&#9641;',
@@ -8353,6 +8394,16 @@ class CWMApp {
           closeBtn.addEventListener('click', () => this.closeTerminalPane(slotIdx));
         }
 
+        // Mic (voice input) button - only show if SpeechRecognition API is available
+        const micBtn = pane.querySelector('.terminal-pane-mic');
+        if (micBtn && this._speechRecognitionAvailable) {
+          micBtn.hidden = false;
+          micBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleVoiceInput(slotIdx);
+          });
+        }
+
         // Upload image button
         const uploadBtn = pane.querySelector('.terminal-pane-upload');
         if (uploadBtn) {
@@ -8456,7 +8507,7 @@ class CWMApp {
       if (emptySlot !== -1) {
         slotIdx = emptySlot;
       } else {
-        // All 4 slots full - replace the target slot
+        // All slots full - replace the target slot
         this.terminalPanes[slotIdx].dispose();
         this.terminalPanes[slotIdx] = null;
       }
@@ -8477,6 +8528,9 @@ class CWMApp {
     if (closeBtn) closeBtn.hidden = false;
     const uploadBtn2 = paneEl.querySelector('.terminal-pane-upload');
     if (uploadBtn2) uploadBtn2.hidden = false;
+    // Show mic button if SpeechRecognition is supported
+    const micBtn2 = paneEl.querySelector('.terminal-pane-mic');
+    if (micBtn2 && this._speechRecognitionAvailable) micBtn2.hidden = false;
 
     // Create and mount TerminalPane
     const tp = new TerminalPane(containerId, sessionId, sessionName, spawnOpts);
@@ -8671,6 +8725,13 @@ class CWMApp {
     if (closeBtn) closeBtn.hidden = true;
     const uploadBtn3 = paneEl.querySelector('.terminal-pane-upload');
     if (uploadBtn3) uploadBtn3.hidden = true;
+    // Stop any active voice recognition and hide mic button on pane close
+    this._stopVoiceRecognition(slotIdx);
+    const micBtn3 = paneEl.querySelector('.terminal-pane-mic');
+    if (micBtn3) { micBtn3.hidden = true; micBtn3.classList.remove('mic-active'); }
+    // Remove any interim transcript overlay
+    const interimOverlay = paneEl.querySelector('.voice-interim-overlay');
+    if (interimOverlay) interimOverlay.remove();
     const activityEl = document.getElementById(`term-activity-${slotIdx}`);
     if (activityEl) activityEl.innerHTML = '';
     const container = document.getElementById(`term-container-${slotIdx}`);
@@ -8703,6 +8764,137 @@ class CWMApp {
   }
 
   /**
+   * Toggle voice input (speech-to-text) for a terminal pane.
+   * Uses the Web Speech API (SpeechRecognition) to capture a single utterance,
+   * transcribe it, and send it to the terminal's WebSocket as input.
+   * @param {number} slotIdx - The terminal pane slot index
+   */
+  toggleVoiceInput(slotIdx) {
+    // If already recording for this slot, stop and return
+    if (this._voiceRecognitions[slotIdx]) {
+      this._stopVoiceRecognition(slotIdx);
+      return;
+    }
+
+    const tp = this.terminalPanes[slotIdx];
+    if (!tp) {
+      this.showToast('No active terminal in this pane', 'warning');
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      this.showToast('Speech recognition not supported in this browser', 'warning');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;   // Single utterance mode
+    recognition.interimResults = true; // Show partial results while speaking
+    recognition.lang = 'en-US';
+
+    const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+    const micBtn = paneEl ? paneEl.querySelector('.terminal-pane-mic') : null;
+
+    // Create interim overlay element for showing live transcription
+    let interimOverlay = null;
+    if (paneEl) {
+      interimOverlay = document.createElement('div');
+      interimOverlay.className = 'voice-interim-overlay';
+      interimOverlay.textContent = 'Listening...';
+      paneEl.appendChild(interimOverlay);
+    }
+
+    // Handle speech recognition results (both interim and final)
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // Update the interim overlay with partial results
+      if (interimOverlay) {
+        interimOverlay.textContent = interimTranscript || finalTranscript || 'Listening...';
+      }
+
+      // Send final transcript to terminal via WebSocket
+      if (finalTranscript && finalTranscript.trim()) {
+        const currentTp = this.terminalPanes[slotIdx];
+        if (currentTp && currentTp.ws && currentTp.ws.readyState === WebSocket.OPEN) {
+          currentTp.ws.send(JSON.stringify({ type: 'input', data: finalTranscript.trim() + '\n' }));
+          this.showToast('Voice input sent', 'success');
+        } else {
+          this.showToast('Terminal not connected - voice input discarded', 'warning');
+        }
+      }
+    };
+
+    // Handle recognition start - visual feedback
+    recognition.onstart = () => {
+      if (micBtn) micBtn.classList.add('mic-active');
+      this.showToast('Listening...', 'info');
+    };
+
+    // Handle recognition end - clean up visual state
+    recognition.onend = () => {
+      if (micBtn) micBtn.classList.remove('mic-active');
+      // Remove interim overlay
+      if (interimOverlay && interimOverlay.parentNode) {
+        interimOverlay.remove();
+      }
+      // Clean up the stored reference
+      delete this._voiceRecognitions[slotIdx];
+    };
+
+    // Handle recognition errors
+    recognition.onerror = (event) => {
+      const errorMessages = {
+        'no-speech': 'No speech detected - try again',
+        'audio-capture': 'Microphone not available',
+        'not-allowed': 'Microphone access denied - check browser permissions',
+        'network': 'Network error during speech recognition',
+        'aborted': 'Speech recognition was aborted',
+      };
+      const msg = errorMessages[event.error] || `Speech recognition error: ${event.error}`;
+      this.showToast(msg, 'error');
+      if (micBtn) micBtn.classList.remove('mic-active');
+      // Remove interim overlay on error
+      if (interimOverlay && interimOverlay.parentNode) {
+        interimOverlay.remove();
+      }
+      delete this._voiceRecognitions[slotIdx];
+    };
+
+    // Store the recognition instance and start listening
+    this._voiceRecognitions[slotIdx] = recognition;
+    recognition.start();
+  }
+
+  /**
+   * Stop an active voice recognition session for a given terminal pane slot.
+   * Safe to call even if no recognition is active for the slot.
+   * @param {number} slotIdx - The terminal pane slot index
+   */
+  _stopVoiceRecognition(slotIdx) {
+    const recognition = this._voiceRecognitions[slotIdx];
+    if (recognition) {
+      try {
+        recognition.abort();
+      } catch (_) {
+        // Ignore errors from already-stopped recognition
+      }
+      delete this._voiceRecognitions[slotIdx];
+    }
+  }
+
+  /**
    * Swap two terminal panes in the grid.
    * Swaps the xterm DOM nodes and the terminalPanes array entries.
    * If one slot is empty, it becomes a move instead of a swap.
@@ -8724,6 +8916,7 @@ class CWMApp {
       const titleEl = paneEl ? paneEl.querySelector('.terminal-pane-title') : null;
       const closeBtn = paneEl ? paneEl.querySelector('.terminal-pane-close') : null;
       const uploadBtnEl = paneEl ? paneEl.querySelector('.terminal-pane-upload') : null;
+      const micBtnEl = paneEl ? paneEl.querySelector('.terminal-pane-mic') : null;
       if (!paneEl) return;
 
       if (tp) {
@@ -8733,6 +8926,7 @@ class CWMApp {
         if (titleEl) titleEl.textContent = tp.sessionName || tp.sessionId;
         if (closeBtn) closeBtn.hidden = false;
         if (uploadBtnEl) uploadBtnEl.hidden = false;
+        if (micBtnEl && this._speechRecognitionAvailable) micBtnEl.hidden = false;
         // Move the xterm element into the new container
         if (container && tp.term) {
           container.innerHTML = '';
@@ -8748,6 +8942,7 @@ class CWMApp {
         if (titleEl) titleEl.textContent = 'Drop a session here';
         if (closeBtn) closeBtn.hidden = true;
         if (uploadBtnEl) uploadBtnEl.hidden = true;
+        if (micBtnEl) { micBtnEl.hidden = true; micBtnEl.classList.remove('mic-active'); }
         if (container) container.innerHTML = '';
       }
     });
@@ -8782,7 +8977,7 @@ class CWMApp {
     grid.setAttribute('data-panes', visibleCount.toString());
 
     let emptyShown = false;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       const paneEl = document.getElementById(`term-pane-${i}`);
       if (!paneEl) continue;
 
@@ -8800,21 +8995,39 @@ class CWMApp {
       }
     }
 
-    // For 3-pane layout: make the last visible pane span both columns
-    // so it fills the entire bottom row instead of leaving an empty quadrant.
+    // Smart spanning: for layouts that don't fill a perfect grid,
+    // make the last visible pane span remaining columns.
     // Reset any previous span for all panes first.
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       const paneEl = document.getElementById(`term-pane-${i}`);
       if (paneEl) paneEl.style.gridColumn = '';
     }
     if (filledCount === 3) {
-      // Find the last filled pane slot and make it span 2 columns
-      for (let i = 3; i >= 0; i--) {
+      // 2-col grid, 3 panes: last pane spans 2 columns (fills bottom row)
+      for (let i = CWMApp.MAX_PANES - 1; i >= 0; i--) {
         if (this.terminalPanes[i]) {
           const paneEl = document.getElementById(`term-pane-${i}`);
           if (paneEl) paneEl.style.gridColumn = 'span 2';
           break;
         }
+      }
+    } else if (filledCount === 5) {
+      // 3-col grid, 5 panes: last pane on bottom row spans remaining space
+      // Find the last filled pane and make it span to fill the row
+      let bottomRowPanes = 0;
+      let lastFilledIdx = -1;
+      let count = 0;
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+        if (this.terminalPanes[i]) {
+          count++;
+          if (count > 3) bottomRowPanes++;
+          lastFilledIdx = i;
+        }
+      }
+      // If bottom row has only 2 panes in a 3-col grid, span the last one
+      if (bottomRowPanes === 2 && lastFilledIdx >= 0) {
+        const paneEl = document.getElementById(`term-pane-${lastFilledIdx}`);
+        if (paneEl) paneEl.style.gridColumn = 'span 2';
       }
     }
 
@@ -9194,14 +9407,20 @@ class CWMApp {
     } else if (filledCount === 2) {
       grid.style.gridTemplateColumns = `${this._gridColSizes[0]}fr ${this._gridColSizes[1]}fr`;
       grid.style.gridTemplateRows = '1fr';
-    } else {
+    } else if (filledCount <= 4) {
+      // 3-4 panes: 2-column grid
       grid.style.gridTemplateColumns = `${this._gridColSizes[0]}fr ${this._gridColSizes[1]}fr`;
+      grid.style.gridTemplateRows = `${this._gridRowSizes[0]}fr ${this._gridRowSizes[1]}fr`;
+    } else {
+      // 5-6 panes: 3-column grid (use equal columns, resize handles not applicable for 3-col)
+      grid.style.gridTemplateColumns = '1fr 1fr 1fr';
       grid.style.gridTemplateRows = `${this._gridRowSizes[0]}fr ${this._gridRowSizes[1]}fr`;
     }
 
     // Position and show/hide resize handles
+    // Column resize only works for 2-col layouts (2-4 panes); 5-6 panes use equal 3-col grid
     if (this._colResizeHandle) {
-      const showCol = filledCount >= 2;
+      const showCol = filledCount >= 2 && filledCount <= 4;
       this._colResizeHandle.hidden = !showCol;
       if (showCol) {
         const totalFr = this._gridColSizes[0] + this._gridColSizes[1];
@@ -9505,7 +9724,7 @@ class CWMApp {
         let activeSlot = this._activeTerminalSlot;
         // Find mobile-active pane if activeSlot not set
         if (activeSlot === null || activeSlot === undefined) {
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < CWMApp.MAX_PANES; i++) {
             const el = document.getElementById(`term-pane-${i}`);
             if (el && el.classList.contains('mobile-active')) { activeSlot = i; break; }
           }
@@ -9570,7 +9789,7 @@ class CWMApp {
 
   switchTerminalTab(slotIdx) {
     // Hide all panes, show the selected one
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       const el = document.getElementById(`term-pane-${i}`);
       if (!el) continue;
       el.classList.remove('mobile-active');
@@ -10493,8 +10712,8 @@ class CWMApp {
     // so we can reattach instantly when switching back.
     const prevGroupId = this._activeGroupId;
     if (prevGroupId) {
-      const cached = { panes: [null, null, null, null], domFragments: [null, null, null, null] };
-      for (let i = 0; i < 4; i++) {
+      const cached = { panes: new Array(CWMApp.MAX_PANES).fill(null), domFragments: new Array(CWMApp.MAX_PANES).fill(null) };
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (this.terminalPanes[i]) {
           cached.panes[i] = this.terminalPanes[i];
           // Detach xterm DOM into a fragment (preserves WebSocket + state)
@@ -10527,7 +10746,7 @@ class CWMApp {
     const cached = this._groupPaneCache[groupId];
     if (cached) {
       // Reattach cached panes instantly (no reconnection needed)
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (cached.panes[i]) {
           this.terminalPanes[i] = cached.panes[i];
           const paneEl = document.getElementById(`term-pane-${i}`);
@@ -10557,7 +10776,7 @@ class CWMApp {
       // same-size restores produce blank canvases without an explicit refresh.
       this.updateTerminalGridLayout();
       requestAnimationFrame(() => {
-        for (let j = 0; j < 4; j++) {
+        for (let j = 0; j < CWMApp.MAX_PANES; j++) {
           const tp = this.terminalPanes[j];
           if (tp && tp.term) {
             tp.term.refresh(0, tp.term.rows - 1);
@@ -10593,7 +10812,7 @@ class CWMApp {
     if (!group) return;
 
     group.panes = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       if (this.terminalPanes[i]) {
         group.panes.push({
           slot: i,
@@ -10608,7 +10827,7 @@ class CWMApp {
   /**
    * Open all sessions from a workspace/focus in a new tab group.
    * Creates a new tab group named after the workspace, switches to terminal view,
-   * and opens as many sessions as possible (up to 4 terminal panes).
+   * and opens as many sessions as possible (up to MAX_PANES terminal panes).
    * @param {string} workspaceId - The workspace to open
    */
   openWorkspaceInTabGroup(workspaceId) {
@@ -10633,15 +10852,15 @@ class CWMApp {
     this.setViewMode('terminal');
 
     // Clear current panes first (they belong to the new group now)
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       if (this.terminalPanes[i]) {
         this.terminalPanes[i].dispose();
         this.terminalPanes[i] = null;
       }
     }
 
-    // Open up to 4 sessions in panes
-    const maxPanes = Math.min(wsSessions.length, 4);
+    // Open up to MAX_PANES sessions in panes
+    const maxPanes = Math.min(wsSessions.length, CWMApp.MAX_PANES);
     for (let i = 0; i < maxPanes; i++) {
       const session = wsSessions[i];
       const spawnOpts = {};
@@ -10655,7 +10874,7 @@ class CWMApp {
     this.saveTerminalLayout();
     this.updateTerminalGridLayout();
 
-    const extra = wsSessions.length > 4 ? ` (${wsSessions.length - 4} more sessions available)` : '';
+    const extra = wsSessions.length > CWMApp.MAX_PANES ? ` (${wsSessions.length - CWMApp.MAX_PANES} more sessions available)` : '';
     this.showToast(`Opened ${maxPanes} sessions from "${ws.name}"${extra}`, 'success');
   }
 
@@ -10864,7 +11083,7 @@ class CWMApp {
   _disposeGroupCache(groupId) {
     const cached = this._groupPaneCache[groupId];
     if (!cached) return;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       if (cached.panes[i]) {
         cached.panes[i].dispose();
         cached.panes[i] = null;
@@ -11018,10 +11237,10 @@ class CWMApp {
     // Save current group panes (now minus the moved terminal)
     this.saveCurrentGroupPanes();
 
-    // Find first available slot in target group (slots 0-3, pick one not used)
+    // Find first available slot in target group (slots 0 to MAX_PANES-1, pick one not used)
     const usedSlots = new Set((targetGroup.panes || []).map(p => p.slot));
     let newSlot = 0;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
       if (!usedSlots.has(i)) { newSlot = i; break; }
     }
 

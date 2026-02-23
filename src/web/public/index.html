@@ -268,6 +268,12 @@
 
       <!-- Sidebar -->
       <aside class="sidebar" id="sidebar">
+        <button class="sidebar-launch-btn" id="sidebar-launch-btn" title="Launch new session">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span class="sidebar-launch-btn-label">Launch Session</span>
+        </button>
         <div class="sidebar-view-toggle" id="sidebar-view-toggle">
           <button class="sidebar-view-btn active" data-sidebar-view="projects">Projects</button>
           <button class="sidebar-view-btn" data-sidebar-view="tasks">Tasks</button>
@@ -522,6 +528,12 @@
             <div class="terminal-pane-header">
               <span class="terminal-pane-title">Drop a session here</span>
               <span class="terminal-pane-activity" id="term-activity-0"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
               <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
               </button>
@@ -552,6 +564,12 @@
             <div class="terminal-pane-header">
               <span class="terminal-pane-title">Drop a session here</span>
               <span class="terminal-pane-activity" id="term-activity-1"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
               <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
               </button>
@@ -582,6 +600,12 @@
             <div class="terminal-pane-header">
               <span class="terminal-pane-title">Drop a session here</span>
               <span class="terminal-pane-activity" id="term-activity-2"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
               <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
               </button>
@@ -612,11 +636,89 @@
             <div class="terminal-pane-header">
               <span class="terminal-pane-title">Drop a session here</span>
               <span class="terminal-pane-activity" id="term-activity-3"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
               <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
               </button>
             </div>
             <div class="terminal-container" id="term-container-3"></div>
+            <button class="terminal-pane-upload" hidden title="Upload image to Claude">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 10v3.5a1 1 0 01-1 1h-11a1 1 0 01-1-1V10"/><polyline points="4.5 5.5 8 2 11.5 5.5"/><line x1="8" y1="2" x2="8" y2="10.5"/></svg>
+            </button>
+            <div class="terminal-mobile-input-row">
+              <input type="text" class="mobile-type-input" placeholder="Type here..." enterkeyhint="send" autocomplete="off" />
+              <button class="mobile-send-btn">Send</button>
+            </div>
+            <div class="terminal-mobile-toolbar">
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
+              <button class="toolbar-keyboard" data-key="keyboard" title="Toggle keyboard">&#9000; Type</button>
+              <button class="toolbar-send" data-key="enter">Enter</button>
+              <button data-key="tab">Tab</button>
+              <button data-key="ctrlc">Ctrl+C</button>
+              <button data-key="copy" title="Copy terminal output">&#128203; Copy</button>
+              <button data-key="ctrld">Ctrl+D</button>
+              <button data-key="escape">Esc</button>
+              <button data-key="up">&#8593;</button>
+              <button data-key="down">&#8595;</button>
+              <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+            </div>
+          </div>
+          <div class="terminal-pane terminal-pane-empty" id="term-pane-4" data-slot="4" hidden>
+            <div class="terminal-pane-header">
+              <span class="terminal-pane-title">Drop a session here</span>
+              <span class="terminal-pane-activity" id="term-activity-4"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
+              <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+              </button>
+            </div>
+            <div class="terminal-container" id="term-container-4"></div>
+            <button class="terminal-pane-upload" hidden title="Upload image to Claude">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 10v3.5a1 1 0 01-1 1h-11a1 1 0 01-1-1V10"/><polyline points="4.5 5.5 8 2 11.5 5.5"/><line x1="8" y1="2" x2="8" y2="10.5"/></svg>
+            </button>
+            <div class="terminal-mobile-input-row">
+              <input type="text" class="mobile-type-input" placeholder="Type here..." enterkeyhint="send" autocomplete="off" />
+              <button class="mobile-send-btn">Send</button>
+            </div>
+            <div class="terminal-mobile-toolbar">
+              <button class="toolbar-reader" data-key="reader" title="Full-screen scrollable reader">&#128196; Read</button>
+              <button class="toolbar-keyboard" data-key="keyboard" title="Toggle keyboard">&#9000; Type</button>
+              <button class="toolbar-send" data-key="enter">Enter</button>
+              <button data-key="tab">Tab</button>
+              <button data-key="ctrlc">Ctrl+C</button>
+              <button data-key="copy" title="Copy terminal output">&#128203; Copy</button>
+              <button data-key="ctrld">Ctrl+D</button>
+              <button data-key="escape">Esc</button>
+              <button data-key="up">&#8593;</button>
+              <button data-key="down">&#8595;</button>
+              <button class="toolbar-upload" data-key="upload" title="Upload image">&#128247;</button>
+            </div>
+          </div>
+          <div class="terminal-pane terminal-pane-empty" id="term-pane-5" data-slot="5" hidden>
+            <div class="terminal-pane-header">
+              <span class="terminal-pane-title">Drop a session here</span>
+              <span class="terminal-pane-activity" id="term-activity-5"></span>
+              <button class="terminal-pane-mic btn btn-ghost btn-icon btn-sm" title="Voice input" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1a2 2 0 00-2 2v4a2 2 0 004 0V3a2 2 0 00-2-2z"/>
+                  <path d="M4 6.5a.5.5 0 011 0V7a3 3 0 006 0v-.5a.5.5 0 011 0V7a4 4 0 01-3.5 3.97V13H10a.5.5 0 010 1H6a.5.5 0 010-1h1.5v-2.03A4 4 0 014 7v-.5z"/>
+                </svg>
+              </button>
+              <button class="terminal-pane-close btn btn-ghost btn-icon btn-sm" hidden>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+              </button>
+            </div>
+            <div class="terminal-container" id="term-container-5"></div>
             <button class="terminal-pane-upload" hidden title="Upload image to Claude">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 10v3.5a1 1 0 01-1 1h-11a1 1 0 01-1-1V10"/><polyline points="4.5 5.5 8 2 11.5 5.5"/><line x1="8" y1="2" x2="8" y2="10.5"/></svg>
             </button>
@@ -1239,6 +1341,55 @@
         </div>
         <button class="btn btn-ghost" id="spinoff-cancel">Cancel</button>
         <button class="btn btn-primary" id="spinoff-create">Create Selected Tasks</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SESSION LAUNCHER                            -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="launcher-overlay" hidden>
+    <div class="launcher-panel" role="dialog" aria-modal="true" aria-label="Launch Session">
+      <div class="launcher-header">
+        <h3 class="launcher-title">Launch Session</h3>
+        <button class="btn btn-ghost btn-icon btn-sm" id="launcher-close" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="launcher-search-wrap">
+        <svg class="launcher-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+          <circle cx="6" cy="6" r="4.5"/><path d="M12.5 12.5l-3-3"/>
+        </svg>
+        <input type="text" id="launcher-search" class="launcher-search" placeholder="Search projects..." spellcheck="false" autocomplete="off" />
+      </div>
+      <div class="launcher-list" id="launcher-list">
+        <!-- Project rows rendered dynamically -->
+      </div>
+      <div class="launcher-form" id="launcher-form" hidden>
+        <div class="launcher-form-selected" id="launcher-form-selected"></div>
+        <div class="launcher-form-fields">
+          <div class="launcher-form-group">
+            <label class="launcher-form-label" for="launcher-session-name">Session name</label>
+            <input type="text" id="launcher-session-name" class="launcher-form-input" placeholder="my-feature" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="launcher-form-group">
+            <label class="launcher-form-label" for="launcher-model">Model</label>
+            <select id="launcher-model" class="launcher-form-input">
+              <option value="">Default</option>
+              <option value="claude-sonnet-4-20250514">Sonnet</option>
+              <option value="claude-opus-4-20250514">Opus</option>
+              <option value="claude-haiku-3-5-20241022">Haiku</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary launcher-form-submit" id="launcher-submit">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          Launch
+        </button>
       </div>
     </div>
   </div>
