@@ -710,14 +710,18 @@ class TerminalPane {
     // bubble from viewport to .xterm where xterm.js intercepts them).
     //
     // This handler intercepts touches at our container level (capture phase)
-    // and programmatically scrolls .xterm-viewport.scrollTop. Momentum
-    // simulation provides native-feeling inertia on touch release.
+    // and uses term.scrollLines() — xterm.js's own scroll API — so that
+    // internal scroll state (ydisp) stays in sync. Without this, xterm.js
+    // doesn't know the user has scrolled up and snaps back to the bottom
+    // on every new PTY output line.
     //
     // Long-press (400ms hold) switches to xterm.js selection mode so the
     // user can highlight text without triggering the keyboard.
 
-    const viewport = this._xtermViewport;
-    if (!viewport) return;
+    // Line height in pixels: used to convert touch pixel deltas to line counts.
+    const fontSize = (this.term.options && this.term.options.fontSize) || 13;
+    const lineHeightMult = (this.term.options && this.term.options.lineHeight) || 1.2;
+    const lineHeightPx = Math.ceil(fontSize * lineHeightMult);
 
     let startY = 0;          // Touch start Y position
     let lastY = 0;           // Previous touchmove Y
@@ -726,10 +730,12 @@ class TerminalPane {
     let momentumRaf = null;  // rAF ID for momentum animation
     let isScrolling = false; // Whether we detected a scroll gesture
     let longPressTimer = null;
+    let scrollAccum = 0;     // Sub-line pixel accumulator for smooth scrolling
+    let lastMomentumTime = 0;
     const LONG_PRESS_MS = 400;
     const MOVE_THRESHOLD = 8;  // px — must move this far to be a scroll
-    const FRICTION = 0.95;     // Momentum deceleration per frame
-    const MIN_VELOCITY = 0.5;  // Stop momentum below this (px/ms)
+    const FRICTION = 0.92;     // Momentum deceleration (per 16ms equivalent)
+    const MIN_VELOCITY = 0.1;  // Stop momentum below this (px/ms)
 
     /** Cancel any running momentum animation */
     const stopMomentum = () => {
@@ -737,11 +743,30 @@ class TerminalPane {
       velocity = 0;
     };
 
-    /** Animate momentum scroll after finger lifts */
-    const animateMomentum = () => {
-      velocity *= FRICTION;
+    /**
+     * Scroll by a pixel amount using xterm.js's scrollLines() API.
+     * Using the API (not direct scrollTop) keeps xterm.js's internal ydisp
+     * in sync, so new output doesn't snap the view back to the bottom.
+     * scrollLines(n): negative = toward top (older content), positive = toward bottom.
+     * Finger moving down (px > 0) should show older content → scrollLines(negative).
+     */
+    const scrollByPixels = (px) => {
+      scrollAccum += px / lineHeightPx;
+      const linesToScroll = Math.trunc(scrollAccum);
+      if (linesToScroll !== 0) {
+        scrollAccum -= linesToScroll;
+        this.term.scrollLines(-linesToScroll);
+      }
+    };
+
+    /** Animate momentum scroll after finger lifts (time-based, works at any Hz) */
+    const animateMomentum = (timestamp) => {
+      if (lastMomentumTime === 0) lastMomentumTime = timestamp;
+      const dt = Math.min(timestamp - lastMomentumTime, 64); // cap at 64ms (tab switches)
+      lastMomentumTime = timestamp;
+      velocity *= Math.pow(FRICTION, dt / 16); // scale decay to actual frame time
       if (Math.abs(velocity) < MIN_VELOCITY) { stopMomentum(); return; }
-      viewport.scrollTop -= velocity * 16; // ~16ms per frame
+      scrollByPixels(velocity * dt);
       momentumRaf = requestAnimationFrame(animateMomentum);
     };
 
@@ -760,6 +785,7 @@ class TerminalPane {
       lastTime = Date.now();
       velocity = 0;
       isScrolling = false;
+      scrollAccum = 0;
 
       // Start long-press timer for text selection
       longPressTimer = setTimeout(() => {
@@ -789,12 +815,12 @@ class TerminalPane {
       }
 
       if (isScrolling) {
-        // Scroll the viewport by the finger's delta
-        viewport.scrollTop -= deltaY;
-        // Track velocity for momentum (smoothed)
+        // Scroll via xterm.js API so ydisp stays in sync (prevents snap-back on output)
+        scrollByPixels(deltaY);
+        // Track velocity for momentum (smoothed exponential average)
         if (dt > 0) {
           const instantV = deltaY / dt;
-          velocity = velocity * 0.6 + instantV * 0.4; // weighted average
+          velocity = velocity * 0.6 + instantV * 0.4;
         }
       }
 
@@ -816,6 +842,7 @@ class TerminalPane {
 
       // Start momentum animation if finger was moving fast enough
       if (isScrolling && Math.abs(velocity) > MIN_VELOCITY) {
+        lastMomentumTime = 0;
         momentumRaf = requestAnimationFrame(animateMomentum);
       }
       isScrolling = false;
