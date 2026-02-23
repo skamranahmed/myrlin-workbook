@@ -5838,8 +5838,169 @@ app.get('/api/search', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
-//  CONFLICT DETECTION (per workspace)
+//  CONFLICT DETECTION (JSONL-based global + per workspace)
 // ──────────────────────────────────────────────────────────
+
+// ─── JSONL Conflict Cache (30s TTL) ────────────────────────
+// In-memory map of sessionId -> Set<filePath> extracted from JSONL Write/Edit tool_use blocks.
+// Cached for 30 seconds to avoid repeatedly reading JSONL files on every poll.
+let _jsonlConflictCache = null;
+let _jsonlConflictCacheTime = 0;
+const JSONL_CONFLICT_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Normalize a file path for consistent comparison across platforms.
+ * Converts backslashes to forward slashes and lowercases on Windows.
+ * @param {string} filePath - Raw file path from JSONL data
+ * @returns {string} Normalized path
+ */
+function normalizeConflictPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return '';
+  let normalized = filePath.replace(/\\/g, '/');
+  // Lowercase on Windows for case-insensitive comparison
+  if (process.platform === 'win32') {
+    normalized = normalized.toLowerCase();
+  }
+  return normalized;
+}
+
+/**
+ * Extract file paths from Edit and Write tool_use blocks in JSONL data.
+ * Reads only the last 50KB of the JSONL file to keep the check lightweight.
+ * @param {string} jsonlPath - Absolute path to the .jsonl file
+ * @returns {Set<string>} Set of normalized file paths modified by this session
+ */
+function extractModifiedFilesFromJsonl(jsonlPath) {
+  const files = new Set();
+  try {
+    const stat = fs.statSync(jsonlPath);
+    const maxRead = 50 * 1024; // 50KB cap -- only need recent activity
+    let content;
+    if (stat.size <= maxRead) {
+      content = fs.readFileSync(jsonlPath, 'utf-8');
+    } else {
+      const fd = fs.openSync(jsonlPath, 'r');
+      try {
+        const buf = Buffer.alloc(maxRead);
+        fs.readSync(fd, buf, 0, maxRead, stat.size - maxRead);
+        content = buf.toString('utf-8');
+        // Skip the first partial line from seeking into the middle of the file
+        const firstNewline = content.indexOf('\n');
+        if (firstNewline > 0) content = content.slice(firstNewline + 1);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+
+    const lines = content.split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.type !== 'assistant' || !entry.message) continue;
+        const blocks = entry.message.content;
+        if (!Array.isArray(blocks)) continue;
+        for (const block of blocks) {
+          if (block.type === 'tool_use' && (block.name === 'Edit' || block.name === 'Write')) {
+            const fp = block.input && (block.input.file_path || block.input.path);
+            if (fp) {
+              files.add(normalizeConflictPath(fp));
+            }
+          }
+        }
+      } catch (_) {
+        // Skip malformed JSONL lines
+      }
+    }
+  } catch (_) {
+    // File read error -- return empty set
+  }
+  return files;
+}
+
+/**
+ * Build a map of sessionId -> { id, name, files: Set<string> } for all active sessions.
+ * Uses 30-second caching to avoid hammering the filesystem.
+ * @returns {{ sessionFiles: Map<string, {id: string, name: string, files: Set<string>}>, checkedSessions: number }}
+ */
+function getGlobalSessionFileMap() {
+  const now = Date.now();
+  if (_jsonlConflictCache && (now - _jsonlConflictCacheTime) < JSONL_CONFLICT_CACHE_TTL) {
+    return _jsonlConflictCache;
+  }
+
+  const store = getStore();
+  const allSessions = store.getAllSessionsList();
+  // Only check sessions that are running or recently active (have a resumeSessionId for JSONL lookup)
+  const activeSessions = allSessions.filter(s =>
+    (s.status === 'running' || s.status === 'idle') && s.resumeSessionId
+  );
+
+  const sessionFiles = new Map();
+  let checkedSessions = 0;
+
+  for (const session of activeSessions) {
+    const jsonlPath = findJsonlFile(session.resumeSessionId);
+    if (!jsonlPath) continue;
+    checkedSessions++;
+    const files = extractModifiedFilesFromJsonl(jsonlPath);
+    if (files.size > 0) {
+      sessionFiles.set(session.id, {
+        id: session.id,
+        name: session.name || session.id.substring(0, 12),
+        files,
+      });
+    }
+  }
+
+  _jsonlConflictCache = { sessionFiles, checkedSessions };
+  _jsonlConflictCacheTime = now;
+  return _jsonlConflictCache;
+}
+
+/**
+ * GET /api/conflicts
+ * Global JSONL-based conflict detection across all active sessions.
+ * Scans recent JSONL entries (last 50KB) for Edit and Write tool_use blocks,
+ * extracts file paths, and cross-references across sessions to find overlaps.
+ * Results are cached for 30 seconds to avoid hammering the filesystem.
+ * Protected by auth.
+ *
+ * @returns {{ conflicts: Array<{ file: string, sessions: Array<{ id: string, name: string }> }>, checkedSessions: number, timestamp: string }}
+ */
+app.get('/api/conflicts', requireAuth, (req, res) => {
+  const { sessionFiles, checkedSessions } = getGlobalSessionFileMap();
+
+  // Cross-reference: find files that appear in 2+ sessions
+  const fileToSessions = new Map(); // normalizedPath -> [{ id, name }]
+
+  for (const [, sessionInfo] of sessionFiles) {
+    for (const file of sessionInfo.files) {
+      if (!fileToSessions.has(file)) {
+        fileToSessions.set(file, []);
+      }
+      fileToSessions.get(file).push({ id: sessionInfo.id, name: sessionInfo.name });
+    }
+  }
+
+  const conflicts = [];
+  for (const [file, sessionsInConflict] of fileToSessions) {
+    if (sessionsInConflict.length >= 2) {
+      conflicts.push({
+        file,
+        sessions: sessionsInConflict,
+      });
+    }
+  }
+
+  // Sort by most sessions involved first
+  conflicts.sort((a, b) => b.sessions.length - a.sessions.length);
+
+  return res.json({
+    conflicts,
+    checkedSessions,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 /**
  * GET /api/workspaces/:id/conflicts

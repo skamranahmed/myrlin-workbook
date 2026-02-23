@@ -8677,6 +8677,29 @@ class CWMApp {
       items.push(...sessionItems);
     }
 
+    // ── File Conflicts (JSONL-based) ─────────────────────────
+    const sessionConflicts = this.getSessionConflicts(tp.sessionId);
+    if (sessionConflicts.length > 0) {
+      items.push({ type: 'sep' });
+      items.push({
+        label: `Conflicts (${sessionConflicts.length})`, icon: '&#9888;', className: 'conflict-warning', action: () => {
+          // Build a readable list of conflicting files and other sessions
+          const lines = sessionConflicts.map(c => {
+            const fileName = (c.file || 'unknown').split('/').pop();
+            const otherSessions = (c.sessions || [])
+              .filter(s => s.id !== tp.sessionId)
+              .map(s => s.name || s.id.substring(0, 12));
+            return `${fileName} -- also edited by: ${otherSessions.join(', ')}`;
+          });
+          this.showToast(lines.join('\n'), 'warning');
+          // Also open the conflict center if available
+          if (this.els.conflictCenterOverlay) {
+            this.openConflictCenter();
+          }
+        },
+      });
+    }
+
     // ── Pane management ───────────────────────────────────────
     items.push({ type: 'sep' });
 
@@ -13645,6 +13668,126 @@ class CWMApp {
     } catch {
       // Silently ignore conflict check failures
     }
+
+    // Also run the global JSONL-based conflict check for per-pane badges
+    this._checkJsonlConflicts();
+  }
+
+  /**
+   * Global JSONL-based conflict detection across all active sessions.
+   * Calls GET /api/conflicts to find files edited by multiple sessions
+   * (based on Write/Edit tool_use blocks in JSONL data), then updates
+   * per-pane conflict badges and shows toasts for new conflicts.
+   */
+  async _checkJsonlConflicts() {
+    try {
+      // Only check when terminal panes are in use
+      const hasActivePanes = this.terminalPanes.some(p => p !== null);
+      if (!hasActivePanes) {
+        this._jsonlConflicts = [];
+        this._paneConflictMap.clear();
+        this._updatePaneConflictBadges();
+        return;
+      }
+
+      const data = await this.api('GET', '/api/conflicts');
+      const conflicts = data.conflicts || [];
+      this._jsonlConflicts = conflicts;
+
+      // Build per-session conflict map for pane badges
+      this._paneConflictMap.clear();
+      for (const conflict of conflicts) {
+        for (const sess of (conflict.sessions || [])) {
+          if (!this._paneConflictMap.has(sess.id)) {
+            this._paneConflictMap.set(sess.id, []);
+          }
+          this._paneConflictMap.get(sess.id).push({
+            file: conflict.file,
+            sessions: conflict.sessions,
+          });
+        }
+      }
+
+      // Update per-pane conflict badges in the terminal grid
+      this._updatePaneConflictBadges();
+
+      // Show toasts for NEW JSONL-based conflicts only
+      if (conflicts.length > 0) {
+        const currentKeys = new Set(conflicts.map(c => c.file || 'unknown'));
+        const newConflicts = conflicts.filter(c => {
+          const key = c.file || 'unknown';
+          return !this._lastJsonlConflictKeys.has(key);
+        });
+        this._lastJsonlConflictKeys = currentKeys;
+
+        if (newConflicts.length > 0) {
+          // Only toast if the workspace-level check didn't already toast these
+          const wsKeys = this._lastConflictKeys || new Set();
+          const uniqueNew = newConflicts.filter(c => !wsKeys.has(c.file || 'unknown'));
+          if (uniqueNew.length === 1) {
+            const c = uniqueNew[0];
+            const fileName = (c.file || 'unknown').split('/').pop();
+            this.showToast(`${c.sessions.length} sessions editing ${fileName}`, 'warning');
+          } else if (uniqueNew.length > 1) {
+            this.showToast(`${uniqueNew.length} file conflicts detected across sessions`, 'warning');
+          }
+        }
+      } else {
+        this._lastJsonlConflictKeys.clear();
+      }
+    } catch {
+      // Silently ignore JSONL conflict check failures
+    }
+  }
+
+  /**
+   * Update amber conflict badges on terminal pane headers.
+   * Shows a small amber dot/count next to the pane title when the session
+   * has files that are also being edited by other sessions.
+   */
+  _updatePaneConflictBadges() {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      const tp = this.terminalPanes[i];
+      const paneEl = document.getElementById(`term-pane-${i}`);
+      if (!paneEl) continue;
+
+      const header = paneEl.querySelector('.terminal-pane-header');
+      if (!header) continue;
+
+      // Remove existing conflict badge if any
+      const existingBadge = header.querySelector('.pane-conflict-badge');
+
+      if (tp && this._paneConflictMap.has(tp.sessionId)) {
+        const conflicts = this._paneConflictMap.get(tp.sessionId);
+        if (existingBadge) {
+          existingBadge.textContent = conflicts.length;
+          existingBadge.title = `${conflicts.length} file${conflicts.length > 1 ? 's' : ''} also edited by other sessions`;
+        } else {
+          const badge = document.createElement('span');
+          badge.className = 'pane-conflict-badge';
+          badge.textContent = conflicts.length;
+          badge.title = `${conflicts.length} file${conflicts.length > 1 ? 's' : ''} also edited by other sessions`;
+          const titleEl = header.querySelector('.terminal-pane-title');
+          if (titleEl && titleEl.nextSibling) {
+            header.insertBefore(badge, titleEl.nextSibling);
+          } else {
+            header.appendChild(badge);
+          }
+        }
+      } else if (existingBadge) {
+        existingBadge.remove();
+      }
+    }
+  }
+
+  /**
+   * Get JSONL-based conflict data for a specific session.
+   * Used by the terminal context menu to show per-session conflict details.
+   * @param {string} sessionId - The session ID to look up
+   * @returns {Array<{file: string, sessions: Array<{id: string, name: string}>}>}
+   */
+  getSessionConflicts(sessionId) {
+    return this._paneConflictMap.get(sessionId) || [];
   }
 
   /**
@@ -14352,6 +14495,369 @@ class CWMApp {
     this.setViewMode('terminal');
     this.openTerminalInPane(emptySlot, session.id, session.name, spawnOpts);
     this.closeSessionManager();
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     SESSION LAUNCHER
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Open the session launcher modal.
+   * Fetches discovered projects, merges with workspace sessions, and renders
+   * a frecency-ranked list with fuzzy search and pin support.
+   */
+  async openLauncher() {
+    if (!this.els.launcherOverlay) return;
+
+    // Reset state
+    this._launcherProjects = [];
+    this._launcherSelectedDir = null;
+    this._launcherPinnedDirs = JSON.parse(localStorage.getItem('cwm_pinnedDirs') || '[]');
+    this.els.launcherSearch.value = '';
+    this.els.launcherForm.hidden = true;
+    this.els.launcherSessionName.value = '';
+    this.els.launcherModel.value = '';
+    this.els.launcherList.innerHTML = '<div class="launcher-empty">Loading projects...</div>';
+    this.els.launcherOverlay.hidden = false;
+
+    // Focus search input after animation
+    requestAnimationFrame(() => this.els.launcherSearch.focus());
+
+    // Keyboard handler for Escape
+    this._launcherKeyHandler = (e) => {
+      if (e.key === 'Escape') this.closeLauncher();
+    };
+    document.addEventListener('keydown', this._launcherKeyHandler);
+
+    try {
+      // Fetch discovered projects
+      const data = await this.api('GET', '/api/discover');
+      const discovered = data.projects || [];
+
+      // Build session count map from current sessions for frecency ranking
+      const sessionsByDir = {};
+      const allSessions = this.state.allSessions || this.state.sessions || [];
+      for (const s of allSessions) {
+        if (!s.workingDir) continue;
+        const dir = s.workingDir.replace(/\\/g, '/').toLowerCase();
+        if (!sessionsByDir[dir]) sessionsByDir[dir] = { count: 0, lastActive: null };
+        sessionsByDir[dir].count++;
+        if (s.lastActive && (!sessionsByDir[dir].lastActive || new Date(s.lastActive) > new Date(sessionsByDir[dir].lastActive))) {
+          sessionsByDir[dir].lastActive = s.lastActive;
+        }
+      }
+
+      // Merge discovered projects with session frequency data
+      const projects = discovered.map(p => {
+        const dirKey = (p.realPath || '').replace(/\\/g, '/').toLowerCase();
+        const sessionData = sessionsByDir[dirKey] || { count: 0, lastActive: null };
+        // Extract a readable project name from the path
+        const pathParts = (p.realPath || '').replace(/\\/g, '/').split('/').filter(Boolean);
+        const name = pathParts[pathParts.length - 1] || p.encodedName;
+
+        return {
+          name,
+          path: p.realPath || '',
+          encodedName: p.encodedName,
+          sessionCount: p.sessionCount || 0,
+          localSessionCount: sessionData.count,
+          lastActive: p.lastActive || sessionData.lastActive,
+          hasClaudeMd: p.hasClaudeMd,
+          dirExists: p.dirExists !== false,
+          pinned: this._launcherPinnedDirs.includes(p.realPath),
+        };
+      });
+
+      // Also add workspace directories not found in discovered projects
+      for (const ws of (this.state.workspaces || [])) {
+        const wsSessions = allSessions.filter(s => s.workspaceId === ws.id);
+        const dirs = new Set(wsSessions.map(s => s.workingDir).filter(Boolean));
+        for (const dir of dirs) {
+          const dirKey = dir.replace(/\\/g, '/').toLowerCase();
+          const alreadyListed = projects.some(p => (p.path || '').replace(/\\/g, '/').toLowerCase() === dirKey);
+          if (!alreadyListed) {
+            const pathParts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+            const name = pathParts[pathParts.length - 1] || dir;
+            const sessionData = sessionsByDir[dirKey] || { count: 0, lastActive: null };
+            projects.push({
+              name,
+              path: dir,
+              encodedName: '',
+              sessionCount: sessionData.count,
+              localSessionCount: sessionData.count,
+              lastActive: sessionData.lastActive,
+              hasClaudeMd: false,
+              dirExists: true,
+              pinned: this._launcherPinnedDirs.includes(dir),
+            });
+          }
+        }
+      }
+
+      // Sort by frecency: pinned first, then by lastActive (most recent first), then by session count
+      projects.sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        if (a.lastActive && b.lastActive) return new Date(b.lastActive) - new Date(a.lastActive);
+        if (a.lastActive) return -1;
+        if (b.lastActive) return 1;
+        return b.sessionCount - a.sessionCount;
+      });
+
+      this._launcherProjects = projects;
+      this.renderLauncherProjects();
+
+    } catch (err) {
+      this.els.launcherList.innerHTML = `<div class="launcher-empty">Failed to load projects: ${this.escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  /**
+   * Close the session launcher modal and clean up event listeners.
+   */
+  closeLauncher() {
+    if (this.els.launcherOverlay) this.els.launcherOverlay.hidden = true;
+    if (this._launcherKeyHandler) {
+      document.removeEventListener('keydown', this._launcherKeyHandler);
+      this._launcherKeyHandler = null;
+    }
+    this._launcherSelectedDir = null;
+  }
+
+  /**
+   * Render the project rows in the launcher list.
+   * Groups projects into Pinned, Recent, and All sections.
+   * @param {string} [filterQuery] - Optional lowercase search query for fuzzy filtering
+   */
+  renderLauncherProjects(filterQuery) {
+    const projects = this._launcherProjects || [];
+    if (projects.length === 0) {
+      this.els.launcherList.innerHTML = '<div class="launcher-empty">No projects discovered. Run Claude Code in a project first.</div>';
+      return;
+    }
+
+    // Apply fuzzy filter if query is provided
+    let filtered = projects;
+    if (filterQuery) {
+      filtered = projects.filter(p => {
+        const haystack = (p.name + ' ' + p.path).toLowerCase();
+        return haystack.includes(filterQuery);
+      });
+    }
+
+    if (filtered.length === 0) {
+      this.els.launcherList.innerHTML = '<div class="launcher-empty">No matching projects</div>';
+      return;
+    }
+
+    // Group into sections
+    const pinned = filtered.filter(p => p.pinned);
+    const recent = filtered.filter(p => !p.pinned && p.lastActive);
+    const rest = filtered.filter(p => !p.pinned && !p.lastActive);
+
+    let html = '';
+
+    // Pinned section
+    if (pinned.length > 0) {
+      html += '<div class="launcher-section-label">Pinned</div>';
+      html += pinned.map(p => this._renderLauncherRow(p)).join('');
+    }
+
+    // Recent section
+    if (recent.length > 0) {
+      html += '<div class="launcher-section-label">Recent</div>';
+      html += recent.map(p => this._renderLauncherRow(p)).join('');
+    }
+
+    // All section (no activity)
+    if (rest.length > 0) {
+      html += '<div class="launcher-section-label">All Projects</div>';
+      html += rest.map(p => this._renderLauncherRow(p)).join('');
+    }
+
+    this.els.launcherList.innerHTML = html;
+
+    // Bind click handlers for project rows
+    this.els.launcherList.querySelectorAll('.launcher-project-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        // Don't trigger row select when clicking pin button
+        if (e.target.closest('.launcher-pin-btn')) return;
+        this.selectLauncherProject(row.dataset.path, row.dataset.name);
+      });
+    });
+
+    // Bind pin button handlers
+    this.els.launcherList.querySelectorAll('.launcher-pin-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleLauncherPin(btn.dataset.path);
+      });
+    });
+  }
+
+  /**
+   * Render a single project row in the launcher list.
+   * @param {Object} p - Project data object
+   * @returns {string} HTML string for the row
+   */
+  _renderLauncherRow(p) {
+    const isSelected = this._launcherSelectedDir === p.path;
+    const timeStr = p.lastActive ? this.relativeTime(p.lastActive) : '';
+    const pinClass = p.pinned ? ' pinned' : '';
+    const pinLabel = p.pinned ? '&#9733;' : '&#9734;';
+    const badges = [];
+    if (p.hasClaudeMd) badges.push('<span class="launcher-project-badge">CLAUDE.md</span>');
+    if (!p.dirExists) badges.push('<span class="launcher-project-badge" style="background:color-mix(in srgb, var(--red) 15%, transparent);color:var(--red);">missing</span>');
+
+    return `<div class="launcher-project-row${isSelected ? ' selected' : ''}" data-path="${this.escapeHtml(p.path)}" data-name="${this.escapeHtml(p.name)}">
+      <div class="launcher-project-info">
+        <div class="launcher-project-name">${this.escapeHtml(p.name)} ${badges.join(' ')}</div>
+        <div class="launcher-project-path">${this.escapeHtml(p.path)}</div>
+      </div>
+      <div class="launcher-project-meta">
+        ${timeStr ? `<span class="launcher-project-time">${timeStr}</span>` : ''}
+        <button class="launcher-pin-btn${pinClass}" data-path="${this.escapeHtml(p.path)}" title="${p.pinned ? 'Unpin' : 'Pin'}">${pinLabel}</button>
+      </div>
+    </div>`;
+  }
+
+  /**
+   * Filter the launcher project list based on the search input value.
+   */
+  filterLauncherProjects() {
+    const query = (this.els.launcherSearch.value || '').trim().toLowerCase();
+    this.renderLauncherProjects(query || undefined);
+  }
+
+  /**
+   * Select a project in the launcher, populating the bottom form.
+   * @param {string} dirPath - The full directory path of the selected project
+   * @param {string} name - The display name of the project
+   */
+  selectLauncherProject(dirPath, name) {
+    this._launcherSelectedDir = dirPath;
+
+    // Highlight the selected row
+    this.els.launcherList.querySelectorAll('.launcher-project-row').forEach(row => {
+      row.classList.toggle('selected', row.dataset.path === dirPath);
+    });
+
+    // Show and populate the form
+    this.els.launcherForm.hidden = false;
+    this.els.launcherFormSelected.innerHTML = `<strong>${this.escapeHtml(name)}</strong> - ${this.escapeHtml(dirPath)}`;
+
+    // Auto-generate a session name from the project directory name
+    if (!this.els.launcherSessionName.value) {
+      this.els.launcherSessionName.value = name + ' - new';
+    }
+
+    // Scroll form into view
+    this.els.launcherForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  /**
+   * Toggle the pinned state of a project directory in the launcher.
+   * Pinned dirs are persisted to localStorage under key 'cwm_pinnedDirs'.
+   * @param {string} dirPath - The directory path to pin/unpin
+   */
+  toggleLauncherPin(dirPath) {
+    const idx = this._launcherPinnedDirs.indexOf(dirPath);
+    if (idx !== -1) {
+      this._launcherPinnedDirs.splice(idx, 1);
+    } else {
+      this._launcherPinnedDirs.push(dirPath);
+    }
+    localStorage.setItem('cwm_pinnedDirs', JSON.stringify(this._launcherPinnedDirs));
+
+    // Update the project data and re-render
+    for (const p of (this._launcherProjects || [])) {
+      p.pinned = this._launcherPinnedDirs.includes(p.path);
+    }
+
+    // Re-sort: pinned first
+    this._launcherProjects.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      if (a.lastActive && b.lastActive) return new Date(b.lastActive) - new Date(a.lastActive);
+      if (a.lastActive) return -1;
+      if (b.lastActive) return 1;
+      return b.sessionCount - a.sessionCount;
+    });
+
+    const query = (this.els.launcherSearch.value || '').trim().toLowerCase();
+    this.renderLauncherProjects(query || undefined);
+  }
+
+  /**
+   * Launch a new Claude Code session in the selected project directory.
+   * Creates the session via API, opens a terminal pane, and switches to terminal view.
+   */
+  async launchSelectedProject() {
+    const dir = this._launcherSelectedDir;
+    if (!dir) {
+      this.showToast('Select a project first', 'warning');
+      return;
+    }
+
+    const name = this.els.launcherSessionName.value.trim() || 'new-session';
+    const model = this.els.launcherModel.value || undefined;
+
+    // Disable submit button to prevent double-click
+    this.els.launcherSubmit.disabled = true;
+    this.els.launcherSubmit.textContent = 'Launching...';
+
+    try {
+      // Find or create a workspace for this project
+      const dirParts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+      const projectName = dirParts[dirParts.length - 1] || 'project';
+
+      // Check if a workspace already exists for this directory
+      let workspaceId = null;
+      for (const ws of (this.state.workspaces || [])) {
+        const wsSessions = (this.state.allSessions || []).filter(s => s.workspaceId === ws.id);
+        if (wsSessions.some(s => s.workingDir && s.workingDir.replace(/\\/g, '/').toLowerCase() === dir.replace(/\\/g, '/').toLowerCase())) {
+          workspaceId = ws.id;
+          break;
+        }
+      }
+
+      const payload = {
+        name,
+        workingDir: dir,
+        command: 'claude',
+      };
+      if (workspaceId) payload.workspaceId = workspaceId;
+      if (model) payload.model = model;
+
+      const data = await this.api('POST', '/api/sessions', payload);
+      const session = data.session || data;
+
+      this.showToast(`Session "${session.name}" created`, 'success');
+      await this.loadSessions();
+      await this.loadStats();
+
+      // Open in a terminal pane
+      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      if (emptySlot !== -1) {
+        const spawnOpts = { cwd: dir };
+        if (model) spawnOpts.model = model;
+        this.setViewMode('terminal');
+        this.openTerminalInPane(emptySlot, session.id, session.name, spawnOpts);
+      } else {
+        this.showToast('All terminal panes full. Close one first.', 'warning');
+      }
+
+      this.closeLauncher();
+
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create session', 'error');
+    } finally {
+      // Re-enable submit button
+      if (this.els.launcherSubmit) {
+        this.els.launcherSubmit.disabled = false;
+        this.els.launcherSubmit.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg> Launch`;
+      }
+    }
   }
 
   /**

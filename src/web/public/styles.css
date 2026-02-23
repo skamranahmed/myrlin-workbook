@@ -8075,6 +8075,39 @@ html {
   }
 }
 
+/* ─── Per-Pane Conflict Badge (JSONL-based) ─────────────── */
+/* Small amber badge on terminal pane headers showing count  */
+/* of files this session shares with other active sessions.  */
+
+.pane-conflict-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 9px;
+  background: var(--yellow);
+  color: var(--base);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  flex-shrink: 0;
+  animation: conflict-pulse 2s ease-in-out infinite;
+}
+
+@keyframes conflict-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Amber text for conflict details in context menu */
+.conflict-warning {
+  color: var(--yellow) !important;
+}
+
 /* ═══════════════════════════════════════════════════════════ */
 /* Theme Dropdown Section Headers + Catppuccin Badge          */
 /* ═══════════════════════════════════════════════════════════ */
