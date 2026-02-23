@@ -384,34 +384,15 @@ class TerminalPane {
         return true;
       });
 
-      // ── Mobile IME/autocorrect guard ──────────────────────────
-      // Mobile keyboards handle autocorrect in two ways:
-      // 1. Composition events (CJK, swipe typing): compositionstart → compositionend
-      // 2. beforeinput with insertReplacementText (tap-to-correct suggestions)
-      //
-      // xterm.js doesn't handle either well — it sends both the original
-      // keystrokes AND the replacement, causing text duplication.
-      //
-      // Strategy: intercept both paths, block xterm's processing, and send
-      // the correct keystrokes (backspaces + replacement) ourselves.
-      this._composing = false;
+      // ── Mobile autocorrect guard ─────────────────────────────
+      // xterm.js does not handle beforeinput with insertReplacementText
+      // (tap-to-correct on Gboard, iOS keyboard, etc.).  We intercept it
+      // ourselves: block the native replacement, compute the required
+      // backspaces from getTargetRanges(), and send backspaces +
+      // replacement text to the PTY directly.
       this._replacingText = false;
       const xtermTextarea = container.querySelector('.xterm-helper-textarea');
       if (xtermTextarea) {
-        // Path 1: Composition events (swipe, CJK input)
-        xtermTextarea.addEventListener('compositionstart', () => {
-          this._composing = true;
-        });
-        xtermTextarea.addEventListener('compositionend', (e) => {
-          this._composing = false;
-          if (e.data && this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'input', data: e.data }));
-          }
-        });
-
-        // Path 2: Autocorrect tap-to-replace (Gboard, iOS keyboard, etc.)
-        // beforeinput fires BEFORE the textarea is modified — we can block it
-        // and send the correct backspaces + replacement to the PTY ourselves.
         xtermTextarea.addEventListener('beforeinput', (e) => {
           if (e.inputType === 'insertReplacementText') {
             e.preventDefault();
@@ -434,8 +415,6 @@ class TerminalPane {
       }
 
       this.term.onData((data) => {
-        // Skip input during IME composition — compositionend sends the result
-        if (this._composing) return;
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify({ type: 'input', data }));
         }
