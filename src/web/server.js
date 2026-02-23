@@ -938,63 +938,83 @@ app.get('/api/discover', requireAuth, (req, res) => {
  *     → C:\Users\Jane\.claude
  */
 function decodeClaudePath(encoded) {
+  // ── Windows path: C--Users-Jane-foo → C:\Users\Jane\foo ──
   const driveMatch = encoded.match(/^([A-Z])--(.*)/);
-  if (!driveMatch) return encoded;
+  if (driveMatch) {
+    const drive = driveMatch[1] + ':\\';
+    const rest = driveMatch[2];
+    if (!rest) return drive;
 
-  const drive = driveMatch[1] + ':\\';
-  const rest = driveMatch[2];
-  if (!rest) return drive;
+    // Split on '--' to handle dot-prefixed dirs (Jane--claude → Jane\.claude)
+    const majorParts = rest.split('--');
+    let resolved = drive;
 
-  // Split on '--' to handle dot-prefixed dirs (Jane--claude → Jane\.claude)
-  const majorParts = rest.split('--');
-  let resolved = drive;
+    for (let i = 0; i < majorParts.length; i++) {
+      const part = majorParts[i];
+      const dotPrefix = i > 0 ? '.' : '';
+      const tokens = part.split('-').filter(t => t.length > 0);
 
-  for (let i = 0; i < majorParts.length; i++) {
-    const part = majorParts[i];
-    const dotPrefix = i > 0 ? '.' : '';
-    const tokens = part.split('-').filter(t => t.length > 0);
+      if (tokens.length === 0) continue;
 
-    if (tokens.length === 0) continue;
+      // Dot-prefixed segments (after --) are a single directory name
+      if (dotPrefix) {
+        resolved = path.join(resolved, '.' + tokens.join('-'));
+        continue;
+      }
 
-    // Dot-prefixed segments (after --) are a single directory name
-    if (dotPrefix) {
-      resolved = path.join(resolved, '.' + tokens.join('-'));
-      continue;
+      resolved = greedyFsWalk(resolved, tokens);
     }
 
-    // For regular segments, greedily match against the real filesystem.
-    // Try the longest hyphenated name first so "claude-workspace-manager"
-    // resolves as ONE directory instead of three.
-    let idx = 0;
-    while (idx < tokens.length) {
-      let matched = false;
+    return resolved;
+  }
 
-      for (let len = tokens.length - idx; len > 1; len--) {
-        const slice = tokens.slice(idx, idx + len);
-        // Try hyphen-joined (e.g. "claude-workspace-manager"),
-        // underscore-joined (e.g. "filepro_ai"), and
-        // space-joined (e.g. "Work AI Project") since Claude encodes
-        // path separators, underscores, and spaces as dashes
-        const candidates = [slice.join('-'), slice.join('_'), slice.join(' ')];
-        for (const candidate of candidates) {
-          const candidatePath = path.join(resolved, candidate);
-          try {
-            if (fs.existsSync(candidatePath)) {
-              resolved = candidatePath;
-              idx += len;
-              matched = true;
-              break;
-            }
-          } catch (_) { /* skip */ }
-        }
-        if (matched) break;
-      }
+  // ── Linux/macOS absolute path: -home-vivi-my-project → /home/vivi/my-project ──
+  // Claude encodes the leading '/' as a leading '-', and every '/' as '-'.
+  if (encoded.startsWith('-')) {
+    const tokens = encoded.slice(1).split('-').filter(t => t.length > 0);
+    return greedyFsWalk('/', tokens);
+  }
 
-      if (!matched) {
-        // Single token - treat as its own directory segment
-        resolved = path.join(resolved, tokens[idx]);
-        idx++;
+  // Unknown format - return as-is
+  return encoded;
+}
+
+/**
+ * Walk the filesystem greedily, resolving ambiguous hyphens.
+ * Claude encodes both path separators AND spaces as '-', so "my-project"
+ * could be one dir or two. We try the longest match first.
+ */
+function greedyFsWalk(root, tokens) {
+  let resolved = root;
+  let idx = 0;
+
+  while (idx < tokens.length) {
+    let matched = false;
+
+    // Try longest slice first to prefer "claude-workspace-manager" over "claude"+"workspace"+"manager"
+    for (let len = tokens.length - idx; len > 1; len--) {
+      const slice = tokens.slice(idx, idx + len);
+      // Try hyphen-joined, underscore-joined, and space-joined (Claude encodes
+      // path separators, underscores, and spaces as dashes)
+      const candidates = [slice.join('-'), slice.join('_'), slice.join(' ')];
+      for (const candidate of candidates) {
+        const candidatePath = path.join(resolved, candidate);
+        try {
+          if (fs.existsSync(candidatePath)) {
+            resolved = candidatePath;
+            idx += len;
+            matched = true;
+            break;
+          }
+        } catch (_) { /* skip */ }
       }
+      if (matched) break;
+    }
+
+    if (!matched) {
+      // Single token - treat as its own directory segment
+      resolved = path.join(resolved, tokens[idx]);
+      idx++;
     }
   }
 
