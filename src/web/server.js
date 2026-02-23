@@ -5402,6 +5402,169 @@ app.delete('/api/tunnels/:id', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
+//  NAMED TUNNEL (Cloudflare token-based, persistent domain)
+// ──────────────────────────────────────────────────────────
+
+const NAMED_TUNNEL_HOME_CONFIG = path.join(os.homedir(), '.myrlin', 'config.json');
+const NAMED_TUNNEL_LOCAL_CONFIG = path.join(__dirname, '..', '..', 'state', 'config.json');
+
+function readMyrlinConfig() {
+  for (const p of [NAMED_TUNNEL_HOME_CONFIG, NAMED_TUNNEL_LOCAL_CONFIG]) {
+    try {
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch (_) {}
+  }
+  return {};
+}
+
+function writeMyrlinConfig(updates) {
+  const cfg = readMyrlinConfig();
+  Object.assign(cfg, updates);
+  const homeDir = path.join(os.homedir(), '.myrlin');
+  try {
+    if (!fs.existsSync(homeDir)) fs.mkdirSync(homeDir, { recursive: true });
+    fs.writeFileSync(NAMED_TUNNEL_HOME_CONFIG, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[Tunnel] Failed to save config to home:', err.message);
+  }
+  try {
+    const localDir = path.dirname(NAMED_TUNNEL_LOCAL_CONFIG);
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    fs.writeFileSync(NAMED_TUNNEL_LOCAL_CONFIG, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch (_) {}
+}
+
+let _namedTunnel = null; // { process, status, startedAt, tunnelId }
+
+function getNamedTunnelStatus() {
+  if (!_namedTunnel) return { running: false, status: 'stopped' };
+  return {
+    running: true,
+    status: _namedTunnel.status,
+    startedAt: _namedTunnel.startedAt,
+    tunnelId: _namedTunnel.tunnelId || null,
+    pid: _namedTunnel.process ? _namedTunnel.process.pid : null,
+  };
+}
+
+function startNamedTunnel(token) {
+  if (_namedTunnel && _namedTunnel.process && !_namedTunnel.process.killed) {
+    return { error: 'Tunnel already running' };
+  }
+  const { spawn } = require('child_process');
+  let proc;
+  try {
+    // Token passed as array arg — no shell injection possible regardless of content
+    proc = spawn('cloudflared', ['tunnel', 'run', '--token', token], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+  } catch (err) {
+    return { error: 'Failed to spawn cloudflared: ' + err.message };
+  }
+  _namedTunnel = { process: proc, status: 'connecting', startedAt: new Date().toISOString(), tunnelId: null };
+
+  const parseLine = (data) => {
+    if (!_namedTunnel) return;
+    const line = data.toString().trim();
+    const idMatch = line.match(/tunnelID=([a-zA-Z0-9-]+)/);
+    if (idMatch) _namedTunnel.tunnelId = idMatch[1];
+    if (/Registered tunnel connection|connection registered/i.test(line)) {
+      _namedTunnel.status = 'connected';
+      broadcastSSE('namedTunnel:status', getNamedTunnelStatus());
+    } else if (/error|failed|unable to/i.test(line) && _namedTunnel.status === 'connecting') {
+      _namedTunnel.status = 'error';
+      broadcastSSE('namedTunnel:status', getNamedTunnelStatus());
+    }
+  };
+  if (proc.stdout) proc.stdout.on('data', parseLine);
+  if (proc.stderr) proc.stderr.on('data', parseLine);
+  proc.on('exit', () => {
+    _namedTunnel = null;
+    broadcastSSE('namedTunnel:status', { running: false, status: 'stopped' });
+  });
+  proc.on('error', (err) => {
+    console.error('[Tunnel] cloudflared error:', err.message);
+    if (_namedTunnel) {
+      _namedTunnel.status = 'error';
+      broadcastSSE('namedTunnel:status', getNamedTunnelStatus());
+    }
+  });
+  return { started: true };
+}
+
+app.get('/api/tunnel/named', requireAuth, (req, res) => {
+  const cfg = readMyrlinConfig();
+  res.json({
+    configured: !!(process.env.CWM_CF_TOKEN || cfg.cfTunnelToken),
+    autoStart: !!cfg.cfTunnelAutoStart,
+    ...getNamedTunnelStatus(),
+  });
+});
+
+app.put('/api/tunnel/named/config', requireAuth, (req, res) => {
+  const { token, autoStart } = req.body || {};
+  const updates = {};
+  if (token !== undefined) {
+    if (typeof token !== 'string' || token.length > 2048) {
+      return res.status(400).json({ error: 'Invalid token' });
+    }
+    if (token.length > 0 && !/^[A-Za-z0-9._=+-]+$/.test(token)) {
+      return res.status(400).json({ error: 'Token contains invalid characters' });
+    }
+    updates.cfTunnelToken = token;
+  }
+  if (autoStart !== undefined) updates.cfTunnelAutoStart = !!autoStart;
+  writeMyrlinConfig(updates);
+  res.json({ success: true });
+});
+
+app.post('/api/tunnel/named/start', requireAuth, async (req, res) => {
+  const cfg = readMyrlinConfig();
+  const token = process.env.CWM_CF_TOKEN || cfg.cfTunnelToken;
+  if (!token) {
+    return res.status(400).json({ error: 'No tunnel token configured. Add one in Settings > Remote Access.' });
+  }
+  const check = await checkCloudflared();
+  if (!check.available) {
+    return res.status(400).json({ error: 'cloudflared not installed. See https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/' });
+  }
+  const result = startNamedTunnel(token);
+  if (result.error) return res.status(409).json({ error: result.error });
+  res.json({ started: true, status: getNamedTunnelStatus() });
+});
+
+app.post('/api/tunnel/named/stop', requireAuth, (req, res) => {
+  if (!_namedTunnel || !_namedTunnel.process) {
+    return res.status(404).json({ error: 'No named tunnel running' });
+  }
+  try {
+    _namedTunnel.process.kill('SIGTERM');
+    setTimeout(() => {
+      try { if (_namedTunnel && !_namedTunnel.process.killed) _namedTunnel.process.kill('SIGKILL'); } catch (_) {}
+    }, 3000);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auto-start on server init if configured
+(async () => {
+  const cfg = readMyrlinConfig();
+  const token = process.env.CWM_CF_TOKEN || cfg.cfTunnelToken;
+  if (cfg.cfTunnelAutoStart && token) {
+    const check = await checkCloudflared();
+    if (check.available) {
+      console.log('[Tunnel] Auto-starting named tunnel...');
+      startNamedTunnel(token);
+    } else {
+      console.warn('[Tunnel] Auto-start skipped: cloudflared not found');
+    }
+  }
+})();
+
+// ──────────────────────────────────────────────────────────
 //  SESSION SEARCH (full-text across all JSONL files)
 // ──────────────────────────────────────────────────────────
 

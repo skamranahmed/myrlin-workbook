@@ -3335,6 +3335,7 @@ class CWMApp {
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
+      { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ… string).', category: 'Remote Access', type: 'tunnel' },
     ];
   }
 
@@ -3877,6 +3878,35 @@ class CWMApp {
                 ${optionsHtml}
               </select>
             </div>`;
+        } else if (item.type === 'tunnel') {
+          html += `
+            <div class="settings-row" data-setting-key="${item.key}" style="flex-direction:column;align-items:flex-start;gap:8px;padding:10px 0;">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <div id="named-tunnel-status" style="font-size:11px;font-family:monospace;opacity:0.65;">checking...</div>
+              <ol style="font-size:11px;opacity:0.55;margin:2px 0 4px 16px;padding:0;line-height:1.7;">
+                <li>Open <a href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener" style="color:inherit;">one.dash.cloudflare.com</a> → Networks → Tunnels</li>
+                <li>Create a tunnel → Cloudflared → copy the <code style="font-size:10px;">eyJ…</code> token → paste below → Save</li>
+                <li>Add a public hostname: subdomain of your choice, your domain, Type <code style="font-size:10px;">HTTP</code>, URL <code style="font-size:10px;">localhost:3456</code></li>
+                <li>Click Start below (or enable Auto-start)</li>
+              </ol>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
+                <input type="password" id="named-tunnel-token-input" autocomplete="off"
+                  placeholder="eyJ… token from Cloudflare dashboard"
+                  style="flex:1;min-width:180px;font-size:12px;padding:4px 8px;background:var(--input-bg,#1e1e2e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;" />
+                <button id="named-tunnel-save-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border,#555);background:var(--btn-bg,#313244);color:inherit;cursor:pointer;">Save</button>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <button id="named-tunnel-start-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:none;background:#89b4fa;color:#1e1e2e;cursor:pointer;font-weight:600;">Start</button>
+                <button id="named-tunnel-stop-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border,#555);background:var(--btn-bg,#313244);color:inherit;cursor:pointer;">Stop</button>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;user-select:none;">
+                  <input type="checkbox" id="named-tunnel-autostart" style="cursor:pointer;" />
+                  Auto-start on launch
+                </label>
+              </div>
+            </div>`;
         } else {
           const checked = this.state.settings[item.key] ? 'checked' : '';
           html += `
@@ -3897,6 +3927,98 @@ class CWMApp {
     }
 
     this.els.settingsBody.innerHTML = html;
+
+    // ── Named tunnel controls ──────────────────────────────
+    const ntStatus = document.getElementById('named-tunnel-status');
+    const ntTokenInput = document.getElementById('named-tunnel-token-input');
+    const ntSaveBtn = document.getElementById('named-tunnel-save-btn');
+    const ntStartBtn = document.getElementById('named-tunnel-start-btn');
+    const ntStopBtn = document.getElementById('named-tunnel-stop-btn');
+    const ntAutoStart = document.getElementById('named-tunnel-autostart');
+
+    const loadNamedTunnelStatus = async () => {
+      try {
+        const r = await fetch('/api/tunnel/named', { headers: { Authorization: 'Bearer ' + this.state.token } });
+        const d = await r.json();
+        if (ntStatus) {
+          const dot = d.running ? (d.status === 'connected' ? '🟢' : '🟡') : (d.configured ? '⚫' : '⚪');
+          const label = d.running ? d.status : (d.configured ? 'stopped (token saved)' : 'not configured');
+          ntStatus.textContent = dot + ' ' + label;
+        }
+        if (ntAutoStart) ntAutoStart.checked = !!d.autoStart;
+        if (ntStartBtn) ntStartBtn.disabled = d.running;
+        if (ntStopBtn) ntStopBtn.disabled = !d.running;
+      } catch (_) {}
+    };
+    if (ntStatus) loadNamedTunnelStatus();
+
+    if (ntSaveBtn) {
+      ntSaveBtn.addEventListener('click', async () => {
+        const token = ntTokenInput ? ntTokenInput.value.trim() : '';
+        if (!token) { this.showToast('Paste a tunnel token first', 'error'); return; }
+        ntSaveBtn.textContent = 'Saving...';
+        ntSaveBtn.disabled = true;
+        try {
+          const r = await fetch('/api/tunnel/named/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + this.state.token },
+            body: JSON.stringify({ token }),
+          });
+          const d = await r.json();
+          if (d.error) { this.showToast(d.error, 'error'); return; }
+          if (ntTokenInput) ntTokenInput.value = '';
+          this.showToast('Tunnel token saved', 'success');
+          await loadNamedTunnelStatus();
+        } catch (_) {
+          this.showToast('Failed to save token', 'error');
+        } finally {
+          ntSaveBtn.textContent = 'Save';
+          ntSaveBtn.disabled = false;
+        }
+      });
+    }
+
+    if (ntStartBtn) {
+      ntStartBtn.addEventListener('click', async () => {
+        ntStartBtn.disabled = true;
+        ntStartBtn.textContent = 'Starting...';
+        try {
+          const r = await fetch('/api/tunnel/named/start', { method: 'POST', headers: { Authorization: 'Bearer ' + this.state.token } });
+          const d = await r.json();
+          if (d.error) this.showToast(d.error, 'error');
+          else this.showToast('Tunnel connecting...', 'info');
+          await loadNamedTunnelStatus();
+        } catch (_) {
+          this.showToast('Failed to start tunnel', 'error');
+        } finally {
+          ntStartBtn.textContent = 'Start';
+          ntStartBtn.disabled = false;
+        }
+      });
+    }
+
+    if (ntStopBtn) {
+      ntStopBtn.addEventListener('click', async () => {
+        ntStopBtn.disabled = true;
+        try {
+          await fetch('/api/tunnel/named/stop', { method: 'POST', headers: { Authorization: 'Bearer ' + this.state.token } });
+          this.showToast('Tunnel stopped', 'info');
+          await loadNamedTunnelStatus();
+        } catch (_) {} finally {
+          ntStopBtn.disabled = false;
+        }
+      });
+    }
+
+    if (ntAutoStart) {
+      ntAutoStart.addEventListener('change', async () => {
+        await fetch('/api/tunnel/named/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + this.state.token },
+          body: JSON.stringify({ autoStart: ntAutoStart.checked }),
+        });
+      });
+    }
 
     // Bind toggle change events
     this.els.settingsBody.querySelectorAll('input[data-setting]').forEach(input => {
@@ -6835,6 +6957,19 @@ class CWMApp {
       case 'tunnel:closed':
         if (this.state.viewMode === 'resources') this.fetchResources();
         break;
+      case 'namedTunnel:status': {
+        // Update status display if the settings panel is currently open
+        const ntEl = document.getElementById('named-tunnel-status');
+        if (ntEl) {
+          const dot = data.running ? (data.status === 'connected' ? '🟢' : '🟡') : '⚫';
+          ntEl.textContent = dot + ' ' + (data.running ? data.status : 'stopped');
+          const startBtn = document.getElementById('named-tunnel-start-btn');
+          const stopBtn = document.getElementById('named-tunnel-stop-btn');
+          if (startBtn) startBtn.disabled = data.running;
+          if (stopBtn) stopBtn.disabled = !data.running;
+        }
+        break;
+      }
       default:
         // Refresh all for unknown events
         this.loadAll();
