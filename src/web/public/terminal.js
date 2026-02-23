@@ -233,6 +233,7 @@ class TerminalPane {
     this._gotFirstData = false;
     // Completion detection: track whether Claude is actively producing output
     this._isWorking = false;
+    this._idleNotified = false; // true once terminal-idle has fired; prevents re-notification on trivial PTY output
     this._lastOutputTime = 0;
     this._idleCheckTimer = null;
     // Activity detection: real-time parsing of Claude Code output patterns
@@ -1073,6 +1074,8 @@ class TerminalPane {
     }
     if (!this._isWorking) {
       this._isWorking = true;
+      // New work started after being idle -- allow the next idle event to fire
+      this._idleNotified = false;
     }
     // Debounced idle check - if no output for 2 seconds after burst, check for prompt
     clearTimeout(this._idleCheckTimer);
@@ -1112,6 +1115,13 @@ class TerminalPane {
           detail: { sessionId: this.sessionId, activity: this._currentActivity }
         }));
       }
+
+      // Only dispatch terminal-idle once per work cycle. Trivial PTY output
+      // (cursor repositioning, escape sequences) can restart the 2s debounce
+      // timer and land here again while the prompt is still showing. Without
+      // this guard, the notification dot gets re-added after the user clears it.
+      if (this._idleNotified) return;
+      this._idleNotified = true;
 
       // Dispatch custom event for the app to handle
       const container = document.getElementById(this.containerId);

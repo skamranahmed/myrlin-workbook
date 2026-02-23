@@ -10442,6 +10442,14 @@ class CWMApp {
     }
 
     this.renderTerminalGroupTabs();
+
+    // Clear notification dot on the now-active tab AFTER render, since
+    // renderTerminalGroupTabs() replaces all tab button DOM elements.
+    // Without this, the dot could reappear if a stale terminal-idle event
+    // fires during the switch and targets the freshly-rendered button.
+    const newTabBtn = document.querySelector(`.terminal-group-tab[data-group-id="${groupId}"]`);
+    if (newTabBtn) newTabBtn.classList.remove('tab-notify');
+
     this.saveTerminalLayout();
   }
 
