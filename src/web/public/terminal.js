@@ -621,6 +621,10 @@ class TerminalPane {
     } catch (err) {
       this._log('Clipboard paste failed: ' + err.message);
     }
+    // Refocus the terminal after the async clipboard read completes.
+    // The await can cause the browser to shift focus away from xterm's
+    // internal textarea, requiring a manual click to resume typing.
+    if (this.term) this.term.focus();
   }
 
   /**
