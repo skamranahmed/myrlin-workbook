@@ -1673,6 +1673,52 @@ function findJsonlFile(claudeSessionId) {
 }
 
 /**
+ * Resolve the Claude CLI binary path. Tries the bare command first,
+ * then checks common installation paths across platforms.
+ * Caches the result after first successful resolution.
+ * @returns {string|null} Path to the claude binary, or null if not found
+ */
+let _cachedClaudePath = undefined;
+function resolveClaudeCli() {
+  if (_cachedClaudePath !== undefined) return _cachedClaudePath;
+
+  // Try bare command first (works if claude is on PATH)
+  try {
+    execSync(process.platform === 'win32' ? 'where claude' : 'which claude', {
+      stdio: 'pipe', timeout: 5000,
+    });
+    _cachedClaudePath = 'claude';
+    return _cachedClaudePath;
+  } catch (_) {}
+
+  // Check common installation paths
+  const home = os.homedir();
+  const candidates = process.platform === 'win32' ? [
+    path.join(home, '.claude', 'local', 'claude.exe'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'claude'),
+    path.join(home, '.npm-global', 'bin', 'claude'),
+    path.join(home, 'scoop', 'shims', 'claude.cmd'),
+  ] : [
+    path.join(home, '.claude', 'local', 'claude'),
+    '/usr/local/bin/claude',
+    path.join(home, '.npm-global', 'bin', 'claude'),
+    '/opt/homebrew/bin/claude',
+    path.join(home, '.local', 'bin', 'claude'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      _cachedClaudePath = candidate;
+      return _cachedClaudePath;
+    }
+  }
+
+  _cachedClaudePath = null;
+  return null;
+}
+
+/**
  * Parse a JSONL file and calculate token usage and estimated cost.
  * Aggregates usage across all assistant messages, grouped by model.
  * @param {string} jsonlPath - Absolute path to the .jsonl file
@@ -2777,14 +2823,19 @@ app.post('/api/sessions/:id/extract-tasks', requireAuth, async (req, res) => {
 
   const jsonlPath = findJsonlFile(claudeSessionId);
   if (!jsonlPath) {
-    return res.status(404).json({ error: 'No conversation data found for this session' });
+    return res.status(404).json({ error: 'No conversation data found. This session may not have an active Claude conversation yet. Start Claude in this terminal first, or try a discovered session.' });
+  }
+
+  const claudeBin = resolveClaudeCli();
+  if (!claudeBin) {
+    return res.status(400).json({ error: 'Claude CLI not found. Install it (npm install -g @anthropic-ai/claude-code) or make sure it is on your PATH.' });
   }
 
   try {
     // Read and parse conversation
     const { messages, filesTouched } = readConversationForExtraction(jsonlPath);
     if (messages.length < 2) {
-      return res.status(400).json({ error: 'Session has too few messages to extract tasks from' });
+      return res.status(400).json({ error: 'Session has too few messages to extract tasks from. Have a longer conversation first.' });
     }
 
     // Build condensed conversation for the prompt
@@ -2818,12 +2869,12 @@ Example:
 JSON array:`;
 
     const result = await new Promise((resolve, reject) => {
-      execFile('claude', ['--print', '-p', prompt], {
+      execFile(claudeBin, ['--print', '-p', prompt], {
         cwd: session ? (session.workingDir || process.cwd()) : process.cwd(),
         timeout: 90000,
         maxBuffer: 1024 * 512,
       }, (err, stdout) => {
-        if (err) return reject(new Error('Failed to extract tasks. Is Claude CLI installed? ' + (err.message || '')));
+        if (err) return reject(new Error('Task extraction failed: ' + (err.message || 'unknown error')));
         resolve(stdout.trim());
       });
     });
@@ -3188,7 +3239,7 @@ app.post('/api/sessions/:id/refocus', requireAuth, (req, res) => {
   // Find the JSONL conversation file
   const jsonlPath = findJsonlFile(claudeSessionId);
   if (!jsonlPath) {
-    return res.status(404).json({ error: 'No conversation data found for this session' });
+    return res.status(404).json({ error: 'No conversation data found. This session may not have an active Claude conversation yet. Start Claude in this terminal first, or try a discovered session.' });
   }
 
   try {
@@ -5064,13 +5115,17 @@ ${diffSummary || 'No changes'}
 
 Format: Start with a ## Summary section with 2-3 bullet points, then a ## Changes section. Keep it under 300 words. Do not include a title line.`;
 
+    const cliPath = resolveClaudeCli();
+    if (!cliPath) {
+      return res.status(400).json({ error: 'Claude CLI not found. Install it (npm install -g @anthropic-ai/claude-code) or make sure it is on your PATH.' });
+    }
     const description = await new Promise((resolve, reject) => {
-      execFile('claude', ['--print', '-p', prompt], {
+      execFile(cliPath, ['--print', '-p', prompt], {
         cwd: taskCwd,
         timeout: 60000,
         maxBuffer: 1024 * 256,
       }, (err, stdout) => {
-        if (err) return reject(new Error('Failed to generate description. Is Claude CLI installed?'));
+        if (err) return reject(new Error('PR description generation failed: ' + (err.message || 'unknown error')));
         resolve(stdout.trim());
       });
     });
