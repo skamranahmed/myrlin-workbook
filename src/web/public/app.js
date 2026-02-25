@@ -8670,6 +8670,45 @@ class CWMApp {
       },
     });
 
+    // ── Change Environment (shell switcher) ─────────────────
+    // Let users relaunch the terminal in a different shell
+    const currentShell = (tp.spawnOpts && tp.spawnOpts.shell) || (navigator.platform.startsWith('Win') ? 'cmd.exe' : 'bash');
+    const isWin = navigator.platform.startsWith('Win');
+    const shellOptions = isWin ? [
+      { id: 'cmd.exe', label: 'CMD' },
+      { id: 'powershell.exe', label: 'PowerShell' },
+      { id: 'pwsh.exe', label: 'PowerShell 7' },
+      { id: 'git-bash', label: 'Git Bash' },
+    ] : [
+      { id: 'bash', label: 'Bash' },
+      { id: 'zsh', label: 'Zsh' },
+      { id: 'fish', label: 'Fish' },
+    ];
+    items.push({ type: 'sep', label: 'Environment' });
+    for (const opt of shellOptions) {
+      const isCurrent = opt.id === currentShell;
+      items.push({
+        label: (isCurrent ? '\u2713 ' : '  ') + opt.label,
+        className: isCurrent ? 'context-item-current' : '',
+        action: isCurrent ? null : async () => {
+          // Kill existing PTY, then relaunch in the new shell
+          const sid = tp.sessionId;
+          const sName = tp.sessionName;
+          const oldOpts = { ...(tp.spawnOpts || {}) };
+          try {
+            await this.api('POST', `/api/pty/${encodeURIComponent(sid)}/kill`);
+          } catch (_) {
+            // Session may already be dead, continue with relaunch
+          }
+          this.closeTerminalPane(slotIdx);
+          // Reopen in the same slot with the new shell
+          const newOpts = { ...oldOpts, shell: opt.id };
+          this.openTerminalInPane(slotIdx, sid, sName, newOpts);
+          this.showToast(`Switched to ${opt.label}`, 'success');
+        },
+      });
+    }
+
     // ── Shared session management items ───────────────────────
     const sessionItems = this._buildSessionContextItems(tp.sessionId);
     if (sessionItems) {
@@ -9558,9 +9597,13 @@ class CWMApp {
     // Desktop: render floating context menu (existing behavior)
     const container = this.els.contextMenuItems;
     container.innerHTML = items.map((item, idx) => {
-      if (item.type === 'sep') return '<div class="context-menu-sep"></div>';
+      if (item.type === 'sep') {
+        if (item.label) return `<div class="context-menu-sep"><span class="ctx-sep-label">${item.label}</span></div>`;
+        return '<div class="context-menu-sep"></div>';
+      }
       const cls = ['context-menu-item'];
       if (item.danger) cls.push('ctx-danger');
+      if (item.className) cls.push(item.className);
       if (item.check) cls.push('ctx-checked');
       if (item.submenu) cls.push('ctx-has-submenu');
       const disabledAttr = item.disabled ? ' disabled' : '';

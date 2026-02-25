@@ -486,6 +486,7 @@ class TerminalPane {
     if (this.spawnOpts.bypassPermissions) wsUrl += '&bypassPermissions=true';
     if (this.spawnOpts.verbose) wsUrl += '&verbose=true';
     if (this.spawnOpts.model) wsUrl += '&model=' + encodeURIComponent(this.spawnOpts.model);
+    if (this.spawnOpts.shell) wsUrl += '&shell=' + encodeURIComponent(this.spawnOpts.shell);
     this._log('Opening WebSocket: ' + wsUrl.substring(0, 80) + '...');
 
     // Add loading animation to the pane

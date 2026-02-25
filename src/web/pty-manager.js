@@ -125,7 +125,7 @@ class PtySessionManager {
    * @param {boolean} [options.bypassPermissions=false] - If true, adds --dangerously-skip-permissions
    * @returns {PtySession} The PTY session object
    */
-  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false } = {}) {
+  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null } = {}) {
     // Return existing session if already alive
     const existing = this.sessions.get(sessionId);
     if (existing && existing.alive) {
@@ -206,19 +206,58 @@ class PtySessionManager {
     }
 
     // Platform-specific shell selection
-    // On non-Windows, validate SHELL against an allowlist to prevent arbitrary
-    // binary execution if the server environment is compromised (important for remote access)
+    // Supports user-requested shell override via context menu "Change Environment".
+    // All shells validated against allowlists to prevent arbitrary binary execution.
     const isWindows = process.platform === 'win32';
-    const ALLOWED_SHELLS = [
+    const ALLOWED_SHELLS_UNIX = [
       '/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh',
       '/bin/zsh', '/usr/bin/zsh', '/bin/fish', '/usr/bin/fish',
       '/bin/dash', '/usr/bin/dash', '/bin/ash',
     ];
-    const safeShell = (process.env.SHELL && ALLOWED_SHELLS.includes(process.env.SHELL))
-      ? process.env.SHELL
-      : '/bin/bash';
-    const shell = isWindows ? 'cmd.exe' : safeShell;
-    const shellArgs = isWindows ? ['/c', fullCommand] : ['-l', '-c', fullCommand];
+    const ALLOWED_SHELLS_WIN = ['cmd.exe', 'powershell.exe', 'pwsh.exe'];
+    // Git Bash paths checked at spawn time (may not exist on all systems)
+    const GIT_BASH_PATHS = [
+      'C:\\Program Files\\Git\\bin\\bash.exe',
+      'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    ];
+
+    let shell, shellArgs;
+    if (requestedShell) {
+      // User explicitly chose a shell via "Change Environment"
+      if (isWindows) {
+        if (ALLOWED_SHELLS_WIN.includes(requestedShell)) {
+          shell = requestedShell;
+        } else if (requestedShell === 'git-bash') {
+          // Resolve Git Bash to an actual path
+          const gitBashPath = GIT_BASH_PATHS.find(p => fs.existsSync(p));
+          shell = gitBashPath || 'cmd.exe';
+          if (!gitBashPath) console.log('[PTY] Git Bash not found, falling back to cmd.exe');
+        } else {
+          console.log(`[PTY] Rejected unknown Windows shell "${requestedShell}", using cmd.exe`);
+          shell = 'cmd.exe';
+        }
+      } else {
+        // Unix: check if requested shell is in allowlist
+        const match = ALLOWED_SHELLS_UNIX.find(s => s.endsWith('/' + requestedShell) || s === requestedShell);
+        shell = match || '/bin/bash';
+      }
+    } else {
+      // Default: cmd.exe on Windows, user's $SHELL (validated) on Unix
+      const safeShell = (process.env.SHELL && ALLOWED_SHELLS_UNIX.includes(process.env.SHELL))
+        ? process.env.SHELL
+        : '/bin/bash';
+      shell = isWindows ? 'cmd.exe' : safeShell;
+    }
+
+    // Build shell arguments based on the resolved shell binary
+    if (shell === 'cmd.exe') {
+      shellArgs = ['/c', fullCommand];
+    } else if (shell === 'powershell.exe' || shell === 'pwsh.exe') {
+      shellArgs = ['-NoProfile', '-Command', fullCommand];
+    } else {
+      // Unix shells and Git Bash all use -l -c
+      shellArgs = ['-l', '-c', fullCommand];
+    }
 
     console.log(`[PTY] Spawning: ${shell} ${shellArgs.join(' ')} (cwd: ${resolvedCwd})`);
 

@@ -21,6 +21,9 @@ const isSafeCommand = (v) => v && typeof v === 'string' && v.length <= 200 && !S
 const isSafeModel = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9._:-]+$/.test(v) && v.length <= 100;
 const isSafeSessionId = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9_-]+$/.test(v) && v.length <= 100;
 const isSafeDir = (v) => v && typeof v === 'string' && v.length <= 500 && !/[;&|`$(){}[\]<>!#*?\n\r]/.test(v);
+// Shell names validated against a strict allowlist (no arbitrary binary paths)
+const ALLOWED_SHELL_NAMES = ['cmd.exe', 'powershell.exe', 'pwsh.exe', 'git-bash', 'bash', 'zsh', 'fish', 'sh', 'dash', 'ash'];
+const isSafeShell = (v) => v && typeof v === 'string' && ALLOWED_SHELL_NAMES.includes(v);
 
 /**
  * Attach a WebSocket server to an existing HTTP server for PTY terminal access.
@@ -83,6 +86,7 @@ function attachPtyWebSocket(httpServer) {
       if (query.bypassPermissions === 'true') spawnOpts.bypassPermissions = true;
       if (query.verbose === 'true') spawnOpts.verbose = true;
       if (query.model && isSafeModel(query.model)) spawnOpts.model = query.model;
+      if (query.shell && isSafeShell(query.shell)) spawnOpts.shell = query.shell;
 
       // Attach the client to the PTY session
       ptyManager.attachClient(sessionId, ws, spawnOpts);

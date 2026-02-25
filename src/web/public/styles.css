@@ -3345,6 +3345,27 @@ textarea.input {
   margin: 4px 8px;
 }
 
+/* Section label on separator (e.g. "Environment") */
+.context-menu-sep .ctx-sep-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  padding: 4px 4px 0;
+  margin-top: -2px;
+}
+
+/* Current/active item in a radio-style group (e.g. active shell) */
+.context-item-current {
+  opacity: 0.55;
+  cursor: default;
+}
+.context-item-current:hover {
+  background: none;
+}
+
 .context-menu-item[disabled] {
   opacity: 0.35;
   pointer-events: none;
