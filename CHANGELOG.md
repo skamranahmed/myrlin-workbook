@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-02-24
+
+### Added
+
+- **Change Environment (shell switcher)** -- Right-click any terminal pane to switch the Claude session's shell environment. On Windows: CMD, PowerShell, PowerShell 7 (pwsh), and Git Bash (auto-detected). On macOS/Linux: Bash, Zsh, Fish. The current shell is indicated with a checkmark. Switching kills the PTY and relaunches in the same pane slot with the new shell. Shell preference persists across tab group switches and layout restores. All shell names validated against strict allowlists for security.
+
 ## [0.8.0] - 2026-02-23
 
 ### Added

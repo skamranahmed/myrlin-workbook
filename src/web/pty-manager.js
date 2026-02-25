@@ -249,6 +249,29 @@ class PtySessionManager {
       shell = isWindows ? 'cmd.exe' : safeShell;
     }
 
+    // Override SHELL env var to match the selected shell so Claude Code's
+    // internal shell detection picks up the right one. Without this, Claude
+    // Code launched from PowerShell may still detect MINGW64 Git Bash via
+    // an inherited SHELL=/usr/bin/bash from the parent process.
+    if (isWindows) {
+      if (shell === 'powershell.exe' || shell === 'pwsh.exe') {
+        sessionEnv.SHELL = shell;
+        // Remove MINGW/Cygwin paths that confuse Windows-native shells
+        delete sessionEnv.MSYSTEM;
+        delete sessionEnv.MINGW_PREFIX;
+      } else if (shell === 'cmd.exe') {
+        // CMD doesn't use SHELL, remove it so Claude Code defaults to
+        // Windows-native behavior instead of detecting Git Bash
+        delete sessionEnv.SHELL;
+        delete sessionEnv.MSYSTEM;
+        delete sessionEnv.MINGW_PREFIX;
+      }
+      // For git-bash: keep SHELL as-is (bash is correct)
+    } else {
+      // Unix: set SHELL to the resolved path
+      sessionEnv.SHELL = shell;
+    }
+
     // Build shell arguments based on the resolved shell binary
     if (shell === 'cmd.exe') {
       shellArgs = ['/c', fullCommand];
