@@ -1673,6 +1673,57 @@ function findJsonlFile(claudeSessionId) {
 }
 
 /**
+ * Find JSONL files by matching a working directory to Claude project directories.
+ * Used as a fallback when resumeSessionId is not set (e.g. discovered/imported sessions).
+ * Returns the most recent JSONL file path, or null.
+ * @param {string} workingDir - The session's working directory
+ * @returns {{jsonlPath: string, claudeSessionId: string}|null}
+ */
+function findJsonlByWorkingDir(workingDir) {
+  if (!workingDir) return null;
+  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  if (!fs.existsSync(claudeProjectsDir)) return null;
+
+  try {
+    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+
+    // Normalize the working dir for comparison
+    const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).toLowerCase();
+
+    for (const dir of projectDirs) {
+      // Decode the encoded directory name to a real path
+      const decodedPath = decodeClaudePath(dir.name);
+      const normalizedDecoded = decodedPath.replace(/[/\\]/g, path.sep).toLowerCase();
+
+      if (normalizedDecoded === normalizedWorkDir) {
+        // Found matching project directory, get the most recent JSONL
+        const projPath = path.join(claudeProjectsDir, dir.name);
+        const jsonls = fs.readdirSync(projPath)
+          .filter(f => f.endsWith('.jsonl'))
+          .map(f => {
+            try {
+              const stat = fs.statSync(path.join(projPath, f));
+              return { name: f, mtime: stat.mtimeMs };
+            } catch { return null; }
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.mtime - a.mtime);
+
+        if (jsonls.length > 0) {
+          const claudeSessionId = jsonls[0].name.replace('.jsonl', '');
+          return {
+            jsonlPath: path.join(projPath, jsonls[0].name),
+            claudeSessionId,
+          };
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/**
  * Resolve the Claude CLI binary path. Tries the bare command first,
  * then checks common installation paths across platforms.
  * Caches the result after first successful resolution.
@@ -1847,21 +1898,29 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
   const store = getStore();
   const session = store.getSession(req.params.id);
 
-  const resumeSessionId = (session && session.resumeSessionId) || req.params.id;
-  if (!resumeSessionId) {
-    return res.json({
-      sessionId: req.params.id,
-      resumeSessionId: null,
-      tokens: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 },
-      cost: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 },
-      modelBreakdown: {},
-      messageCount: 0,
-      firstMessage: null,
-      lastMessage: null,
-    });
+  let resumeSessionId = (session && session.resumeSessionId) || null;
+  let jsonlPath = resumeSessionId ? findJsonlFile(resumeSessionId) : null;
+
+  // Fallback: if no JSONL found by resumeSessionId, try matching by workingDir.
+  // This handles discovered/imported sessions that don't have resumeSessionId set.
+  if (!jsonlPath && session && session.workingDir) {
+    const fallback = findJsonlByWorkingDir(session.workingDir);
+    if (fallback) {
+      jsonlPath = fallback.jsonlPath;
+      // Backfill the resumeSessionId so future lookups are fast
+      if (!session.resumeSessionId) {
+        store.updateSession(req.params.id, { resumeSessionId: fallback.claudeSessionId });
+        resumeSessionId = fallback.claudeSessionId;
+      }
+    }
   }
 
-  const jsonlPath = findJsonlFile(resumeSessionId);
+  // Last resort: try the Myrlin session ID directly (unlikely to match, but try)
+  if (!jsonlPath && !resumeSessionId) {
+    jsonlPath = findJsonlFile(req.params.id);
+    resumeSessionId = req.params.id;
+  }
+
   if (!jsonlPath) {
     return res.json({
       sessionId: req.params.id,

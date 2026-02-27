@@ -5747,7 +5747,8 @@ class CWMApp {
           !p.dirExists ? '<span class="discover-badge discover-badge-missing">missing</span>' : '',
         ].filter(Boolean).join(' ');
 
-        return `<div class="discover-row" data-path="${this.escapeHtml(p.realPath)}" data-name="${this.escapeHtml(name)}">
+        const latestSessionId = p.sessions && p.sessions.length > 0 ? p.sessions[0].name : '';
+        return `<div class="discover-row" data-path="${this.escapeHtml(p.realPath)}" data-name="${this.escapeHtml(name)}" data-session-id="${this.escapeHtml(latestSessionId)}">
           <div class="discover-check">
             <input type="checkbox" class="discover-cb" ${p.dirExists ? 'checked' : ''} ${!p.dirExists ? 'disabled' : ''}>
           </div>
@@ -5811,6 +5812,7 @@ class CWMApp {
           selected.push({
             name: row.dataset.name,
             path: row.dataset.path,
+            sessionId: row.dataset.sessionId || '',
           });
         }
       });
@@ -5830,13 +5832,18 @@ class CWMApp {
       let created = 0;
       for (const proj of selected) {
         try {
-          await this.api('POST', '/api/sessions', {
+          const sessionData = {
             name: proj.name,
             workspaceId: this.state.activeWorkspace.id,
             workingDir: proj.path,
             topic: '',
             command: 'claude',
-          });
+          };
+          // Pass the Claude CLI session UUID so cost tracking works immediately
+          if (proj.sessionId) {
+            sessionData.resumeSessionId = proj.sessionId;
+          }
+          await this.api('POST', '/api/sessions', sessionData);
           created++;
         } catch {
           // skip duplicates or errors
