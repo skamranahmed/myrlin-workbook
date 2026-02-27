@@ -1035,7 +1035,12 @@ function resolveProjectPath(projectDir, encodedName) {
     const indexPath = path.join(projectDir, 'sessions-index.json');
     if (fs.existsSync(indexPath)) {
       const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      // Newer format has originalPath at top level
       if (index.originalPath) return index.originalPath;
+      // Older format only has projectPath inside entries
+      if (index.entries && index.entries.length > 0 && index.entries[0].projectPath) {
+        return index.entries[0].projectPath;
+      }
     }
   } catch (_) {}
   return decodeClaudePath(encodedName);
@@ -1688,17 +1693,18 @@ function findJsonlByWorkingDir(workingDir) {
     const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
       .filter(d => d.isDirectory());
 
-    // Normalize the working dir for comparison
-    const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).toLowerCase();
+    // Normalize the working dir for comparison (case-insensitive, unified separators)
+    const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
 
     for (const dir of projectDirs) {
-      // Decode the encoded directory name to a real path
-      const decodedPath = decodeClaudePath(dir.name);
-      const normalizedDecoded = decodedPath.replace(/[/\\]/g, path.sep).toLowerCase();
+      // Use resolveProjectPath which prefers sessions-index.json (reliable),
+      // falling back to decodeClaudePath for legacy directories
+      const projPath = path.join(claudeProjectsDir, dir.name);
+      const resolvedPath = resolveProjectPath(projPath, dir.name);
+      const normalizedResolved = resolvedPath.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
 
-      if (normalizedDecoded === normalizedWorkDir) {
+      if (normalizedResolved === normalizedWorkDir) {
         // Found matching project directory, get the most recent JSONL
-        const projPath = path.join(claudeProjectsDir, dir.name);
         const jsonls = fs.readdirSync(projPath)
           .filter(f => f.endsWith('.jsonl'))
           .map(f => {
