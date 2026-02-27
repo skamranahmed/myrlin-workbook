@@ -6308,9 +6308,41 @@ app.get('/api/browse', requireAuth, (req, res) => {
 // Reference to PTY manager for cleanup on shutdown
 let _ptyManager = null;
 
+/**
+ * Backfill resumeSessionId for sessions that have a workingDir but no resumeSessionId.
+ * This ensures cost tracking works for discovered/imported sessions and any sessions
+ * where PTY backfill failed. Runs once at startup, non-blocking.
+ */
+function backfillResumeSessionIds() {
+  try {
+    const store = getStore();
+    const sessions = store.getAllSessionsList();
+    let backfilled = 0;
+
+    for (const session of sessions) {
+      if (session.resumeSessionId || !session.workingDir) continue;
+
+      const result = findJsonlByWorkingDir(session.workingDir);
+      if (result) {
+        store.updateSession(session.id, { resumeSessionId: result.claudeSessionId });
+        backfilled++;
+      }
+    }
+
+    if (backfilled > 0) {
+      console.log(`[Server] Backfilled resumeSessionId for ${backfilled} session(s)`);
+    }
+  } catch (err) {
+    console.error('[Server] Failed to backfill resumeSessionIds:', err.message);
+  }
+}
+
 function startServer(port = 3456, host = '127.0.0.1') {
   // Wire store events to SSE before accepting connections
   attachStoreEvents();
+
+  // Backfill missing resumeSessionIds so cost tracking works for all sessions
+  setImmediate(() => backfillResumeSessionIds());
 
   const server = app.listen(port, host, () => {
     // Server is ready - caller handles the log message
