@@ -4693,8 +4693,8 @@ html.activity-indicators-disabled .terminal-pane-activity {
   flex-shrink: 0;
 }
 
-.ws-project-group-chevron.collapsed {
-  transform: rotate(-90deg);
+.ws-project-group-chevron.open {
+  transform: rotate(90deg);
 }
 
 .ws-project-group-path {
@@ -4717,8 +4717,29 @@ html.activity-indicators-disabled .terminal-pane-activity {
   padding-left: 4px;
 }
 
-.ws-project-group-body.collapsed {
-  display: none;
+/* Sidebar section divider between categories and uncategorized projects */
+.sidebar-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  margin-top: 4px;
+}
+
+.sidebar-section-divider::before,
+.sidebar-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--surface1);
+}
+
+.sidebar-section-divider-label {
+  font-size: 10px;
+  color: var(--overlay0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 /* ═══════════════════════════════════════════════════════════ */

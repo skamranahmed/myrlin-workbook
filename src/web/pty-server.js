@@ -87,6 +87,7 @@ function attachPtyWebSocket(httpServer) {
       if (query.verbose === 'true') spawnOpts.verbose = true;
       if (query.model && isSafeModel(query.model)) spawnOpts.model = query.model;
       if (query.shell && isSafeShell(query.shell)) spawnOpts.shell = query.shell;
+      if (query.newSession === 'true') spawnOpts.newSession = true;
 
       // Attach the client to the PTY session
       ptyManager.attachClient(sessionId, ws, spawnOpts);

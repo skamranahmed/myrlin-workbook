@@ -125,7 +125,7 @@ class PtySessionManager {
    * @param {boolean} [options.bypassPermissions=false] - If true, adds --dangerously-skip-permissions
    * @returns {PtySession} The PTY session object
    */
-  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null } = {}) {
+  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false } = {}) {
     // Return existing session if already alive
     const existing = this.sessions.get(sessionId);
     if (existing && existing.alive) {
@@ -153,10 +153,11 @@ class PtySessionManager {
     let fullCommand = command;
     if (resumeSessionId) {
       fullCommand += ' --resume ' + resumeSessionId;
-    } else if (cwd) {
+    } else if (cwd && !newSession) {
       // No explicit session to resume - use --continue to pick up most recent
       // conversation in this working directory. On a fresh dir with no history,
       // Claude will start a new conversation (same as bare `claude`).
+      // Skip --continue when newSession is true (user explicitly wants a fresh session).
       fullCommand += ' --continue';
     }
     if (bypassPermissions) {

@@ -134,6 +134,8 @@ class CWMApp {
 
     // Load persisted workspace group collapse state
     try { this._groupCollapseState = JSON.parse(localStorage.getItem('cwm_groupCollapseState') || '{}'); } catch (_) { this._groupCollapseState = {}; }
+    // Load persisted workspace accordion collapse state (prevents re-open on re-render)
+    try { this._wsCollapseState = JSON.parse(localStorage.getItem('cwm_wsCollapseState') || '{}'); } catch (_) { this._wsCollapseState = {}; }
 
     // ─── Terminal panes ──────────────────────────────────────────
     this.terminalPanes = new Array(CWMApp.MAX_PANES).fill(null);
@@ -615,8 +617,14 @@ class CWMApp {
     // Vertical resize between workspaces & projects sections
     this.initSidebarSectionResize();
 
-    // Workspace
-    this.els.createWorkspaceBtn.addEventListener('click', () => this.createWorkspace());
+    // Workspace / Category creation dropdown
+    this.els.createWorkspaceBtn.addEventListener('click', (e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      this._renderContextItems('New', [
+        { label: 'New Project', icon: '&#128193;', action: () => this.createWorkspace() },
+        { label: 'New Category', icon: '&#128194;', action: () => this.createGroup() },
+      ], rect.left, rect.bottom + 4);
+    });
 
     // Session
     this.els.createSessionBtn.addEventListener('click', () => this.createSession());
@@ -1358,10 +1366,12 @@ class CWMApp {
         const body = group.querySelector('.ws-project-group-body');
         const chevron = projectGroupHeader.querySelector('.ws-project-group-chevron');
         const key = group.dataset.groupKey;
-        const isCollapsed = body.classList.toggle('collapsed');
-        chevron.classList.toggle('collapsed', isCollapsed);
+        // Toggle: if body is currently visible, hide it (and vice versa)
+        const isNowHidden = !body.hidden;
+        body.hidden = isNowHidden;
+        chevron.classList.toggle('open', !isNowHidden);
         const st = JSON.parse(localStorage.getItem('cwm_projectGroupState') || '{}');
-        st[key] = !isCollapsed;
+        st[key] = !isNowHidden; // true = expanded, false = collapsed
         localStorage.setItem('cwm_projectGroupState', JSON.stringify(st));
         return;
       }
@@ -1386,16 +1396,25 @@ class CWMApp {
         const wsId = workspaceItem.dataset.id;
         const isAlreadyActive = this.state.activeWorkspace && this.state.activeWorkspace.id === wsId;
         if (isAlreadyActive) {
+          // Toggle the active workspace accordion and persist the state
           const accordion = workspaceItem.closest('.workspace-accordion');
           if (accordion) {
             const body = accordion.querySelector('.workspace-accordion-body');
             const chevron = workspaceItem.querySelector('.ws-chevron');
             if (body) body.hidden = !body.hidden;
             if (chevron) chevron.classList.toggle('open', body && !body.hidden);
+            // Persist so re-renders don't re-open it
+            if (!this._wsCollapseState) this._wsCollapseState = {};
+            this._wsCollapseState[wsId] = body ? body.hidden : false;
+            try { localStorage.setItem('cwm_wsCollapseState', JSON.stringify(this._wsCollapseState)); } catch (_) {}
           }
         } else {
           wsList.querySelectorAll('.workspace-accordion-body').forEach(b => b.hidden = true);
           wsList.querySelectorAll('.ws-chevron').forEach(c => c.classList.remove('open'));
+          // Clear collapse state for newly selected workspace so it opens
+          if (!this._wsCollapseState) this._wsCollapseState = {};
+          delete this._wsCollapseState[wsId];
+          try { localStorage.setItem('cwm_wsCollapseState', JSON.stringify(this._wsCollapseState)); } catch (_) {}
           this.selectWorkspace(wsId);
         }
         return;
@@ -2386,7 +2405,7 @@ class CWMApp {
       const emptySlot = this.terminalPanes.findIndex(p => p === null);
       if (emptySlot !== -1) {
         this.setViewMode('terminal');
-        const spawnOpts = { cwd: dir };
+        const spawnOpts = { cwd: dir, newSession: true };
         if (flags.bypassPermissions) spawnOpts.bypassPermissions = true;
         this.openTerminalInPane(emptySlot, session.id, session.name, spawnOpts);
       }
@@ -7052,16 +7071,7 @@ class CWMApp {
       rosewater: '#f5e0dc',
     };
 
-    // Build child workspace map for nested rendering (1 level deep only)
-    const childMap = {};
-    workspaces.forEach(ws => {
-      if (ws.parentId) {
-        if (!childMap[ws.parentId]) childMap[ws.parentId] = [];
-        childMap[ws.parentId].push(ws);
-      }
-    });
-
-    const renderWorkspaceItem = (ws, isChild = false) => {
+    const renderWorkspaceItem = (ws) => {
       const isActive = this.state.activeWorkspace && this.state.activeWorkspace.id === ws.id;
       const color = colorMap[ws.color] || colorMap.mauve;
       const allWsSessions = (this.state.allSessions || this.state.sessions).filter(s => s.workspaceId === ws.id);
@@ -7180,33 +7190,32 @@ class CWMApp {
         sessionItems = dirKeys.map(dir => {
           const dirSessions = sessionsByDir[dir];
           const groupKey = ws.id + ':' + dir;
-          const isCollapsed = projectGroupState[groupKey] === false;
+          // Default: expanded (true or missing). Explicitly false = collapsed.
+          const isExpanded = projectGroupState[groupKey] !== false;
           // Show last 2 path segments for readability
           const parts = dir.replace(/\\/g, '/').split('/');
           const shortDir = parts.slice(-2).join('/');
           return `<div class="ws-project-group" data-group-key="${this.escapeHtml(groupKey)}">
             <div class="ws-project-group-header" data-dir="${this.escapeHtml(dir)}" data-ws-id="${ws.id}" title="${this.escapeHtml(dir)}">
-              <span class="ws-project-group-chevron${isCollapsed ? ' collapsed' : ''}">&#9654;</span>
+              <span class="ws-project-group-chevron${isExpanded ? ' open' : ''}">&#9654;</span>
               <span class="ws-project-group-path">${this.escapeHtml(shortDir)}</span>
               <span class="ws-project-group-count">${dirSessions.length}</span>
             </div>
-            <div class="ws-project-group-body${isCollapsed ? ' collapsed' : ''}">
+            <div class="ws-project-group-body"${isExpanded ? '' : ' hidden'}>
               ${dirSessions.map(renderSessionItem).join('')}
             </div>
           </div>`;
         }).join('');
       }
 
-      // Build child workspaces HTML (only for non-child items, 1 level deep)
-      const childrenHtml = !isChild ? (childMap[ws.id] || []).map(child => renderWorkspaceItem(child, true)).join('') : '';
-      const childWrapperHtml = childrenHtml ? `<div class="ws-children" data-parent="${ws.id}">${childrenHtml}</div>` : '';
-
-      const childClass = isChild ? ' ws-item-child' : '';
+      // Respect persisted collapse state: active workspace stays open unless user manually collapsed it
+      const isManuallyCollapsed = this._wsCollapseState && this._wsCollapseState[ws.id] === true;
+      const showBody = isActive && !isManuallyCollapsed;
 
       return `
-        <div class="workspace-accordion${childClass}" data-id="${ws.id}">
-          <div class="workspace-item${isActive ? ' active' : ''}${childClass}" data-id="${ws.id}" draggable="true">
-            <span class="ws-chevron${isActive ? ' open' : ''}">&#9654;</span>
+        <div class="workspace-accordion" data-id="${ws.id}">
+          <div class="workspace-item${isActive ? ' active' : ''}" data-id="${ws.id}" draggable="true">
+            <span class="ws-chevron${showBody ? ' open' : ''}">&#9654;</span>
             <div class="workspace-color-dot" style="background: ${color}"></div>
             <div class="workspace-info">
               <div class="workspace-name">${this.escapeHtml(ws.name)}</div>
@@ -7226,29 +7235,26 @@ class CWMApp {
               </button>
             </div>
           </div>
-          <div class="workspace-accordion-body"${isActive ? '' : ' hidden'}>
+          <div class="workspace-accordion-body"${showBody ? '' : ' hidden'}>
             ${sessionItems || '<div class="ws-session-empty">No sessions</div>'}
           </div>
-        </div>${childWrapperHtml}`;
+        </div>`;
     };
 
     // Split workspaces into grouped and ungrouped
-    // Child workspaces (those with parentId) are rendered under their parent, not separately
     const groups = this.state.groups || [];
     const groupedIds = new Set();
     groups.forEach(g => (g.workspaceIds || []).forEach(id => groupedIds.add(id)));
-    const childIds = new Set(workspaces.filter(ws => ws.parentId).map(ws => ws.id));
-    const ungrouped = workspaces.filter(ws => !groupedIds.has(ws.id) && !childIds.has(ws.id));
+    const ungrouped = workspaces.filter(ws => !groupedIds.has(ws.id));
 
     let html = '';
 
-    // Render groups FIRST at the top so they're prominent
+    // Render categories (groups) at the top
     groups.forEach(group => {
       const groupColor = colorMap[group.color] || colorMap.mauve;
       const groupWorkspaces = (group.workspaceIds || [])
         .map(id => workspaces.find(ws => ws.id === id))
-        .filter(Boolean)
-        .filter(ws => !ws.parentId); // Child workspaces render under their parent, not separately in groups
+        .filter(Boolean);
 
       // Show empty groups too so user can drag workspaces into them
       const groupCount = groupWorkspaces.length;
@@ -7271,7 +7277,12 @@ class CWMApp {
         </div>`;
     });
 
-    // Render ungrouped top-level workspaces below groups (children render nested via renderWorkspaceItem)
+    // Visual divider between categories and uncategorized projects
+    if (groups.length > 0 && ungrouped.length > 0) {
+      html += `<div class="sidebar-section-divider"><span class="sidebar-section-divider-label">Uncategorized</span></div>`;
+    }
+
+    // Render ungrouped projects
     html += ungrouped.map(ws => renderWorkspaceItem(ws)).join('');
 
     list.innerHTML = html;
@@ -7341,9 +7352,6 @@ class CWMApp {
           this.showToast(`Auto-docs ${newVal ? 'enabled' : 'disabled'}`, 'info');
         }
       },
-      { type: 'sep' },
-      { label: 'Set Parent...', icon: '&#128193;', action: () => this.setWorkspaceParent(workspaceId) },
-      ...(ws.parentId ? [{ label: 'Remove Parent', icon: '&#8592;', action: () => this.removeWorkspaceParent(workspaceId) }] : []),
       { type: 'sep' },
       ...(groupItems.length > 0 ? [
         { label: 'Move to Category', icon: '&#8594;', disabled: true },
@@ -7427,63 +7435,6 @@ class CWMApp {
       this.renderWorkspaces();
     } catch (err) {
       this.showToast(err.message || 'Failed to remove project', 'error');
-    }
-  }
-
-  /**
-   * Set a parent workspace for nesting (1 level deep only).
-   * Shows a prompt to pick from available top-level workspaces.
-   */
-  async setWorkspaceParent(workspaceId) {
-    const ws = this.state.workspaces.find(w => w.id === workspaceId);
-    if (!ws) return;
-
-    // Only allow setting parent to top-level workspaces (no parentId)
-    // and exclude self and current parent
-    const others = this.state.workspaces.filter(w =>
-      w.id !== workspaceId &&
-      w.id !== ws.parentId &&
-      !w.parentId // Don't allow nested children (only 1 level deep)
-    );
-
-    if (others.length === 0) {
-      this.showToast('No available parent projects', 'info');
-      return;
-    }
-
-    const options = others.map(w => ({ value: w.id, label: w.name }));
-    const result = await this.showPromptModal({
-      title: 'Set Parent Project',
-      fields: [
-        { key: 'parentId', label: 'Parent Project', type: 'select', options, required: true },
-      ],
-      confirmText: 'Set Parent',
-    });
-
-    if (result && result.parentId) {
-      try {
-        await this.api('PUT', `/api/workspaces/${workspaceId}`, { parentId: result.parentId });
-        await this.loadWorkspaces();
-        this.renderWorkspaces();
-        const parentWs = others.find(w => w.id === result.parentId);
-        this.showToast(`Moved under ${parentWs ? parentWs.name : 'parent'}`, 'success');
-      } catch (err) {
-        this.showToast(err.message || 'Failed to set parent', 'error');
-      }
-    }
-  }
-
-  /**
-   * Remove parent from a child workspace, making it top-level again.
-   */
-  async removeWorkspaceParent(workspaceId) {
-    try {
-      await this.api('PUT', `/api/workspaces/${workspaceId}`, { parentId: null });
-      await this.loadWorkspaces();
-      this.renderWorkspaces();
-      this.showToast('Project is now top-level', 'success');
-    } catch (err) {
-      this.showToast(err.message || 'Failed to remove parent', 'error');
     }
   }
 

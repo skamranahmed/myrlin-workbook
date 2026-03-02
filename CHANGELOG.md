@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-03-02
+
+### Fixed
+
+- **Sidebar chevrons** - Project directory group arrows now correctly point right (collapsed) and down (expanded), matching the workspace accordion pattern
+- **Accordion persistence** - Collapsed workspace accordions no longer randomly re-open on SSE re-renders. Collapse state is persisted to localStorage
+- **New session resume bug** - Right-click "New Session Here" on project directories now starts a fresh Claude session instead of resuming the most recent one via `--continue`
+
+### Changed
+
+- **+ button dropdown** - The sidebar + button now offers both "New Project" and "New Category" options via a dropdown menu
+- **Visual divider** - Added an "Uncategorized" divider between category groups and ungrouped projects in the sidebar
+- **Removed workspace nesting** - Removed "Set Parent" and "Remove Parent" from the workspace context menu. Use Categories for grouping instead, which is simpler and less confusing
+
 ## [0.8.1] - 2026-02-24
 
 ### Added
