@@ -8790,7 +8790,7 @@ class CWMApp {
    * @param {number} slotIdx - The terminal pane slot index
    */
   toggleVoiceInput(slotIdx) {
-    // If already recording for this slot, stop and return
+    // If already recording for this slot, stop, send accumulated text, and return
     if (this._voiceRecognitions[slotIdx]) {
       this._stopVoiceRecognition(slotIdx);
       return;
@@ -8809,86 +8809,104 @@ class CWMApp {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;   // Single utterance mode
+    recognition.continuous = true;    // Keep listening until user clicks stop
     recognition.interimResults = true; // Show partial results while speaking
     recognition.lang = 'en-US';
 
     const paneEl = document.getElementById(`term-pane-${slotIdx}`);
     const micBtn = paneEl ? paneEl.querySelector('.terminal-pane-mic') : null;
 
+    // Accumulated final transcript segments (sent when user clicks stop)
+    let accumulatedTranscript = '';
+
     // Create interim overlay element for showing live transcription
     let interimOverlay = null;
     if (paneEl) {
       interimOverlay = document.createElement('div');
       interimOverlay.className = 'voice-interim-overlay';
-      interimOverlay.textContent = 'Listening...';
+      interimOverlay.textContent = 'Listening... (click mic to send)';
       paneEl.appendChild(interimOverlay);
     }
+
+    // Update the overlay with accumulated + interim text
+    const updateOverlay = (interim) => {
+      if (!interimOverlay) return;
+      const display = accumulatedTranscript + (interim ? interim : '');
+      interimOverlay.textContent = display || 'Listening... (click mic to send)';
+    };
 
     // Handle speech recognition results (both interim and final)
     recognition.onresult = (event) => {
       let interimTranscript = '';
-      let finalTranscript = '';
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          finalTranscript += transcript;
+          // Accumulate finalized segments (browser commits these on natural pauses)
+          accumulatedTranscript += transcript;
         } else {
           interimTranscript += transcript;
         }
       }
 
-      // Update the interim overlay with partial results
-      if (interimOverlay) {
-        interimOverlay.textContent = interimTranscript || finalTranscript || 'Listening...';
-      }
+      updateOverlay(interimTranscript);
+    };
 
-      // Send final transcript to terminal via WebSocket
-      if (finalTranscript && finalTranscript.trim()) {
-        const currentTp = this.terminalPanes[slotIdx];
-        if (currentTp && currentTp.ws && currentTp.ws.readyState === WebSocket.OPEN) {
-          currentTp.ws.send(JSON.stringify({ type: 'input', data: finalTranscript.trim() + '\n' }));
-          this.showToast('Voice input sent', 'success');
-        } else {
-          this.showToast('Terminal not connected - voice input discarded', 'warning');
+    // Handle recognition start
+    recognition.onstart = () => {
+      if (micBtn) micBtn.classList.add('mic-active');
+      this.showToast('Listening... click mic again to send', 'info');
+    };
+
+    // Handle recognition end. In continuous mode the browser may auto-disconnect
+    // (silence timeout, network drop, etc.). If the user didn't explicitly stop,
+    // restart automatically so listening continues until the button is pressed.
+    recognition.onend = () => {
+      if (recognition._cwmUserStopped) {
+        // User clicked stop: send accumulated transcript and clean up
+        if (micBtn) micBtn.classList.remove('mic-active');
+        if (interimOverlay && interimOverlay.parentNode) interimOverlay.remove();
+        delete this._voiceRecognitions[slotIdx];
+
+        const text = accumulatedTranscript.trim();
+        if (text) {
+          const currentTp = this.terminalPanes[slotIdx];
+          if (currentTp && currentTp.ws && currentTp.ws.readyState === WebSocket.OPEN) {
+            currentTp.ws.send(JSON.stringify({ type: 'input', data: text + '\n' }));
+            this.showToast('Voice input sent', 'success');
+          } else {
+            this.showToast('Terminal not connected, voice input discarded', 'warning');
+          }
+        }
+      } else {
+        // Browser auto-stopped (silence timeout, network). Restart to keep listening.
+        try {
+          recognition.start();
+        } catch (_) {
+          // If restart fails, clean up gracefully
+          if (micBtn) micBtn.classList.remove('mic-active');
+          if (interimOverlay && interimOverlay.parentNode) interimOverlay.remove();
+          delete this._voiceRecognitions[slotIdx];
         }
       }
     };
 
-    // Handle recognition start - visual feedback
-    recognition.onstart = () => {
-      if (micBtn) micBtn.classList.add('mic-active');
-      this.showToast('Listening...', 'info');
-    };
-
-    // Handle recognition end - clean up visual state
-    recognition.onend = () => {
-      if (micBtn) micBtn.classList.remove('mic-active');
-      // Remove interim overlay
-      if (interimOverlay && interimOverlay.parentNode) {
-        interimOverlay.remove();
-      }
-      // Clean up the stored reference
-      delete this._voiceRecognitions[slotIdx];
-    };
-
     // Handle recognition errors
     recognition.onerror = (event) => {
+      // 'no-speech' and 'aborted' are expected during continuous listening,
+      // they happen on silence timeouts and restarts. Don't show errors for these.
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+
       const errorMessages = {
-        'no-speech': 'No speech detected - try again',
         'audio-capture': 'Microphone not available',
-        'not-allowed': 'Microphone access denied - check browser permissions',
+        'not-allowed': 'Microphone access denied, check browser permissions',
         'network': 'Network error during speech recognition',
-        'aborted': 'Speech recognition was aborted',
       };
       const msg = errorMessages[event.error] || `Speech recognition error: ${event.error}`;
       this.showToast(msg, 'error');
+      recognition._cwmUserStopped = true; // Prevent auto-restart on fatal errors
       if (micBtn) micBtn.classList.remove('mic-active');
-      // Remove interim overlay on error
-      if (interimOverlay && interimOverlay.parentNode) {
-        interimOverlay.remove();
-      }
+      if (interimOverlay && interimOverlay.parentNode) interimOverlay.remove();
       delete this._voiceRecognitions[slotIdx];
     };
 
@@ -8899,18 +8917,22 @@ class CWMApp {
 
   /**
    * Stop an active voice recognition session for a given terminal pane slot.
+   * Sets the userStopped flag so onend sends accumulated text instead of restarting.
    * Safe to call even if no recognition is active for the slot.
    * @param {number} slotIdx - The terminal pane slot index
    */
   _stopVoiceRecognition(slotIdx) {
     const recognition = this._voiceRecognitions[slotIdx];
     if (recognition) {
+      // Mark as user-stopped so onend sends accumulated text instead of restarting.
+      // We use stop() (not abort()) so any pending results still fire before onend.
+      recognition._cwmUserStopped = true;
       try {
-        recognition.abort();
+        recognition.stop();
       } catch (_) {
-        // Ignore errors from already-stopped recognition
+        // Fallback: clean up directly if stop() throws
+        delete this._voiceRecognitions[slotIdx];
       }
-      delete this._voiceRecognitions[slotIdx];
     }
   }
 
