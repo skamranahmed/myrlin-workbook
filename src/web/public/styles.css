@@ -4160,6 +4160,110 @@ textarea.input {
   font-style: italic;
 }
 
+/* ── td Issues section ─────────────────────────────────── */
+
+.td-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--blue);
+  color: var(--base);
+  vertical-align: middle;
+  margin-left: 4px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.td-issue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+
+.td-issue-item:hover {
+  background: var(--surface0);
+}
+
+.td-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+}
+
+.td-status-dot.open        { background: transparent; color: var(--overlay1); }
+.td-status-dot.in_progress { background: var(--yellow); color: var(--yellow); }
+.td-status-dot.in_review   { background: var(--mauve); color: var(--mauve); }
+.td-status-dot.blocked     { background: var(--red); color: var(--red); }
+.td-status-dot.closed      { background: var(--green); color: var(--green); }
+
+.td-issue-id {
+  font-size: 10px;
+  color: var(--overlay0);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.td-issue-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.td-issue-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.td-issue-item:hover .td-issue-actions {
+  opacity: 1;
+}
+
+.td-start-worktree-btn {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface1);
+  color: var(--text);
+  border: 1px solid var(--surface2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.td-start-worktree-btn:hover {
+  background: var(--blue);
+  color: var(--base);
+  border-color: var(--blue);
+}
+
+.td-setup-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--overlay1);
+  border-top: 1px solid var(--surface0);
+  flex-wrap: wrap;
+}
+
+.td-setup-msg {
+  flex: 1;
+  min-width: 0;
+}
+
 .docs-raw {
   flex: 1;
   display: flex;

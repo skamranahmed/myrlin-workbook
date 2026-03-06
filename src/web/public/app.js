@@ -343,6 +343,17 @@ class CWMApp {
       docsAiInsights: document.getElementById('docs-ai-insights'),
       docsAiRefresh: document.getElementById('docs-ai-refresh'),
 
+      // td Issues (docs panel integration)
+      docsTdSection: document.getElementById('docs-td-section'),
+      docsTdList: document.getElementById('docs-td-list'),
+      docsTdCount: document.getElementById('docs-td-count'),
+      docsTdAddBtn: document.getElementById('docs-td-add-btn'),
+      docsTdRefreshBtn: document.getElementById('docs-td-refresh-btn'),
+      docsTdSetupBar: document.getElementById('docs-td-setup-bar'),
+      docsTdSetupMsg: document.getElementById('docs-td-setup-msg'),
+      docsTdInitBtn: document.getElementById('docs-td-init-btn'),
+      docsTdSetdirBtn: document.getElementById('docs-td-setdir-btn'),
+
       // Feature Board
       featureBoard: document.getElementById('feature-board'),
       boardColumns: document.getElementById('board-columns'),
@@ -5085,6 +5096,9 @@ class CWMApp {
         }
 
         this.showToast(`Task started on ${branch}`, 'success');
+
+        // If this task was promoted from a td issue, mark that issue in_progress
+        this._maybeMarkTdIssueStarted();
       } else {
         // Create task in backlog (no session, no worktree yet)
         const data = await this.api('POST', '/api/worktree-tasks', {
@@ -5101,6 +5115,9 @@ class CWMApp {
 
         this.closeNewTaskDialog();
 
+        // If this task was promoted from a td issue, mark that issue in_progress
+        this._maybeMarkTdIssueStarted();
+
         // Switch to tasks view to see the backlog
         this.setViewMode('tasks');
         this.showToast(`Task added to backlog: ${branch}`, 'success');
@@ -5111,6 +5128,21 @@ class CWMApp {
       this.els.newTaskCreate.disabled = false;
       this.els.newTaskCreate.textContent = 'Create Task';
     }
+  }
+
+  /**
+   * If the current worktree task was promoted from a td issue (via _promoteTdIssueToWorktree),
+   * tell the server to mark that td issue as in_progress, then clear the pending state.
+   * Fire-and-forget: failures are logged but do not block the user.
+   */
+  _maybeMarkTdIssueStarted() {
+    const issueId = this._pendingTdIssueId;
+    const wsId = this._pendingTdWorkspaceId;
+    this._pendingTdIssueId = null;
+    this._pendingTdWorkspaceId = null;
+    if (!issueId || !wsId) return;
+    this.api('POST', `/api/workspaces/${wsId}/td/issues/${issueId}/start`, {})
+      .catch(err => console.warn('td start failed for', issueId, err));
   }
 
 
@@ -5952,6 +5984,7 @@ class CWMApp {
       this.renderTasksView();
     } else if (isDocs) {
       this.loadDocs();
+      this.loadTdIssues();
     } else if (isResources) {
       this.loadResources();
     } else if (isCosts) {
@@ -10239,6 +10272,299 @@ class CWMApp {
     }
   }
 
+
+  /* ═══════════════════════════════════════════════════════════
+     TD ISSUES — docs panel integration
+     github.com/marcus/td
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Load td status and issues for the active workspace.
+   * Shows/hides the td section and renders issues or setup prompt.
+   */
+  async loadTdIssues() {
+    if (!this.els.docsTdSection) return;
+    const ws = this.state.activeWorkspace;
+    if (!ws) {
+      this.els.docsTdSection.hidden = true;
+      return;
+    }
+
+    // Show the section now that we have a workspace
+    this.els.docsTdSection.hidden = false;
+
+    try {
+      const status = await this.api('GET', `/api/workspaces/${ws.id}/td/status`);
+
+      if (!status.available) {
+        this._renderTdSetup('td is not installed. Install it from github.com/marcus/td', { showSetdir: false, showInit: false });
+        return;
+      }
+
+      if (!status.repoDir) {
+        this._renderTdSetup('No project directory configured for this workspace.', { showSetdir: true, showInit: false });
+        return;
+      }
+
+      if (!status.initialized) {
+        this._renderTdSetup('td not initialized in ' + status.repoDir, { showSetdir: true, showInit: true });
+        return;
+      }
+
+      // td is ready — hide setup bar and load issues
+      if (this.els.docsTdSetupBar) this.els.docsTdSetupBar.hidden = true;
+      await this._fetchAndRenderTdIssues(ws.id);
+
+    } catch (err) {
+      if (this.els.docsTdList) this.els.docsTdList.textContent = 'Error loading td status: ' + (err.message || err);
+    }
+
+    this._wireTdEvents();
+  }
+
+  /** Show the td setup bar with a message. */
+  _renderTdSetup(msg, { showSetdir = true, showInit = false } = {}) {
+    if (this.els.docsTdList) this.els.docsTdList.textContent = 'td not configured for this project.';
+    if (this.els.docsTdCount) this.els.docsTdCount.textContent = '0';
+    if (this.els.docsTdSetupBar) this.els.docsTdSetupBar.hidden = false;
+    if (this.els.docsTdSetupMsg) this.els.docsTdSetupMsg.textContent = msg;
+    if (this.els.docsTdInitBtn) this.els.docsTdInitBtn.hidden = !showInit;
+    if (this.els.docsTdSetdirBtn) this.els.docsTdSetdirBtn.hidden = !showSetdir;
+  }
+
+  /** Fetch and render td issues for the workspace. */
+  async _fetchAndRenderTdIssues(workspaceId) {
+    if (this.els.docsTdList) this.els.docsTdList.textContent = 'Loading...';
+    try {
+      const data = await this.api('GET', `/api/workspaces/${workspaceId}/td/issues`);
+      const issues = data.issues || [];
+      this._tdIssuesCache = issues;
+      this._renderTdIssues(issues);
+    } catch (err) {
+      if (this.els.docsTdList) this.els.docsTdList.textContent = 'Failed to load issues: ' + (err.message || err);
+    }
+  }
+
+  /** Render td issues list using DOM (not innerHTML) for XSS safety. */
+  _renderTdIssues(issues) {
+    if (this.els.docsTdCount) this.els.docsTdCount.textContent = issues.length;
+    if (!this.els.docsTdList) return;
+
+    // Clear existing content safely
+    while (this.els.docsTdList.firstChild) {
+      this.els.docsTdList.removeChild(this.els.docsTdList.firstChild);
+    }
+
+    if (issues.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'docs-empty';
+      empty.textContent = 'No open issues. Click + to create one.';
+      this.els.docsTdList.appendChild(empty);
+      return;
+    }
+
+    const statusLabel = { open: 'Open', in_progress: 'In Progress', in_review: 'In Review', blocked: 'Blocked', closed: 'Closed' };
+
+    for (const issue of issues) {
+      const status = issue.status || 'open';
+      const title = issue.title || issue.id;
+      const id = issue.id;
+
+      // Row container
+      const row = document.createElement('div');
+      row.className = 'td-issue-item';
+      row.dataset.tdId = id;
+
+      // Status dot
+      const dot = document.createElement('span');
+      dot.className = 'td-status-dot ' + status;
+      dot.title = statusLabel[status] || status;
+      row.appendChild(dot);
+
+      // ID label
+      const idLabel = document.createElement('span');
+      idLabel.className = 'td-issue-id';
+      idLabel.textContent = id;
+      row.appendChild(idLabel);
+
+      // Title
+      const titleEl = document.createElement('span');
+      titleEl.className = 'td-issue-title';
+      titleEl.textContent = title;
+      titleEl.title = title;
+      row.appendChild(titleEl);
+
+      // Actions container
+      const actions = document.createElement('div');
+      actions.className = 'td-issue-actions';
+
+      // Start Worktree button
+      const startBtn = document.createElement('button');
+      startBtn.className = 'td-start-worktree-btn';
+      startBtn.textContent = '→ Worktree';
+      startBtn.title = 'Promote to worktree task';
+      startBtn.dataset.tdId = id;
+      startBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._promoteTdIssueToWorktree(id, title);
+      });
+      actions.appendChild(startBtn);
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'docs-item-delete btn btn-ghost btn-icon btn-sm td-delete-btn';
+      deleteBtn.title = 'Delete issue';
+      deleteBtn.textContent = '×';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._deleteTdIssue(id);
+      });
+      actions.appendChild(deleteBtn);
+
+      row.appendChild(actions);
+      this.els.docsTdList.appendChild(row);
+    }
+  }
+
+  /**
+   * Wire one-time click events for the td section header buttons.
+   * Safe to call multiple times — guards with a flag.
+   */
+  _wireTdEvents() {
+    if (this._tdEventsWired) return;
+    this._tdEventsWired = true;
+
+    if (this.els.docsTdAddBtn) {
+      this.els.docsTdAddBtn.addEventListener('click', () => this._addTdIssue());
+    }
+    if (this.els.docsTdRefreshBtn) {
+      this.els.docsTdRefreshBtn.addEventListener('click', () => {
+        const ws = this.state.activeWorkspace;
+        if (ws) this._fetchAndRenderTdIssues(ws.id);
+      });
+    }
+    if (this.els.docsTdInitBtn) {
+      this.els.docsTdInitBtn.addEventListener('click', () => this._initTd());
+    }
+    if (this.els.docsTdSetdirBtn) {
+      this.els.docsTdSetdirBtn.addEventListener('click', () => this._setTdRepoDir());
+    }
+  }
+
+  /** Prompt for a new td issue title and create it. */
+  async _addTdIssue() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) { this.showToast('Select a project first', 'warning'); return; }
+
+    const title = prompt('New td issue title:');
+    if (!title || !title.trim()) return;
+
+    try {
+      await this.api('POST', `/api/workspaces/${ws.id}/td/issues`, { title: title.trim() });
+      this.showToast('td issue created', 'success');
+      await this._fetchAndRenderTdIssues(ws.id);
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create td issue', 'error');
+    }
+  }
+
+  /** Delete a td issue after confirmation. */
+  async _deleteTdIssue(issueId) {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    if (!confirm('Delete td issue ' + issueId + '?')) return;
+    try {
+      await this.api('DELETE', `/api/workspaces/${ws.id}/td/issues/${issueId}`);
+      this.showToast(issueId + ' deleted', 'success');
+      await this._fetchAndRenderTdIssues(ws.id);
+    } catch (err) {
+      this.showToast(err.message || 'Failed to delete issue', 'error');
+    }
+  }
+
+  /** Run `td init` in the workspace repo directory. */
+  async _initTd() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    try {
+      const result = await this.api('POST', `/api/workspaces/${ws.id}/td/init`, {});
+      this.showToast('td initialized in ' + result.repoDir, 'success');
+      await this.loadTdIssues();
+    } catch (err) {
+      this.showToast(err.message || 'Failed to initialize td', 'error');
+    }
+  }
+
+  /** Prompt the user to set/override the repo directory for td. */
+  async _setTdRepoDir() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    const dir = prompt('Enter the absolute path to the project directory (where .todos/ should live):');
+    if (!dir || !dir.trim()) return;
+    try {
+      await this.api('PUT', `/api/workspaces/${ws.id}/td/repodir`, { repoDir: dir.trim() });
+      this.showToast('Project directory saved', 'success');
+      await this.loadTdIssues();
+    } catch (err) {
+      this.showToast(err.message || 'Failed to set directory', 'error');
+    }
+  }
+
+  /**
+   * Phase 2: Promote a td issue to a worktree task.
+   * Fetches full context, pre-populates the New Task dialog, and after
+   * the task is created marks the td issue as in_progress.
+   */
+  async _promoteTdIssueToWorktree(issueId, issueTitle) {
+    const ws = this.state.activeWorkspace;
+    if (!ws) { this.showToast('Select a project first', 'warning'); return; }
+
+    this.showToast('Loading context for ' + issueId + '...', 'info');
+
+    let context = '';
+    let repoDir = null;
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues/${issueId}/context`);
+      context = data.context || '';
+      repoDir = data.repoDir || null;
+    } catch (_err) {
+      this.showToast('Could not load td context, opening dialog anyway', 'warning');
+    }
+
+    // Open the existing New Task dialog pre-populated with td issue data
+    this.openNewTaskDialog(ws.id);
+
+    // Pre-populate after a tick so the dialog has rendered
+    setTimeout(() => {
+      if (this.els.newTaskName) {
+        this.els.newTaskName.value = issueTitle || issueId;
+        this.updateBranchPreview();
+      }
+      if (this.els.newTaskDescription) {
+        const desc = context
+          ? 'td:' + issueId + '\n\n' + context
+          : 'td:' + issueId + '\n\n' + issueTitle;
+        this.els.newTaskDescription.value = desc;
+      }
+      if (repoDir && this.els.newTaskDir) {
+        const opts = Array.from(this.els.newTaskDir.options);
+        const match = opts.find(o => o.value === repoDir);
+        if (match) {
+          this.els.newTaskDir.value = repoDir;
+        } else {
+          this.els.newTaskDir.value = '__custom__';
+          if (this.els.newTaskDirCustom) {
+            this.els.newTaskDirCustom.value = repoDir;
+            this.els.newTaskDirCustom.hidden = false;
+          }
+        }
+      }
+    }, 50);
+
+    // Store so submitNewTask() can mark the td issue in_progress after creation
+    this._pendingTdIssueId = issueId;
+    this._pendingTdWorkspaceId = ws.id;
+  }
 
   /* ═══════════════════════════════════════════════════════════
      PHASE 3: INLINE SESSION RENAME

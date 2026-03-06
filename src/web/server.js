@@ -18,6 +18,7 @@ const { setupAuth, requireAuth, isValidToken } = require('./auth');
 const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
+const td = require('../core/td-adapter');
 
 // ─── Input Sanitization ────────────────────────────────────
 // Validates user-controlled fields that flow into shell commands.
@@ -496,6 +497,183 @@ app.delete('/api/workspaces/:id/docs/:section/:index', requireAuth, (req, res) =
   }
   const result = store.removeWorkspaceItem(req.params.id, section, idx);
   if (!result) return res.status(404).json({ error: 'Item not found at index.' });
+  return res.json({ success: true });
+});
+
+// ──────────────────────────────────────────────────────────
+//  TD TASK INTEGRATION
+//  These endpoints bridge myrlin's docs panel to the `td` CLI
+//  (github.com/marcus/td). All td commands run in the context
+//  of the workspace's configured repo directory (tdRepoDir).
+// ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve the td repo directory for a workspace.
+ * Uses workspace.tdRepoDir if set, otherwise falls back to the most
+ * common workingDir among the workspace's sessions.
+ * @param {Object} store
+ * @param {string} workspaceId
+ * @returns {string|null}
+ */
+function resolveTdRepoDir(store, workspaceId) {
+  const ws = store.getWorkspace(workspaceId);
+  if (!ws) return null;
+  if (ws.tdRepoDir) return ws.tdRepoDir;
+  // Infer from sessions
+  const sessions = store.getWorkspaceSessions(workspaceId);
+  if (!sessions || sessions.length === 0) return null;
+  const counts = {};
+  for (const s of sessions) {
+    if (s.workingDir) counts[s.workingDir] = (counts[s.workingDir] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return sorted.length > 0 ? sorted[0][0] : null;
+}
+
+/**
+ * GET /api/workspaces/:id/td/status
+ * Returns whether td is available and initialized for this workspace.
+ */
+app.get('/api/workspaces/:id/td/status', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  const available = await td.isAvailable().catch(() => false);
+  const initialized = repoDir ? td.isInitialized(repoDir) : false;
+  return res.json({ available, initialized, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/init
+ * Run `td init` in the workspace repo directory.
+ * Body: { repoDir? } — optionally set/override the repo dir at the same time.
+ */
+app.post('/api/workspaces/:id/td/init', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  let repoDir = (req.body && req.body.repoDir) ? req.body.repoDir.trim() : null;
+  if (!repoDir) repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  // Persist the repoDir on the workspace if it wasn't already set
+  if (!ws.tdRepoDir || ws.tdRepoDir !== repoDir) {
+    store.updateWorkspace(req.params.id, { tdRepoDir: repoDir });
+  }
+
+  const output = await td.init(repoDir).catch(err => { throw err; });
+  return res.json({ success: true, output, repoDir });
+});
+
+/**
+ * PUT /api/workspaces/:id/td/repodir
+ * Set the repo directory for td integration on this workspace.
+ * Body: { repoDir }
+ */
+app.put('/api/workspaces/:id/td/repodir', requireAuth, (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = (req.body && req.body.repoDir) ? req.body.repoDir.trim() : null;
+  if (!repoDir) return res.status(400).json({ error: 'repoDir is required.' });
+
+  store.updateWorkspace(req.params.id, { tdRepoDir: repoDir });
+  return res.json({ success: true, repoDir });
+});
+
+/**
+ * GET /api/workspaces/:id/td/issues
+ * List td issues for this workspace's repo.
+ * Query: ?status=open|in_progress|in_review|blocked|closed (optional filter)
+ */
+app.get('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+  if (!td.isInitialized(repoDir)) return res.status(400).json({ error: 'td is not initialized in this directory. POST /td/init first.' });
+
+  const filters = req.query.status ? { status: req.query.status } : {};
+  const issues = await td.listIssues(repoDir, filters);
+  return res.json({ issues, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/issues
+ * Create a new td issue.
+ * Body: { title, type?, priority? }
+ */
+app.post('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+  if (!td.isInitialized(repoDir)) return res.status(400).json({ error: 'td is not initialized in this directory.' });
+
+  const { title, type, priority } = req.body || {};
+  if (!title || typeof title !== 'string') return res.status(400).json({ error: 'title is required.' });
+
+  const issueId = await td.createIssue(repoDir, title.trim(), { type, priority });
+  const issue = await td.showIssue(repoDir, issueId).catch(() => ({ id: issueId, title: title.trim() }));
+  return res.status(201).json({ issue, issueId });
+});
+
+/**
+ * DELETE /api/workspaces/:id/td/issues/:issueId
+ * Delete a td issue.
+ */
+app.delete('/api/workspaces/:id/td/issues/:issueId', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  await td.deleteIssue(repoDir, req.params.issueId);
+  return res.json({ success: true });
+});
+
+/**
+ * GET /api/workspaces/:id/td/issues/:issueId/context
+ * Get full td context for an issue (for pre-populating worktree task form).
+ */
+app.get('/api/workspaces/:id/td/issues/:issueId/context', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  const [details, context] = await Promise.all([
+    td.showIssue(repoDir, req.params.issueId),
+    td.getContext(repoDir, req.params.issueId).catch(() => ''),
+  ]);
+  return res.json({ details, context, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/issues/:issueId/start
+ * Mark a td issue as in_progress (called when promoting to a worktree task).
+ */
+app.post('/api/workspaces/:id/td/issues/:issueId/start', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  await td.startIssue(repoDir, req.params.issueId);
   return res.json({ success: true });
 });
 
