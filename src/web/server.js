@@ -18,6 +18,21 @@ const { setupAuth, requireAuth, isValidToken } = require('./auth');
 const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
+const td = require('../core/td-adapter');
+
+/**
+ * Resolve the td binary path in priority order:
+ *   1. store.settings.tdBinary (user-configured, persisted in workspaces.json)
+ *   2. TD_BINARY environment variable
+ *   3. 'td' (rely on PATH)
+ */
+function getTdBinary() {
+  try {
+    const stored = getStore().settings.tdBinary;
+    if (stored && stored.trim()) return stored.trim();
+  } catch (_) { /* store not ready yet */ }
+  return process.env.TD_BINARY || td.DEFAULT_TD_BINARY;
+}
 
 // ─── Input Sanitization ────────────────────────────────────
 // Validates user-controlled fields that flow into shell commands.
@@ -497,6 +512,229 @@ app.delete('/api/workspaces/:id/docs/:section/:index', requireAuth, (req, res) =
   const result = store.removeWorkspaceItem(req.params.id, section, idx);
   if (!result) return res.status(404).json({ error: 'Item not found at index.' });
   return res.json({ success: true });
+});
+
+// ──────────────────────────────────────────────────────────
+//  TD TASK INTEGRATION
+//  These endpoints bridge myrlin's docs panel to the `td` CLI
+//  (github.com/marcus/td). All td commands run in the context
+//  of the workspace's configured repo directory (tdRepoDir).
+// ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve the td repo directory for a workspace.
+ * Uses workspace.tdRepoDir if set, otherwise falls back to the most
+ * common workingDir among the workspace's sessions.
+ * @param {Object} store
+ * @param {string} workspaceId
+ * @returns {string|null}
+ */
+function resolveTdRepoDir(store, workspaceId) {
+  const ws = store.getWorkspace(workspaceId);
+  if (!ws) return null;
+  if (ws.tdRepoDir) return ws.tdRepoDir;
+  // Infer from sessions
+  const sessions = store.getWorkspaceSessions(workspaceId);
+  if (!sessions || sessions.length === 0) return null;
+  const counts = {};
+  for (const s of sessions) {
+    if (s.workingDir) counts[s.workingDir] = (counts[s.workingDir] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length === 0) return null;
+
+  const inferredDir = sorted[0][0];
+
+  // If the inferred dir is a git worktree (not the main repo), resolve to the
+  // main repo root — that's where .todos/ lives, not inside the worktree.
+  // `git rev-parse --git-common-dir` returns the shared .git dir for both the
+  // main repo and any linked worktree, so dirname() gives the main repo root.
+  try {
+    const { execFileSync } = require('child_process');
+    const commonGitDir = execFileSync(
+      'git', ['-C', inferredDir, 'rev-parse', '--git-common-dir'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    const absCommonGitDir = path.isAbsolute(commonGitDir)
+      ? commonGitDir
+      : path.resolve(inferredDir, commonGitDir);
+    const mainRepoRoot = path.dirname(absCommonGitDir);
+    if (mainRepoRoot && mainRepoRoot !== inferredDir && require('fs').existsSync(mainRepoRoot)) {
+      return mainRepoRoot;
+    }
+  } catch (_) { /* not a git repo or git unavailable — fall through */ }
+
+  return inferredDir;
+}
+
+/**
+ * GET /api/workspaces/:id/td/status
+ * Returns whether td is available and initialized for this workspace.
+ */
+app.get('/api/workspaces/:id/td/status', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  const available = await td.isAvailable(getTdBinary()).catch(() => false);
+  const initialized = repoDir ? td.isInitialized(repoDir) : false;
+  return res.json({ available, initialized, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/init
+ * Run `td init` in the workspace repo directory.
+ * Body: { repoDir? } — optionally set/override the repo dir at the same time.
+ */
+app.post('/api/workspaces/:id/td/init', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  let repoDir = (req.body && req.body.repoDir) ? req.body.repoDir.trim() : null;
+  if (!repoDir) repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  // Persist the repoDir on the workspace if it wasn't already set
+  if (!ws.tdRepoDir || ws.tdRepoDir !== repoDir) {
+    store.updateWorkspace(req.params.id, { tdRepoDir: repoDir });
+  }
+
+  const output = await td.init(repoDir, getTdBinary()).catch(err => { throw err; });
+  return res.json({ success: true, output, repoDir });
+});
+
+/**
+ * PUT /api/workspaces/:id/td/repodir
+ * Set the repo directory for td integration on this workspace.
+ * Body: { repoDir }
+ */
+app.put('/api/workspaces/:id/td/repodir', requireAuth, (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = (req.body && req.body.repoDir) ? req.body.repoDir.trim() : null;
+  if (!repoDir) return res.status(400).json({ error: 'repoDir is required.' });
+
+  store.updateWorkspace(req.params.id, { tdRepoDir: repoDir });
+  return res.json({ success: true, repoDir });
+});
+
+/**
+ * GET /api/workspaces/:id/td/issues
+ * List td issues for this workspace's repo.
+ * Query: ?status=open|in_progress|in_review|blocked|closed (optional filter)
+ */
+app.get('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+  if (!td.isInitialized(repoDir)) return res.status(400).json({ error: 'td is not initialized in this directory. POST /td/init first.' });
+
+  const filters = req.query.status ? { status: req.query.status } : {};
+  const issues = await td.listIssues(repoDir, filters, getTdBinary());
+  return res.json({ issues, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/issues
+ * Create a new td issue.
+ * Body: { title, type?, priority? }
+ */
+app.post('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+  if (!td.isInitialized(repoDir)) return res.status(400).json({ error: 'td is not initialized in this directory.' });
+
+  const { title, type, priority } = req.body || {};
+  if (!title || typeof title !== 'string') return res.status(400).json({ error: 'title is required.' });
+
+  const issueId = await td.createIssue(repoDir, title.trim(), { type, priority }, getTdBinary());
+  const issue = await td.showIssue(repoDir, issueId, getTdBinary()).catch(() => ({ id: issueId, title: title.trim() }));
+  return res.status(201).json({ issue, issueId });
+});
+
+/**
+ * DELETE /api/workspaces/:id/td/issues/:issueId
+ * Delete a td issue.
+ */
+app.delete('/api/workspaces/:id/td/issues/:issueId', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  await td.deleteIssue(repoDir, req.params.issueId, getTdBinary());
+  return res.json({ success: true });
+});
+
+/**
+ * GET /api/workspaces/:id/td/issues/:issueId/context
+ * Get full td context for an issue (for pre-populating worktree task form).
+ */
+app.get('/api/workspaces/:id/td/issues/:issueId/context', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  const [details, context] = await Promise.all([
+    td.showIssue(repoDir, req.params.issueId, getTdBinary()),
+    td.getContext(repoDir, req.params.issueId, getTdBinary()).catch(() => ''),
+  ]);
+  return res.json({ details, context, repoDir });
+});
+
+/**
+ * POST /api/workspaces/:id/td/issues/:issueId/start
+ * Mark a td issue as in_progress (called when promoting to a worktree task).
+ */
+app.post('/api/workspaces/:id/td/issues/:issueId/start', requireAuth, async (req, res) => {
+  const store = getStore();
+  const ws = store.getWorkspace(req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
+
+  const repoDir = resolveTdRepoDir(store, req.params.id);
+  if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
+
+  await td.startIssue(repoDir, req.params.issueId, getTdBinary());
+  return res.json({ success: true });
+});
+
+/**
+ * GET /api/td/binary
+ * Return the currently resolved td binary path and whether it is reachable.
+ */
+app.get('/api/td/binary', requireAuth, async (req, res) => {
+  const binary = getTdBinary();
+  const available = await td.isAvailable(binary).catch(() => false);
+  return res.json({ binary, available, source: getStore().settings.tdBinary ? 'settings' : (process.env.TD_BINARY ? 'env' : 'default') });
+});
+
+/**
+ * PUT /api/td/binary
+ * Persist the td binary path in the store settings.
+ * Body: { binary } — empty string clears it (falls back to env/default).
+ */
+app.put('/api/td/binary', requireAuth, async (req, res) => {
+  const binary = ((req.body && req.body.binary) || '').trim();
+  getStore().updateSettings({ tdBinary: binary });
+  const resolved = getTdBinary();
+  const available = await td.isAvailable(resolved).catch(() => false);
+  return res.json({ success: true, binary: resolved, available });
 });
 
 // ──────────────────────────────────────────────────────────
@@ -4768,7 +5006,7 @@ app.get('/api/worktree-tasks', requireAuth, async (req, res) => {
  * Create a worktree task: creates git worktree, session, and task record.
  */
 app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
-  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model, tags, startNow } = req.body || {};
+  const { workspaceId, repoDir, branch, description, baseBranch, featureId, model, tags, startNow, prompt, flags } = req.body || {};
   if (!workspaceId) return res.status(400).json({ error: 'workspaceId is required' });
   if (!repoDir) return res.status(400).json({ error: 'repoDir is required' });
   if (!branch) return res.status(400).json({ error: 'branch is required' });
@@ -4889,12 +5127,16 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
 
     // 2. Create a session in this workspace pointing at the worktree
     const sessionName = branch.replace(/^feat\//, '') + ' (worktree task)';
+    const safePrompt = (typeof prompt === 'string' && prompt.trim()) ? prompt.trim() : null;
+    const safeFlags = Array.isArray(flags) ? flags.filter(f => typeof f === 'string' && /^[a-zA-Z0-9-]+$/.test(f)) : [];
     const session = store.createSession({
       workspaceId,
       name: sessionName,
       workingDir: worktreePath,
       command: 'claude',
       model: model || undefined,
+      initialPrompt: safePrompt,
+      flags: safeFlags,
     });
     if (!session) {
       return res.status(500).json({ error: 'Failed to create session' });

@@ -4160,6 +4160,263 @@ textarea.input {
   font-style: italic;
 }
 
+/* ── td Issues section ─────────────────────────────────── */
+
+.td-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--blue);
+  color: var(--base);
+  vertical-align: middle;
+  margin-left: 4px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.td-issue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+
+.td-issue-item:hover {
+  background: var(--surface0);
+}
+
+.td-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+}
+
+.td-status-dot.open        { background: transparent; color: var(--overlay1); }
+.td-status-dot.in_progress { background: var(--yellow); color: var(--yellow); }
+.td-status-dot.in_review   { background: var(--mauve); color: var(--mauve); }
+.td-status-dot.blocked     { background: var(--red); color: var(--red); }
+.td-status-dot.closed      { background: var(--green); color: var(--green); }
+
+.td-issue-id {
+  font-size: 10px;
+  color: var(--overlay0);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.td-issue-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.td-issue-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.td-issue-item:hover .td-issue-actions {
+  opacity: 1;
+}
+
+.td-start-worktree-btn {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--surface1);
+  color: var(--text);
+  border: 1px solid var(--surface2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.td-start-worktree-btn:hover {
+  background: var(--blue);
+  color: var(--base);
+  border-color: var(--blue);
+}
+
+.td-setup-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--overlay1);
+  border-top: 1px solid var(--surface0);
+  flex-wrap: wrap;
+}
+
+.td-setup-msg {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── td Issue Detail Modal ─────────────────────────────── */
+
+.td-issue-modal {
+  max-width: 660px;
+  width: 92%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.td-issue-modal-header-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.td-issue-modal-id {
+  font-size: 11px;
+  color: var(--overlay0);
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.td-issue-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.td-issue-modal-loading {
+  color: var(--overlay0);
+  font-size: 13px;
+  padding: 12px 0;
+}
+
+.td-issue-modal-meta {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.td-issue-modal-meta-item {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.td-issue-modal-meta-item strong {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--overlay1);
+  margin-bottom: 2px;
+}
+
+.td-issue-modal-section {
+  margin-bottom: 14px;
+}
+
+.td-issue-modal-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--overlay1);
+  margin-bottom: 6px;
+}
+
+.td-issue-modal-content {
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  background: var(--mantle);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--font-mono, monospace);
+  line-height: 1.55;
+  overflow-x: auto;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* ── Sidebar Tasks Mode Toggle ─────────────────────────── */
+
+.sidebar-tasks-header {
+  padding: 6px 8px 0;
+  flex-shrink: 0;
+}
+
+.sidebar-tasks-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--mantle);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.sidebar-tasks-mode-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--overlay1);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-tasks-mode-btn.active {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+.sidebar-tasks-mode-btn:hover:not(.active) {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+/* td issue items in sidebar (compact variant) */
+.sidebar-td-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.sidebar-td-item:hover {
+  background: var(--surface0);
+}
+
+.sidebar-td-item .td-issue-id {
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.sidebar-td-item .td-issue-title {
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .docs-raw {
   flex: 1;
   display: flex;

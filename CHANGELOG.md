@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.5] - 2026-03-07
+
+### Added
+
+- **td task management integration** - Optional td binary integration for task tracking in the docs panel. Toggle in Settings, configure binary path. Includes issue detail modal and sidebar toggle (PR #26 by @croakingtoad)
+- **Initial prompt and flags passthrough** - Worktree sessions now pass through initial prompt and CLI flags (e.g. `--verbose`, `--agent-teams`) to the PTY on first launch (PR #26)
+- **Worktree task records** - Track worktree lifecycle (branch, path, status, tags) with dedicated API endpoints (PR #26)
+
+### Fixed
+
+- **createSession workspaceId** - Pass workspaceId inside the options object instead of as a separate argument (PR #22 by @croakingtoad)
+- **--continue without history** - Skip `--continue` flag when the working directory has no prior Claude JSONL history (PR #23 by @croakingtoad)
+- **Worktree branch collision** - Handle "branch already checked out" error during worktree creation by detecting and skipping (PR #24 by @croakingtoad)
+- **Worktree path collision** - Skip `git worktree add` if path is already registered as a worktree (PR #26)
+- **Worktree repo root resolution** - Resolve td repo dir to main repo root for git worktrees (PR #26)
+- **Flag checkbox values** - Strip leading `--` from flag checkbox values to avoid double-dash when constructing CLI args (PR #26)
+
 ## [0.8.3] - 2026-03-07
 
 ### Fixed

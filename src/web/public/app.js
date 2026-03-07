@@ -343,6 +343,26 @@ class CWMApp {
       docsAiInsights: document.getElementById('docs-ai-insights'),
       docsAiRefresh: document.getElementById('docs-ai-refresh'),
 
+      // td Issues (docs panel integration)
+      docsTdSection: document.getElementById('docs-td-section'),
+      docsTdList: document.getElementById('docs-td-list'),
+      docsTdCount: document.getElementById('docs-td-count'),
+      docsTdAddBtn: document.getElementById('docs-td-add-btn'),
+      docsTdRefreshBtn: document.getElementById('docs-td-refresh-btn'),
+      docsTdSetupBar: document.getElementById('docs-td-setup-bar'),
+      docsTdSetupMsg: document.getElementById('docs-td-setup-msg'),
+      docsTdInitBtn: document.getElementById('docs-td-init-btn'),
+      docsTdSetdirBtn: document.getElementById('docs-td-setdir-btn'),
+
+      // td Issue Detail Modal
+      tdIssueModalOverlay: document.getElementById('td-issue-modal-overlay'),
+      tdIssueModalTitle: document.getElementById('td-issue-modal-title'),
+      tdIssueModalId: document.getElementById('td-issue-modal-id'),
+      tdIssueModalBody: document.getElementById('td-issue-modal-body'),
+      tdIssueModalClose: document.getElementById('td-issue-modal-close'),
+      tdIssueModalCloseBtn: document.getElementById('td-issue-modal-close-btn'),
+      tdIssueModalPromoteBtn: document.getElementById('td-issue-modal-promote-btn'),
+
       // Feature Board
       featureBoard: document.getElementById('feature-board'),
       boardColumns: document.getElementById('board-columns'),
@@ -366,6 +386,8 @@ class CWMApp {
       kanbanBoard: document.getElementById('kanban-board'),
       sidebarViewToggle: document.getElementById('sidebar-view-toggle'),
       sidebarProjectsHeader: document.getElementById('sidebar-projects-header'),
+      sidebarTasksHeader: document.getElementById('sidebar-tasks-header'),
+      sidebarTasksModeToggle: document.getElementById('sidebar-tasks-mode-toggle'),
       sidebarTasksList: document.getElementById('sidebar-tasks-list'),
       tasksLayoutToggle: document.getElementById('tasks-layout-toggle'),
       tasksSearch: document.getElementById('tasks-search'),
@@ -856,6 +878,15 @@ class CWMApp {
       this.els.sidebarViewToggle.querySelectorAll('.sidebar-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           this.setSidebarView(btn.dataset.sidebarView);
+        });
+      });
+    }
+
+    // Sidebar tasks mode toggle (native vs td)
+    if (this.els.sidebarTasksModeToggle) {
+      this.els.sidebarTasksModeToggle.querySelectorAll('.sidebar-tasks-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._setSidebarTasksMode(btn.dataset.tasksMode);
         });
       });
     }
@@ -3393,6 +3424,8 @@ class CWMApp {
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
+      { key: 'enableTd', label: 'td Task Management', description: 'Show td issue tracking integration (github.com/marcus/td). When disabled, hides all td UI including the docs panel section and sidebar toggle.', category: 'Advanced' },
+      { key: 'tdBinary', label: 'td Binary Path', description: 'Optional. td is an alternative task management system (github.com/marcus/td) — Myrlin works fine without it. If installed, set the absolute path to the binary here, or leave blank to use the TD_BINARY environment variable or "td" from PATH. Example: /home/user/go/bin/td', category: 'Advanced', type: 'server-text', placeholder: 'e.g. /home/user/go/bin/td', apiEndpoint: '/api/td/binary', apiField: 'binary' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
@@ -3939,6 +3972,25 @@ class CWMApp {
                 ${optionsHtml}
               </select>
             </div>`;
+        } else if (item.type === 'server-text') {
+          // A text setting persisted on the server (not localStorage).
+          // Value is loaded async after render via loadServerTextSettings().
+          html += `
+            <div class="settings-row" data-setting-key="${item.key}">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="text" class="settings-server-text-input" id="server-text-${item.key}"
+                  data-api-endpoint="${this.escapeHtml(item.apiEndpoint || '')}"
+                  data-api-field="${this.escapeHtml(item.apiField || 'value')}"
+                  placeholder="${this.escapeHtml(item.placeholder || '')}"
+                  style="font-size:12px;padding:4px 8px;background:var(--mantle);border:1px solid var(--surface1);border-radius:4px;color:inherit;width:220px;" />
+                <button class="settings-server-text-save btn btn-ghost btn-sm" data-input-id="server-text-${item.key}" style="font-size:12px;">Save</button>
+                <span class="settings-server-text-status" id="server-text-status-${item.key}" style="font-size:11px;opacity:0.6;"></span>
+              </div>
+            </div>`;
         } else if (item.type === 'tunnel') {
           html += `
             <div class="settings-row" data-setting-key="${item.key}" style="flex-direction:column;align-items:flex-start;gap:8px;padding:10px 0;">
@@ -4120,6 +4172,50 @@ class CWMApp {
         this.applySettings();
       });
     });
+
+    // Bind server-text Save buttons (settings persisted server-side)
+    this.els.settingsBody.querySelectorAll('.settings-server-text-save').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const inputId = btn.dataset.inputId;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        const endpoint = input.dataset.apiEndpoint;
+        const field = input.dataset.apiField || 'value';
+        const statusEl = document.getElementById('server-text-status-' + inputId.replace('server-text-', ''));
+        btn.disabled = true;
+        try {
+          const result = await this.api('PUT', endpoint, { [field]: input.value.trim() });
+          if (statusEl) {
+            statusEl.textContent = result.available ? '✓ found' : '⚠ not found';
+            statusEl.style.color = result.available ? 'var(--green)' : 'var(--yellow)';
+          }
+          this.showToast('Setting saved', 'success');
+        } catch (err) {
+          if (statusEl) { statusEl.textContent = '✗ error'; statusEl.style.color = 'var(--red)'; }
+          this.showToast(err.message || 'Failed to save', 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Load current server-text values from their respective API endpoints
+    this.els.settingsBody.querySelectorAll('.settings-server-text-input').forEach(async input => {
+      const endpoint = input.dataset.apiEndpoint;
+      const field = input.dataset.apiField || 'value';
+      const key = input.id.replace('server-text-', '');
+      const statusEl = document.getElementById('server-text-status-' + key);
+      try {
+        const result = await this.api('GET', endpoint);
+        input.value = result[field] || '';
+        if (statusEl) {
+          statusEl.textContent = result.available ? '✓ found' : '⚠ not on PATH';
+          statusEl.style.color = result.available ? 'var(--green)' : 'var(--yellow)';
+        }
+      } catch (_) {
+        if (statusEl) { statusEl.textContent = 'could not load'; }
+      }
+    });
   }
 
   /** Filter settings from search input */
@@ -4155,6 +4251,22 @@ class CWMApp {
       this.renderWorkspaces();
     }
 
+    // td integration: show/hide sidebar mode toggle based on enableTd setting
+    const tdEnabled = !!this.getSetting('enableTd');
+    if (this.els.sidebarTasksHeader) {
+      // Only visible when in tasks view AND td is enabled
+      const inTasksView = this._sidebarView === 'tasks';
+      this.els.sidebarTasksHeader.hidden = !(tdEnabled && inTasksView);
+    }
+    // If td was just disabled while in td mode, revert to native mode
+    if (!tdEnabled && this._sidebarTasksMode === 'td') {
+      this._setSidebarTasksMode('native');
+    }
+    // Reload td docs section if currently visible
+    if (typeof this.loadTdIssues === 'function') {
+      this.loadTdIssues();
+    }
+
   }
 
 
@@ -4188,7 +4300,22 @@ class CWMApp {
     // Toggle sidebar tasks visibility
     if (this.els.sidebarTasksList) {
       this.els.sidebarTasksList.hidden = isProjects;
-      if (!isProjects) this.renderSidebarTasks();
+    }
+
+    // Show tasks header (mode toggle) only when td is enabled and tasks view is active
+    if (this.els.sidebarTasksHeader) {
+      const showHeader = !isProjects && this.getSetting('enableTd');
+      this.els.sidebarTasksHeader.hidden = !showHeader;
+    }
+
+    if (!isProjects) {
+      // Render whichever mode is active
+      const mode = this._sidebarTasksMode || 'native';
+      if (mode === 'td') {
+        this.renderSidebarTdIssues();
+      } else {
+        this.renderSidebarTasks();
+      }
     }
   }
 
@@ -4231,6 +4358,89 @@ class CWMApp {
       });
     } catch (_) {
       this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:11px;">Failed to load tasks</div>';
+    }
+  }
+
+  /**
+   * Switch the sidebar tasks panel between native tasks and td issues.
+   * @param {'native'|'td'} mode
+   */
+  _setSidebarTasksMode(mode) {
+    this._sidebarTasksMode = mode;
+
+    // Update toggle button state
+    if (this.els.sidebarTasksModeToggle) {
+      this.els.sidebarTasksModeToggle.querySelectorAll('.sidebar-tasks-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tasksMode === mode);
+      });
+    }
+
+    if (mode === 'td') {
+      this.renderSidebarTdIssues();
+    } else {
+      this.renderSidebarTasks();
+    }
+  }
+
+  /** Render td issues list in the sidebar tasks panel. */
+  async renderSidebarTdIssues() {
+    if (!this.els.sidebarTasksList) return;
+
+    // Use cached issues if available, otherwise fetch
+    const ws = this.state.activeWorkspace;
+    if (!ws) {
+      this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;text-align:center;">No active project</div>';
+      return;
+    }
+
+    this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;">Loading td issues…</div>';
+
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues`);
+      const issues = data.issues || [];
+
+      // Clear
+      while (this.els.sidebarTasksList.firstChild) {
+        this.els.sidebarTasksList.removeChild(this.els.sidebarTasksList.firstChild);
+      }
+
+      if (issues.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:16px;color:var(--overlay0);font-size:12px;text-align:center;';
+        empty.textContent = 'No open td issues';
+        this.els.sidebarTasksList.appendChild(empty);
+        return;
+      }
+
+      for (const issue of issues) {
+        const id = issue.id;
+        const status = issue.status || 'open';
+        const title = issue.title || id;
+
+        const row = document.createElement('div');
+        row.className = 'sidebar-td-item';
+        row.title = title;
+
+        const dot = document.createElement('span');
+        dot.className = 'td-status-dot ' + status;
+        row.appendChild(dot);
+
+        const idEl = document.createElement('span');
+        idEl.className = 'td-issue-id';
+        idEl.textContent = id;
+        row.appendChild(idEl);
+
+        const titleEl = document.createElement('span');
+        titleEl.className = 'td-issue-title';
+        titleEl.textContent = title;
+        row.appendChild(titleEl);
+
+        row.addEventListener('click', () => this.openTdIssueModal(id));
+
+        this.els.sidebarTasksList.appendChild(row);
+      }
+    } catch (_) {
+      this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:11px;">Failed to load td issues</div>';
     }
   }
 
@@ -5085,6 +5295,9 @@ class CWMApp {
         }
 
         this.showToast(`Task started on ${branch}`, 'success');
+
+        // If this task was promoted from a td issue, mark that issue in_progress
+        this._maybeMarkTdIssueStarted();
       } else {
         // Create task in backlog (no session, no worktree yet)
         const data = await this.api('POST', '/api/worktree-tasks', {
@@ -5101,6 +5314,9 @@ class CWMApp {
 
         this.closeNewTaskDialog();
 
+        // If this task was promoted from a td issue, mark that issue in_progress
+        this._maybeMarkTdIssueStarted();
+
         // Switch to tasks view to see the backlog
         this.setViewMode('tasks');
         this.showToast(`Task added to backlog: ${branch}`, 'success');
@@ -5111,6 +5327,21 @@ class CWMApp {
       this.els.newTaskCreate.disabled = false;
       this.els.newTaskCreate.textContent = 'Create Task';
     }
+  }
+
+  /**
+   * If the current worktree task was promoted from a td issue (via _promoteTdIssueToWorktree),
+   * tell the server to mark that td issue as in_progress, then clear the pending state.
+   * Fire-and-forget: failures are logged but do not block the user.
+   */
+  _maybeMarkTdIssueStarted() {
+    const issueId = this._pendingTdIssueId;
+    const wsId = this._pendingTdWorkspaceId;
+    this._pendingTdIssueId = null;
+    this._pendingTdWorkspaceId = null;
+    if (!issueId || !wsId) return;
+    this.api('POST', `/api/workspaces/${wsId}/td/issues/${issueId}/start`, {})
+      .catch(err => console.warn('td start failed for', issueId, err));
   }
 
 
@@ -5952,6 +6183,7 @@ class CWMApp {
       this.renderTasksView();
     } else if (isDocs) {
       this.loadDocs();
+      this.loadTdIssues();
     } else if (isResources) {
       this.loadResources();
     } else if (isCosts) {
@@ -10239,6 +10471,469 @@ class CWMApp {
     }
   }
 
+
+  /* ═══════════════════════════════════════════════════════════
+     TD ISSUES — docs panel integration
+     github.com/marcus/td
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Load td status and issues for the active workspace.
+   * Shows/hides the td section and renders issues or setup prompt.
+   */
+  async loadTdIssues() {
+    if (!this.els.docsTdSection) return;
+
+    // Respect global td toggle
+    if (!this.getSetting('enableTd')) {
+      this.els.docsTdSection.hidden = true;
+      return;
+    }
+
+    const ws = this.state.activeWorkspace;
+    if (!ws) {
+      this.els.docsTdSection.hidden = true;
+      return;
+    }
+
+    // Show the section now that we have a workspace
+    this.els.docsTdSection.hidden = false;
+
+    try {
+      const status = await this.api('GET', `/api/workspaces/${ws.id}/td/status`);
+
+      if (!status.available) {
+        this._renderTdSetup('td is not installed. Install it from github.com/marcus/td', { showSetdir: false, showInit: false });
+        return;
+      }
+
+      if (!status.repoDir) {
+        this._renderTdSetup('No project directory configured for this workspace.', { showSetdir: true, showInit: false });
+        return;
+      }
+
+      if (!status.initialized) {
+        this._renderTdSetup('td not initialized in ' + status.repoDir, { showSetdir: true, showInit: true });
+        return;
+      }
+
+      // td is ready — hide setup bar and load issues
+      if (this.els.docsTdSetupBar) this.els.docsTdSetupBar.hidden = true;
+      await this._fetchAndRenderTdIssues(ws.id);
+
+    } catch (err) {
+      if (this.els.docsTdList) this.els.docsTdList.textContent = 'Error loading td status: ' + (err.message || err);
+    }
+
+    this._wireTdEvents();
+  }
+
+  /** Show the td setup bar with a message. */
+  _renderTdSetup(msg, { showSetdir = true, showInit = false } = {}) {
+    if (this.els.docsTdList) this.els.docsTdList.textContent = 'td not configured for this project.';
+    if (this.els.docsTdCount) this.els.docsTdCount.textContent = '0';
+    if (this.els.docsTdSetupBar) this.els.docsTdSetupBar.hidden = false;
+    if (this.els.docsTdSetupMsg) this.els.docsTdSetupMsg.textContent = msg;
+    if (this.els.docsTdInitBtn) this.els.docsTdInitBtn.hidden = !showInit;
+    if (this.els.docsTdSetdirBtn) this.els.docsTdSetdirBtn.hidden = !showSetdir;
+  }
+
+  /** Fetch and render td issues for the workspace. */
+  async _fetchAndRenderTdIssues(workspaceId) {
+    if (this.els.docsTdList) this.els.docsTdList.textContent = 'Loading...';
+    try {
+      const data = await this.api('GET', `/api/workspaces/${workspaceId}/td/issues`);
+      const issues = data.issues || [];
+      this._tdIssuesCache = issues;
+      this._renderTdIssues(issues);
+    } catch (err) {
+      if (this.els.docsTdList) this.els.docsTdList.textContent = 'Failed to load issues: ' + (err.message || err);
+    }
+  }
+
+  /** Render td issues list using DOM (not innerHTML) for XSS safety. */
+  _renderTdIssues(issues) {
+    if (this.els.docsTdCount) this.els.docsTdCount.textContent = issues.length;
+    if (!this.els.docsTdList) return;
+
+    // Clear existing content safely
+    while (this.els.docsTdList.firstChild) {
+      this.els.docsTdList.removeChild(this.els.docsTdList.firstChild);
+    }
+
+    if (issues.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'docs-empty';
+      empty.textContent = 'No open issues. Click + to create one.';
+      this.els.docsTdList.appendChild(empty);
+      return;
+    }
+
+    const statusLabel = { open: 'Open', in_progress: 'In Progress', in_review: 'In Review', blocked: 'Blocked', closed: 'Closed' };
+
+    for (const issue of issues) {
+      const status = issue.status || 'open';
+      const title = issue.title || issue.id;
+      const id = issue.id;
+
+      // Row container
+      const row = document.createElement('div');
+      row.className = 'td-issue-item';
+      row.dataset.tdId = id;
+      row.style.cursor = 'pointer';
+      row.title = 'Click to view details';
+      row.addEventListener('click', () => this.openTdIssueModal(id));
+
+      // Status dot
+      const dot = document.createElement('span');
+      dot.className = 'td-status-dot ' + status;
+      dot.title = statusLabel[status] || status;
+      row.appendChild(dot);
+
+      // ID label
+      const idLabel = document.createElement('span');
+      idLabel.className = 'td-issue-id';
+      idLabel.textContent = id;
+      row.appendChild(idLabel);
+
+      // Title
+      const titleEl = document.createElement('span');
+      titleEl.className = 'td-issue-title';
+      titleEl.textContent = title;
+      titleEl.title = title;
+      row.appendChild(titleEl);
+
+      // Actions container
+      const actions = document.createElement('div');
+      actions.className = 'td-issue-actions';
+
+      // Start Worktree button
+      const startBtn = document.createElement('button');
+      startBtn.className = 'td-start-worktree-btn';
+      startBtn.textContent = '→ Worktree';
+      startBtn.title = 'Promote to worktree task';
+      startBtn.dataset.tdId = id;
+      startBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._promoteTdIssueToWorktree(id, title);
+      });
+      actions.appendChild(startBtn);
+
+      // Delete button
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'docs-item-delete btn btn-ghost btn-icon btn-sm td-delete-btn';
+      deleteBtn.title = 'Delete issue';
+      deleteBtn.textContent = '×';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._deleteTdIssue(id);
+      });
+      actions.appendChild(deleteBtn);
+
+      row.appendChild(actions);
+      this.els.docsTdList.appendChild(row);
+    }
+  }
+
+  /**
+   * Wire one-time click events for the td section header buttons.
+   * Safe to call multiple times — guards with a flag.
+   */
+  _wireTdEvents() {
+    if (this._tdEventsWired) return;
+    this._tdEventsWired = true;
+
+    if (this.els.docsTdAddBtn) {
+      this.els.docsTdAddBtn.addEventListener('click', () => this._addTdIssue());
+    }
+    if (this.els.docsTdRefreshBtn) {
+      this.els.docsTdRefreshBtn.addEventListener('click', () => {
+        const ws = this.state.activeWorkspace;
+        if (ws) this._fetchAndRenderTdIssues(ws.id);
+      });
+    }
+    if (this.els.docsTdInitBtn) {
+      this.els.docsTdInitBtn.addEventListener('click', () => this._initTd());
+    }
+    if (this.els.docsTdSetdirBtn) {
+      this.els.docsTdSetdirBtn.addEventListener('click', () => this._setTdRepoDir());
+    }
+  }
+
+  /** Prompt for a new td issue title and create it. */
+  async _addTdIssue() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) { this.showToast('Select a project first', 'warning'); return; }
+
+    const title = prompt('New td issue title:');
+    if (!title || !title.trim()) return;
+
+    try {
+      await this.api('POST', `/api/workspaces/${ws.id}/td/issues`, { title: title.trim() });
+      this.showToast('td issue created', 'success');
+      await this._fetchAndRenderTdIssues(ws.id);
+    } catch (err) {
+      this.showToast(err.message || 'Failed to create td issue', 'error');
+    }
+  }
+
+  /** Delete a td issue after confirmation. */
+  async _deleteTdIssue(issueId) {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    if (!confirm('Delete td issue ' + issueId + '?')) return;
+    try {
+      await this.api('DELETE', `/api/workspaces/${ws.id}/td/issues/${issueId}`);
+      this.showToast(issueId + ' deleted', 'success');
+      await this._fetchAndRenderTdIssues(ws.id);
+    } catch (err) {
+      this.showToast(err.message || 'Failed to delete issue', 'error');
+    }
+  }
+
+  /** Run `td init` in the workspace repo directory. */
+  async _initTd() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    try {
+      const result = await this.api('POST', `/api/workspaces/${ws.id}/td/init`, {});
+      this.showToast('td initialized in ' + result.repoDir, 'success');
+      await this.loadTdIssues();
+    } catch (err) {
+      this.showToast(err.message || 'Failed to initialize td', 'error');
+    }
+  }
+
+  /** Prompt the user to set/override the repo directory for td. */
+  async _setTdRepoDir() {
+    const ws = this.state.activeWorkspace;
+    if (!ws) return;
+    const dir = prompt('Enter the absolute path to the project directory (where .todos/ should live):');
+    if (!dir || !dir.trim()) return;
+    try {
+      await this.api('PUT', `/api/workspaces/${ws.id}/td/repodir`, { repoDir: dir.trim() });
+      this.showToast('Project directory saved', 'success');
+      await this.loadTdIssues();
+    } catch (err) {
+      this.showToast(err.message || 'Failed to set directory', 'error');
+    }
+  }
+
+  /**
+   * Phase 2: Promote a td issue to a worktree task.
+   * Fetches full context, pre-populates the New Task dialog, and after
+   * the task is created marks the td issue as in_progress.
+   */
+  async _promoteTdIssueToWorktree(issueId, issueTitle) {
+    const ws = this.state.activeWorkspace;
+    if (!ws) { this.showToast('Select a project first', 'warning'); return; }
+
+    this.showToast('Loading context for ' + issueId + '...', 'info');
+
+    let context = '';
+    let repoDir = null;
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues/${issueId}/context`);
+      context = data.context || '';
+      repoDir = data.repoDir || null;
+    } catch (_err) {
+      this.showToast('Could not load td context, opening dialog anyway', 'warning');
+    }
+
+    // Open the existing New Task dialog pre-populated with td issue data
+    this.openNewTaskDialog(ws.id);
+
+    // Pre-populate after a tick so the dialog has rendered
+    setTimeout(() => {
+      if (this.els.newTaskName) {
+        this.els.newTaskName.value = issueTitle || issueId;
+        this.updateBranchPreview();
+      }
+      if (this.els.newTaskDescription) {
+        const desc = context
+          ? 'td:' + issueId + '\n\n' + context
+          : 'td:' + issueId + '\n\n' + issueTitle;
+        this.els.newTaskDescription.value = desc;
+      }
+      if (repoDir && this.els.newTaskDir) {
+        const opts = Array.from(this.els.newTaskDir.options);
+        const match = opts.find(o => o.value === repoDir);
+        if (match) {
+          this.els.newTaskDir.value = repoDir;
+        } else {
+          this.els.newTaskDir.value = '__custom__';
+          if (this.els.newTaskDirCustom) {
+            this.els.newTaskDirCustom.value = repoDir;
+            this.els.newTaskDirCustom.hidden = false;
+          }
+        }
+      }
+    }, 50);
+
+    // Store so submitNewTask() can mark the td issue in_progress after creation
+    this._pendingTdIssueId = issueId;
+    this._pendingTdWorkspaceId = ws.id;
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     TD ISSUE DETAIL MODAL
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Open the td issue detail modal for a given issue ID.
+   * Fetches context (which includes show details) from the server.
+   * @param {string} issueId
+   */
+  async openTdIssueModal(issueId) {
+    const ws = this.state.activeWorkspace;
+    if (!ws || !this.els.tdIssueModalOverlay) return;
+
+    // Reset and show modal immediately
+    if (this.els.tdIssueModalId) this.els.tdIssueModalId.textContent = issueId;
+    if (this.els.tdIssueModalTitle) this.els.tdIssueModalTitle.textContent = issueId;
+    if (this.els.tdIssueModalBody) {
+      while (this.els.tdIssueModalBody.firstChild) {
+        this.els.tdIssueModalBody.removeChild(this.els.tdIssueModalBody.firstChild);
+      }
+      const loading = document.createElement('div');
+      loading.className = 'td-issue-modal-loading';
+      loading.textContent = 'Loading issue details…';
+      this.els.tdIssueModalBody.appendChild(loading);
+    }
+    this.els.tdIssueModalOverlay.hidden = false;
+
+    // Remember which issue is open (for promote button)
+    this._tdModalIssueId = issueId;
+    this._tdModalWorkspaceId = ws.id;
+
+    // Wire modal buttons once
+    if (!this._tdModalEventsWired) {
+      this._tdModalEventsWired = true;
+
+      if (this.els.tdIssueModalClose) {
+        this.els.tdIssueModalClose.addEventListener('click', () => this.closeTdIssueModal());
+      }
+      if (this.els.tdIssueModalCloseBtn) {
+        this.els.tdIssueModalCloseBtn.addEventListener('click', () => this.closeTdIssueModal());
+      }
+      if (this.els.tdIssueModalOverlay) {
+        this.els.tdIssueModalOverlay.addEventListener('click', (e) => {
+          if (e.target === this.els.tdIssueModalOverlay) this.closeTdIssueModal();
+        });
+      }
+      if (this.els.tdIssueModalPromoteBtn) {
+        this.els.tdIssueModalPromoteBtn.addEventListener('click', () => {
+          const id = this._tdModalIssueId;
+          const title = (this.els.tdIssueModalTitle && this.els.tdIssueModalTitle.textContent !== id)
+            ? this.els.tdIssueModalTitle.textContent
+            : id;
+          this.closeTdIssueModal();
+          if (id) this._promoteTdIssueToWorktree(id, title);
+        });
+      }
+    }
+
+    // Fetch combined show + context from the context endpoint
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues/${issueId}/context`);
+      this._renderTdIssueModal(issueId, data.details, data.context || '');
+    } catch (err) {
+      if (this.els.tdIssueModalBody) {
+        while (this.els.tdIssueModalBody.firstChild) {
+          this.els.tdIssueModalBody.removeChild(this.els.tdIssueModalBody.firstChild);
+        }
+        const errEl = document.createElement('div');
+        errEl.className = 'td-issue-modal-loading';
+        errEl.textContent = 'Failed to load details: ' + (err.message || err);
+        this.els.tdIssueModalBody.appendChild(errEl);
+      }
+    }
+  }
+
+  /**
+   * Render the td issue modal body with parsed details + context.
+   * @param {string} issueId
+   * @param {Object|null} details  - result of td show --json (or { raw: string })
+   * @param {string} contextText   - result of td context
+   */
+  _renderTdIssueModal(issueId, details, contextText) {
+    const body = this.els.tdIssueModalBody;
+    if (!body) return;
+
+    // Clear
+    while (body.firstChild) body.removeChild(body.firstChild);
+
+    // Update title from details
+    const title = details?.title || issueId;
+    if (this.els.tdIssueModalTitle) this.els.tdIssueModalTitle.textContent = title;
+
+    // Meta row (status / type / priority)
+    if (details) {
+      const metaData = [
+        ['Status', details.status],
+        ['Type', details.type],
+        ['Priority', details.priority],
+      ].filter(([, v]) => v);
+
+      if (metaData.length > 0) {
+        const meta = document.createElement('div');
+        meta.className = 'td-issue-modal-meta';
+        for (const [label, val] of metaData) {
+          const item = document.createElement('div');
+          item.className = 'td-issue-modal-meta-item';
+          const strong = document.createElement('strong');
+          strong.textContent = label;
+          item.appendChild(strong);
+          item.appendChild(document.createTextNode(val));
+          meta.appendChild(item);
+        }
+        body.appendChild(meta);
+      }
+
+      // Description / body / raw show output
+      const showText = details.raw || details.description || details.body || '';
+      if (showText) {
+        body.appendChild(this._makeTdModalSection('Details', showText));
+      }
+    }
+
+    // Context (handoffs, decisions, log)
+    if (contextText) {
+      body.appendChild(this._makeTdModalSection('Context & History', contextText));
+    }
+
+    if (!body.firstChild) {
+      const empty = document.createElement('div');
+      empty.className = 'td-issue-modal-loading';
+      empty.textContent = 'No details available.';
+      body.appendChild(empty);
+    }
+  }
+
+  /** Build a labelled pre-formatted content section for the modal. */
+  _makeTdModalSection(title, content) {
+    const section = document.createElement('div');
+    section.className = 'td-issue-modal-section';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'td-issue-modal-section-title';
+    titleEl.textContent = title;
+    section.appendChild(titleEl);
+
+    const contentEl = document.createElement('div');
+    contentEl.className = 'td-issue-modal-content';
+    contentEl.textContent = content;
+    section.appendChild(contentEl);
+
+    return section;
+  }
+
+  /** Close and reset the td issue detail modal. */
+  closeTdIssueModal() {
+    if (this.els.tdIssueModalOverlay) this.els.tdIssueModalOverlay.hidden = true;
+    this._tdModalIssueId = null;
+    this._tdModalWorkspaceId = null;
+  }
 
   /* ═══════════════════════════════════════════════════════════
      PHASE 3: INLINE SESSION RENAME
