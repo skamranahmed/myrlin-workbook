@@ -541,7 +541,30 @@ function resolveTdRepoDir(store, workspaceId) {
     if (s.workingDir) counts[s.workingDir] = (counts[s.workingDir] || 0) + 1;
   }
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  return sorted.length > 0 ? sorted[0][0] : null;
+  if (sorted.length === 0) return null;
+
+  const inferredDir = sorted[0][0];
+
+  // If the inferred dir is a git worktree (not the main repo), resolve to the
+  // main repo root — that's where .todos/ lives, not inside the worktree.
+  // `git rev-parse --git-common-dir` returns the shared .git dir for both the
+  // main repo and any linked worktree, so dirname() gives the main repo root.
+  try {
+    const { execFileSync } = require('child_process');
+    const commonGitDir = execFileSync(
+      'git', ['-C', inferredDir, 'rev-parse', '--git-common-dir'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    ).trim();
+    const absCommonGitDir = path.isAbsolute(commonGitDir)
+      ? commonGitDir
+      : path.resolve(inferredDir, commonGitDir);
+    const mainRepoRoot = path.dirname(absCommonGitDir);
+    if (mainRepoRoot && mainRepoRoot !== inferredDir && require('fs').existsSync(mainRepoRoot)) {
+      return mainRepoRoot;
+    }
+  } catch (_) { /* not a git repo or git unavailable — fall through */ }
+
+  return inferredDir;
 }
 
 /**
