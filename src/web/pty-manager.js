@@ -154,11 +154,30 @@ class PtySessionManager {
     if (resumeSessionId) {
       fullCommand += ' --resume ' + resumeSessionId;
     } else if (cwd && !newSession) {
-      // No explicit session to resume - use --continue to pick up most recent
-      // conversation in this working directory. On a fresh dir with no history,
-      // Claude will start a new conversation (same as bare `claude`).
-      // Skip --continue when newSession is true (user explicitly wants a fresh session).
-      fullCommand += ' --continue';
+      // Only add --continue when there is actually conversation history for this
+      // working directory. `claude --continue` exits with code 1 ("No conversation
+      // found to continue") on a fresh directory — e.g. a brand-new git worktree.
+      // Scan ~/.claude/projects/ for any JSONL file whose encoded path matches cwd.
+      let hasHistory = false;
+      try {
+        const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+        if (fs.existsSync(claudeDir)) {
+          const normalizedCwd = cwd.replace(/[/\\]/g, path.sep);
+          const match = fs.readdirSync(claudeDir).find(d => {
+            try {
+              return decodeURIComponent(d).replace(/[/\\]/g, path.sep) === normalizedCwd;
+            } catch (_) { return false; }
+          });
+          if (match) {
+            const projDir = path.join(claudeDir, match);
+            hasHistory = fs.readdirSync(projDir).some(f => f.endsWith('.jsonl'));
+          }
+        }
+      } catch (_) { /* filesystem error — fall through, don't add --continue */ }
+      if (hasHistory) {
+        fullCommand += ' --continue';
+      }
+      // If no history, run bare `claude` — starts a fresh session without error.
     }
     if (bypassPermissions) {
       fullCommand += ' --dangerously-skip-permissions';
