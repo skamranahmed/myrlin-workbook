@@ -195,6 +195,15 @@ setupAuth(app);
 // ─── Protected API Routes ──────────────────────────────────
 // All routes below require a valid Bearer token.
 
+// Cross-process state sync: on GET requests, check if another process
+// (e.g. TUI) has modified the state file since we last read it.
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET') {
+    getStore().checkDiskSync();
+  }
+  next();
+});
+
 // ──────────────────────────────────────────────────────────
 //  WORKSPACES
 // ──────────────────────────────────────────────────────────
@@ -4502,15 +4511,43 @@ app.post('/api/resources/kill-process', requireAuth, (req, res) => {
 //  GIT OPERATIONS
 // ──────────────────────────────────────────────────────────
 
+/**
+ * Maximum number of concurrent git child processes.
+ * Prevents resource exhaustion when frontend polls many sessions at once.
+ */
+const GIT_MAX_CONCURRENT = 3;
+let gitRunning = 0;
+const gitQueue = [];
+
+/**
+ * Execute a git command with concurrency limiting.
+ * At most GIT_MAX_CONCURRENT git processes run simultaneously;
+ * additional calls are queued and drained in FIFO order.
+ * @param {string[]} args - git subcommand and arguments
+ * @param {string} cwd - working directory for the git command
+ * @returns {Promise<string>} stdout from the git process
+ */
 function gitExec(args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout: 5000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
-      if (err) {
-        const msg = (stderr || err.message || '').trim();
-        return reject(new Error(msg || 'git command failed'));
-      }
-      resolve(stdout);
-    });
+    const run = () => {
+      gitRunning++;
+      execFile('git', args, { cwd, timeout: 5000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        gitRunning--;
+        // Drain next queued command if any
+        const next = gitQueue.shift();
+        if (next) next();
+        if (err) {
+          const msg = (stderr || err.message || '').trim();
+          return reject(new Error(msg || 'git command failed'));
+        }
+        resolve(stdout);
+      });
+    };
+    if (gitRunning < GIT_MAX_CONCURRENT) {
+      run();
+    } else {
+      gitQueue.push(run);
+    }
   });
 }
 
@@ -4547,6 +4584,14 @@ app.get('/api/git/status', requireAuth, async (req, res) => {
   const cached = gitStatusCache.get(dir);
   if (cached && Date.now() - cached.ts < GIT_STATUS_CACHE_TTL) {
     return res.json(cached.data);
+  }
+
+  // Validate directory exists before spawning git processes
+  const fs = require('fs');
+  if (!fs.existsSync(dir)) {
+    const result = { isGitRepo: false };
+    gitStatusCache.set(dir, { data: result, ts: Date.now() });
+    return res.json(result);
   }
 
   try {
@@ -6129,7 +6174,7 @@ app.get('/api/conflicts', requireAuth, (req, res) => {
  * then cross-references to find overlapping edits.
  * Protected by auth.
  */
-app.get('/api/workspaces/:id/conflicts', requireAuth, (req, res) => {
+app.get('/api/workspaces/:id/conflicts', requireAuth, async (req, res) => {
   const store = getStore();
   const workspace = store.getWorkspace(req.params.id);
 
@@ -6152,19 +6197,15 @@ app.get('/api/workspaces/:id/conflicts', requireAuth, (req, res) => {
     });
   }
 
-  // Collect modified files per session
+  // Collect modified files per session (async, routed through concurrency pool)
   // Map: sessionId → { id, name, files: string[] }
   const sessionFiles = new Map();
   let checkedSessions = 0;
 
-  for (const session of runningSessions) {
+  // Run git status for all sessions concurrently (pool limits actual spawns)
+  await Promise.all(runningSessions.map(async (session) => {
     try {
-      const stdout = execSync('git status --porcelain', {
-        cwd: session.workingDir,
-        timeout: 3000,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'], // suppress stderr output
-      });
+      const stdout = await gitExec(['status', '--porcelain'], session.workingDir);
 
       checkedSessions++;
 
@@ -6209,7 +6250,7 @@ app.get('/api/workspaces/:id/conflicts', requireAuth, (req, res) => {
       // git status failed (not a git repo, timeout, etc.) - skip this session
       checkedSessions++;
     }
-  }
+  }));
 
   // Cross-reference: find files that appear in 2+ sessions
   const fileToSessions = new Map(); // filename → [{ id, name }]
@@ -6298,6 +6339,22 @@ app.get('/api/browse', requireAuth, (req, res) => {
   entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   res.json({ currentPath: targetPath, parent: hasParent ? parent : null, entries });
+});
+
+// ──────────────────────────────────────────────────────────
+//  EXPRESS ERROR MIDDLEWARE
+// ──────────────────────────────────────────────────────────
+
+/**
+ * Catch-all error handler for Express routes.
+ * Prevents unhandled route errors from crashing the process.
+ */
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  console.error('[Server] Unhandled route error:', err.message || err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ──────────────────────────────────────────────────────────

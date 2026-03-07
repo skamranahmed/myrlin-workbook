@@ -619,6 +619,7 @@ class CWMApp {
 
     // Workspace / Category creation dropdown
     this.els.createWorkspaceBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent document click handler from immediately closing the menu
       const rect = e.currentTarget.getBoundingClientRect();
       this._renderContextItems('New', [
         { label: 'New Project', icon: '&#128193;', action: () => this.createWorkspace() },
@@ -8611,6 +8612,24 @@ class CWMApp {
       label: 'Fix Terminal (reset)', icon: '&#8635;', action: () => {
         tp.sendCommand('reset\r');
         this.showToast('Sent reset to terminal', 'info');
+      },
+    });
+
+    // Restart Session - kills and relaunches the Claude session in-place
+    items.push({
+      label: 'Restart Session', icon: '&#8635;', action: async () => {
+        const sid = tp.sessionId;
+        const sName = tp.sessionName;
+        const oldOpts = { ...(tp.spawnOpts || {}) };
+        try {
+          await this.api('POST', `/api/pty/${encodeURIComponent(sid)}/kill`);
+        } catch (_) {
+          // Session may already be dead, continue with relaunch
+        }
+        this.closeTerminalPane(slotIdx);
+        // Reopen in the same slot with the same options (resumes the session)
+        this.openTerminalInPane(slotIdx, sid, sName, oldOpts);
+        this.showToast('Session restarted', 'success');
       },
     });
 

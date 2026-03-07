@@ -44,6 +44,7 @@ class Store extends EventEmitter {
     this._state = null;
     this._dirty = false;
     this._saveTimer = null;
+    this._lastDiskMtimeMs = 0; // Track last known mtime for cross-process sync
   }
 
   /**
@@ -57,7 +58,42 @@ class Store extends EventEmitter {
     // Create a timestamped backup BEFORE loading (preserves last known good state)
     this.createTimestampedBackup();
     this._state = this._load();
+    this._recordDiskMtime();
     return this;
+  }
+
+  /**
+   * Record the current mtime of the state file for cross-process sync detection.
+   */
+  _recordDiskMtime() {
+    try {
+      if (fs.existsSync(STATE_FILE)) {
+        this._lastDiskMtimeMs = fs.statSync(STATE_FILE).mtimeMs;
+      }
+    } catch (_) {
+      // Ignore stat errors
+    }
+  }
+
+  /**
+   * Check if another process has modified the state file since we last read it.
+   * If so, reload from disk. Enables TUI/GUI cross-process state sync.
+   */
+  checkDiskSync() {
+    try {
+      if (!fs.existsSync(STATE_FILE)) return;
+      const currentMtimeMs = fs.statSync(STATE_FILE).mtimeMs;
+      if (currentMtimeMs > this._lastDiskMtimeMs) {
+        const reloaded = this._load();
+        if (reloaded) {
+          this._state = reloaded;
+          this._lastDiskMtimeMs = currentMtimeMs;
+          this.emit('state:reloaded');
+        }
+      }
+    } catch (_) {
+      // Ignore stat/read errors; serve from memory as fallback
+    }
   }
 
   /**
@@ -129,12 +165,12 @@ class Store extends EventEmitter {
       if (fs.existsSync(STATE_FILE)) {
         fs.copyFileSync(STATE_FILE, BACKUP_FILE);
       }
-      // Atomic write: write to temp file, then rename over the target.
-      // If the process is killed mid-write, the temp file is lost but
-      // the original STATE_FILE (or BACKUP_FILE) survives intact.
-      const tmpFile = STATE_FILE + '.tmp';
+      // Atomic write: write to PID-unique temp file, then rename over the target.
+      // PID suffix prevents collisions when TUI and GUI write concurrently.
+      const tmpFile = STATE_FILE + '.' + process.pid + '.tmp';
       fs.writeFileSync(tmpFile, JSON.stringify(this._state, null, 2), 'utf-8');
       fs.renameSync(tmpFile, STATE_FILE);
+      this._recordDiskMtime();
       this._dirty = false;
     } catch (err) {
       this.emit('error', { type: 'save_failed', error: err.message });
