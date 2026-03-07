@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.3] - 2026-03-07
+
+### Fixed
+
+- **New project "+" button** - The dropdown menu was immediately closing due to an event-bubbling race condition. The document-level click handler dismissed the menu before it could render. Fixed by stopping propagation on the button click (#20)
+- **Cross-process state sync** - Projects created in the TUI never appeared in the GUI because each process had its own in-memory state. Added mtime-based disk sync so the GUI re-reads state when another process modifies the file (#20)
+- **Concurrent write safety** - Atomic write temp files now use PID-unique filenames to prevent collisions when TUI and GUI write simultaneously
+
+### Added
+
+- **Git concurrency pool** - Limits concurrent git child processes to 3, preventing resource exhaustion when polling many sessions
+- **Express error middleware** - Catch-all error handler prevents unhandled route errors from crashing the server
+- **Directory validation** - Git status endpoint validates directory exists before spawning git processes
+- **Restart Session** - Terminal context menu now has a "Restart Session" option that kills and relaunches in-place
+
 ## [0.8.2] - 2026-03-02
 
 ### Fixed
