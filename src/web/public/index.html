@@ -295,6 +295,12 @@
         <div class="sidebar-list" id="workspace-list">
           <!-- Project items rendered here -->
         </div>
+        <div class="sidebar-tasks-header" id="sidebar-tasks-header" hidden>
+          <div class="sidebar-tasks-mode-toggle" id="sidebar-tasks-mode-toggle">
+            <button class="sidebar-tasks-mode-btn active" data-tasks-mode="native" title="Worktree Tasks">Tasks</button>
+            <button class="sidebar-tasks-mode-btn" data-tasks-mode="td" title="td Issues">td</button>
+          </div>
+        </div>
         <div class="sidebar-list sidebar-tasks-list" id="sidebar-tasks-list" hidden>
           <!-- Sidebar task items rendered here -->
         </div>
@@ -1437,6 +1443,33 @@
 
   <!-- ═══════════════════════════════════════════ -->
   <!-- SETTINGS OVERLAY                            -->
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TD ISSUE DETAIL MODAL                        -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div class="modal-overlay" id="td-issue-modal-overlay" hidden>
+    <div class="modal td-issue-modal" role="dialog" aria-modal="true" aria-label="td Issue Detail">
+      <div class="modal-header">
+        <div class="td-issue-modal-header-info">
+          <span class="td-badge">td</span>
+          <h3 class="modal-title" id="td-issue-modal-title">Issue Detail</h3>
+          <span class="td-issue-modal-id" id="td-issue-modal-id"></span>
+        </div>
+        <button class="btn btn-ghost btn-icon btn-sm" id="td-issue-modal-close" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="td-issue-modal-body" id="td-issue-modal-body">
+        <div class="td-issue-modal-loading">Loading...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="td-issue-modal-promote-btn">→ Promote to Worktree</button>
+        <button class="btn btn-ghost" id="td-issue-modal-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════════════════════ -->
   <div class="modal-overlay" id="settings-overlay" hidden>
     <div class="settings-panel">

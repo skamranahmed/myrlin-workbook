@@ -36,6 +36,7 @@ const DEFAULT_STATE = {
     theme: 'dark',
     confirmBeforeClose: true,
     tdBinary: '',              // Absolute path to td binary (empty = use $TD_BINARY env or 'td')
+    enableTd: true,            // Show td issue tracking integration
   },
 };
 

@@ -354,6 +354,15 @@ class CWMApp {
       docsTdInitBtn: document.getElementById('docs-td-init-btn'),
       docsTdSetdirBtn: document.getElementById('docs-td-setdir-btn'),
 
+      // td Issue Detail Modal
+      tdIssueModalOverlay: document.getElementById('td-issue-modal-overlay'),
+      tdIssueModalTitle: document.getElementById('td-issue-modal-title'),
+      tdIssueModalId: document.getElementById('td-issue-modal-id'),
+      tdIssueModalBody: document.getElementById('td-issue-modal-body'),
+      tdIssueModalClose: document.getElementById('td-issue-modal-close'),
+      tdIssueModalCloseBtn: document.getElementById('td-issue-modal-close-btn'),
+      tdIssueModalPromoteBtn: document.getElementById('td-issue-modal-promote-btn'),
+
       // Feature Board
       featureBoard: document.getElementById('feature-board'),
       boardColumns: document.getElementById('board-columns'),
@@ -377,6 +386,8 @@ class CWMApp {
       kanbanBoard: document.getElementById('kanban-board'),
       sidebarViewToggle: document.getElementById('sidebar-view-toggle'),
       sidebarProjectsHeader: document.getElementById('sidebar-projects-header'),
+      sidebarTasksHeader: document.getElementById('sidebar-tasks-header'),
+      sidebarTasksModeToggle: document.getElementById('sidebar-tasks-mode-toggle'),
       sidebarTasksList: document.getElementById('sidebar-tasks-list'),
       tasksLayoutToggle: document.getElementById('tasks-layout-toggle'),
       tasksSearch: document.getElementById('tasks-search'),
@@ -867,6 +878,15 @@ class CWMApp {
       this.els.sidebarViewToggle.querySelectorAll('.sidebar-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           this.setSidebarView(btn.dataset.sidebarView);
+        });
+      });
+    }
+
+    // Sidebar tasks mode toggle (native vs td)
+    if (this.els.sidebarTasksModeToggle) {
+      this.els.sidebarTasksModeToggle.querySelectorAll('.sidebar-tasks-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._setSidebarTasksMode(btn.dataset.tasksMode);
         });
       });
     }
@@ -3404,6 +3424,7 @@ class CWMApp {
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
+      { key: 'enableTd', label: 'td Task Management', description: 'Show td issue tracking integration (github.com/marcus/td). When disabled, hides all td UI including the docs panel section and sidebar toggle.', category: 'Advanced' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
@@ -4230,6 +4251,22 @@ class CWMApp {
       this.renderWorkspaces();
     }
 
+    // td integration: show/hide sidebar mode toggle based on enableTd setting
+    const tdEnabled = !!this.getSetting('enableTd');
+    if (this.els.sidebarTasksHeader) {
+      // Only visible when in tasks view AND td is enabled
+      const inTasksView = this._sidebarView === 'tasks';
+      this.els.sidebarTasksHeader.hidden = !(tdEnabled && inTasksView);
+    }
+    // If td was just disabled while in td mode, revert to native mode
+    if (!tdEnabled && this._sidebarTasksMode === 'td') {
+      this._setSidebarTasksMode('native');
+    }
+    // Reload td docs section if currently visible
+    if (typeof this.loadTdIssues === 'function') {
+      this.loadTdIssues();
+    }
+
   }
 
 
@@ -4263,7 +4300,22 @@ class CWMApp {
     // Toggle sidebar tasks visibility
     if (this.els.sidebarTasksList) {
       this.els.sidebarTasksList.hidden = isProjects;
-      if (!isProjects) this.renderSidebarTasks();
+    }
+
+    // Show tasks header (mode toggle) only when td is enabled and tasks view is active
+    if (this.els.sidebarTasksHeader) {
+      const showHeader = !isProjects && this.getSetting('enableTd');
+      this.els.sidebarTasksHeader.hidden = !showHeader;
+    }
+
+    if (!isProjects) {
+      // Render whichever mode is active
+      const mode = this._sidebarTasksMode || 'native';
+      if (mode === 'td') {
+        this.renderSidebarTdIssues();
+      } else {
+        this.renderSidebarTasks();
+      }
     }
   }
 
@@ -4306,6 +4358,89 @@ class CWMApp {
       });
     } catch (_) {
       this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:11px;">Failed to load tasks</div>';
+    }
+  }
+
+  /**
+   * Switch the sidebar tasks panel between native tasks and td issues.
+   * @param {'native'|'td'} mode
+   */
+  _setSidebarTasksMode(mode) {
+    this._sidebarTasksMode = mode;
+
+    // Update toggle button state
+    if (this.els.sidebarTasksModeToggle) {
+      this.els.sidebarTasksModeToggle.querySelectorAll('.sidebar-tasks-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tasksMode === mode);
+      });
+    }
+
+    if (mode === 'td') {
+      this.renderSidebarTdIssues();
+    } else {
+      this.renderSidebarTasks();
+    }
+  }
+
+  /** Render td issues list in the sidebar tasks panel. */
+  async renderSidebarTdIssues() {
+    if (!this.els.sidebarTasksList) return;
+
+    // Use cached issues if available, otherwise fetch
+    const ws = this.state.activeWorkspace;
+    if (!ws) {
+      this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;text-align:center;">No active project</div>';
+      return;
+    }
+
+    this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;">Loading td issues…</div>';
+
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues`);
+      const issues = data.issues || [];
+
+      // Clear
+      while (this.els.sidebarTasksList.firstChild) {
+        this.els.sidebarTasksList.removeChild(this.els.sidebarTasksList.firstChild);
+      }
+
+      if (issues.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:16px;color:var(--overlay0);font-size:12px;text-align:center;';
+        empty.textContent = 'No open td issues';
+        this.els.sidebarTasksList.appendChild(empty);
+        return;
+      }
+
+      for (const issue of issues) {
+        const id = issue.id;
+        const status = issue.status || 'open';
+        const title = issue.title || id;
+
+        const row = document.createElement('div');
+        row.className = 'sidebar-td-item';
+        row.title = title;
+
+        const dot = document.createElement('span');
+        dot.className = 'td-status-dot ' + status;
+        row.appendChild(dot);
+
+        const idEl = document.createElement('span');
+        idEl.className = 'td-issue-id';
+        idEl.textContent = id;
+        row.appendChild(idEl);
+
+        const titleEl = document.createElement('span');
+        titleEl.className = 'td-issue-title';
+        titleEl.textContent = title;
+        row.appendChild(titleEl);
+
+        row.addEventListener('click', () => this.openTdIssueModal(id));
+
+        this.els.sidebarTasksList.appendChild(row);
+      }
+    } catch (_) {
+      this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:11px;">Failed to load td issues</div>';
     }
   }
 
@@ -10348,6 +10483,13 @@ class CWMApp {
    */
   async loadTdIssues() {
     if (!this.els.docsTdSection) return;
+
+    // Respect global td toggle
+    if (!this.getSetting('enableTd')) {
+      this.els.docsTdSection.hidden = true;
+      return;
+    }
+
     const ws = this.state.activeWorkspace;
     if (!ws) {
       this.els.docsTdSection.hidden = true;
@@ -10438,6 +10580,9 @@ class CWMApp {
       const row = document.createElement('div');
       row.className = 'td-issue-item';
       row.dataset.tdId = id;
+      row.style.cursor = 'pointer';
+      row.title = 'Click to view details';
+      row.addEventListener('click', () => this.openTdIssueModal(id));
 
       // Status dot
       const dot = document.createElement('span');
@@ -10628,6 +10773,166 @@ class CWMApp {
     // Store so submitNewTask() can mark the td issue in_progress after creation
     this._pendingTdIssueId = issueId;
     this._pendingTdWorkspaceId = ws.id;
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     TD ISSUE DETAIL MODAL
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Open the td issue detail modal for a given issue ID.
+   * Fetches context (which includes show details) from the server.
+   * @param {string} issueId
+   */
+  async openTdIssueModal(issueId) {
+    const ws = this.state.activeWorkspace;
+    if (!ws || !this.els.tdIssueModalOverlay) return;
+
+    // Reset and show modal immediately
+    if (this.els.tdIssueModalId) this.els.tdIssueModalId.textContent = issueId;
+    if (this.els.tdIssueModalTitle) this.els.tdIssueModalTitle.textContent = issueId;
+    if (this.els.tdIssueModalBody) {
+      while (this.els.tdIssueModalBody.firstChild) {
+        this.els.tdIssueModalBody.removeChild(this.els.tdIssueModalBody.firstChild);
+      }
+      const loading = document.createElement('div');
+      loading.className = 'td-issue-modal-loading';
+      loading.textContent = 'Loading issue details…';
+      this.els.tdIssueModalBody.appendChild(loading);
+    }
+    this.els.tdIssueModalOverlay.hidden = false;
+
+    // Remember which issue is open (for promote button)
+    this._tdModalIssueId = issueId;
+    this._tdModalWorkspaceId = ws.id;
+
+    // Wire modal buttons once
+    if (!this._tdModalEventsWired) {
+      this._tdModalEventsWired = true;
+
+      if (this.els.tdIssueModalClose) {
+        this.els.tdIssueModalClose.addEventListener('click', () => this.closeTdIssueModal());
+      }
+      if (this.els.tdIssueModalCloseBtn) {
+        this.els.tdIssueModalCloseBtn.addEventListener('click', () => this.closeTdIssueModal());
+      }
+      if (this.els.tdIssueModalOverlay) {
+        this.els.tdIssueModalOverlay.addEventListener('click', (e) => {
+          if (e.target === this.els.tdIssueModalOverlay) this.closeTdIssueModal();
+        });
+      }
+      if (this.els.tdIssueModalPromoteBtn) {
+        this.els.tdIssueModalPromoteBtn.addEventListener('click', () => {
+          const id = this._tdModalIssueId;
+          const title = (this.els.tdIssueModalTitle && this.els.tdIssueModalTitle.textContent !== id)
+            ? this.els.tdIssueModalTitle.textContent
+            : id;
+          this.closeTdIssueModal();
+          if (id) this._promoteTdIssueToWorktree(id, title);
+        });
+      }
+    }
+
+    // Fetch combined show + context from the context endpoint
+    try {
+      const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues/${issueId}/context`);
+      this._renderTdIssueModal(issueId, data.details, data.context || '');
+    } catch (err) {
+      if (this.els.tdIssueModalBody) {
+        while (this.els.tdIssueModalBody.firstChild) {
+          this.els.tdIssueModalBody.removeChild(this.els.tdIssueModalBody.firstChild);
+        }
+        const errEl = document.createElement('div');
+        errEl.className = 'td-issue-modal-loading';
+        errEl.textContent = 'Failed to load details: ' + (err.message || err);
+        this.els.tdIssueModalBody.appendChild(errEl);
+      }
+    }
+  }
+
+  /**
+   * Render the td issue modal body with parsed details + context.
+   * @param {string} issueId
+   * @param {Object|null} details  - result of td show --json (or { raw: string })
+   * @param {string} contextText   - result of td context
+   */
+  _renderTdIssueModal(issueId, details, contextText) {
+    const body = this.els.tdIssueModalBody;
+    if (!body) return;
+
+    // Clear
+    while (body.firstChild) body.removeChild(body.firstChild);
+
+    // Update title from details
+    const title = details?.title || issueId;
+    if (this.els.tdIssueModalTitle) this.els.tdIssueModalTitle.textContent = title;
+
+    // Meta row (status / type / priority)
+    if (details) {
+      const metaData = [
+        ['Status', details.status],
+        ['Type', details.type],
+        ['Priority', details.priority],
+      ].filter(([, v]) => v);
+
+      if (metaData.length > 0) {
+        const meta = document.createElement('div');
+        meta.className = 'td-issue-modal-meta';
+        for (const [label, val] of metaData) {
+          const item = document.createElement('div');
+          item.className = 'td-issue-modal-meta-item';
+          const strong = document.createElement('strong');
+          strong.textContent = label;
+          item.appendChild(strong);
+          item.appendChild(document.createTextNode(val));
+          meta.appendChild(item);
+        }
+        body.appendChild(meta);
+      }
+
+      // Description / body / raw show output
+      const showText = details.raw || details.description || details.body || '';
+      if (showText) {
+        body.appendChild(this._makeTdModalSection('Details', showText));
+      }
+    }
+
+    // Context (handoffs, decisions, log)
+    if (contextText) {
+      body.appendChild(this._makeTdModalSection('Context & History', contextText));
+    }
+
+    if (!body.firstChild) {
+      const empty = document.createElement('div');
+      empty.className = 'td-issue-modal-loading';
+      empty.textContent = 'No details available.';
+      body.appendChild(empty);
+    }
+  }
+
+  /** Build a labelled pre-formatted content section for the modal. */
+  _makeTdModalSection(title, content) {
+    const section = document.createElement('div');
+    section.className = 'td-issue-modal-section';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'td-issue-modal-section-title';
+    titleEl.textContent = title;
+    section.appendChild(titleEl);
+
+    const contentEl = document.createElement('div');
+    contentEl.className = 'td-issue-modal-content';
+    contentEl.textContent = content;
+    section.appendChild(contentEl);
+
+    return section;
+  }
+
+  /** Close and reset the td issue detail modal. */
+  closeTdIssueModal() {
+    if (this.els.tdIssueModalOverlay) this.els.tdIssueModalOverlay.hidden = true;
+    this._tdModalIssueId = null;
+    this._tdModalWorkspaceId = null;
   }
 
   /* ═══════════════════════════════════════════════════════════
