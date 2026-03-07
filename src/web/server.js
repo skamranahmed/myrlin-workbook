@@ -5031,16 +5031,38 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
       branchExists = true;
     } catch {}
 
-    // Check if this worktree path is already registered with git (e.g. from a
-    // previous attempt that succeeded at the git level but failed later).
-    // If so, skip `git worktree add` to avoid the "already exists" fatal error.
-    let worktreeAlreadyRegistered = false;
+    // Check existing worktrees to avoid two fatal git errors:
+    //   1. "already exists"  — target path is already a registered worktree
+    //   2. "already checked out" — the branch is checked out in a different worktree
+    // Parse `git worktree list --porcelain` once and handle both cases.
+    let skipWorktreeAdd = false;
     try {
       const listOut = await gitExec(['worktree', 'list', '--porcelain'], root);
-      worktreeAlreadyRegistered = listOut.includes(`worktree ${worktreePath}`);
+
+      // Case 1: exact path already registered — reuse it as-is
+      if (listOut.includes(`worktree ${worktreePath}`)) {
+        skipWorktreeAdd = true;
+      }
+
+      // Case 2: branch already checked out in a *different* worktree path —
+      // redirect worktreePath to that existing location so the rest of task
+      // creation (session, record) still succeeds pointing at the right dir.
+      if (!skipWorktreeAdd) {
+        const branchRef = `refs/heads/${branch}`;
+        const blocks = listOut.split('\n\n').filter(Boolean);
+        for (const block of blocks) {
+          const pathMatch = block.match(/^worktree (.+)$/m);
+          const branchMatch = block.match(/^branch (.+)$/m);
+          if (pathMatch && branchMatch && branchMatch[1].trim() === branchRef) {
+            worktreePath = pathMatch[1].trim();
+            skipWorktreeAdd = true;
+            break;
+          }
+        }
+      }
     } catch {}
 
-    if (!worktreeAlreadyRegistered) {
+    if (!skipWorktreeAdd) {
       const args = ['worktree', 'add'];
       if (!branchExists) args.push('-b', branch);
       args.push(worktreePath);
