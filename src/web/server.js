@@ -4807,7 +4807,7 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
     const root = await gitRepoRoot(repoDir);
     if (!root) return res.status(400).json({ error: 'Not a git repository' });
     const repoName = path.basename(root);
-    const worktreePath = path.join(path.dirname(root), `${repoName}-wt`, branch.replace(/\//g, '-'));
+    let worktreePath = path.join(path.dirname(root), `${repoName}-wt`, branch.replace(/\//g, '-'));
 
     let branchExists = false;
     try {
@@ -4815,11 +4815,44 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
       branchExists = true;
     } catch {}
 
-    const args = ['worktree', 'add'];
-    if (!branchExists) args.push('-b', branch);
-    args.push(worktreePath);
-    if (branchExists) args.push(branch);
-    await gitExec(args, root);
+    // Check existing worktrees to avoid two fatal git errors:
+    //   1. "already exists"  — target path is already a registered worktree
+    //   2. "already checked out" — the branch is checked out in a different worktree
+    // Parse `git worktree list --porcelain` once and handle both cases.
+    let skipWorktreeAdd = false;
+    try {
+      const listOut = await gitExec(['worktree', 'list', '--porcelain'], root);
+
+      // Case 1: exact path already registered — reuse it as-is
+      if (listOut.includes(`worktree ${worktreePath}`)) {
+        skipWorktreeAdd = true;
+      }
+
+      // Case 2: branch already checked out in a *different* worktree path —
+      // redirect worktreePath to that existing location so the rest of task
+      // creation (session, record) still succeeds pointing at the right dir.
+      if (!skipWorktreeAdd) {
+        const branchRef = `refs/heads/${branch}`;
+        const blocks = listOut.split('\n\n').filter(Boolean);
+        for (const block of blocks) {
+          const pathMatch = block.match(/^worktree (.+)$/m);
+          const branchMatch = block.match(/^branch (.+)$/m);
+          if (pathMatch && branchMatch && branchMatch[1].trim() === branchRef) {
+            worktreePath = pathMatch[1].trim();
+            skipWorktreeAdd = true;
+            break;
+          }
+        }
+      }
+    } catch {}
+
+    if (!skipWorktreeAdd) {
+      const args = ['worktree', 'add'];
+      if (!branchExists) args.push('-b', branch);
+      args.push(worktreePath);
+      if (branchExists) args.push(branch);
+      await gitExec(args, root);
+    }
 
     // 1.5. Run init hooks (copy_files and init_script) if configured
     const initHooks = store.getWorktreeInitHooks();
