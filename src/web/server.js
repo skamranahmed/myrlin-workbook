@@ -3434,7 +3434,8 @@ app.post('/api/sessions/:id/spinoff-batch', requireAuth, async (req, res) => {
 
         // Create session
         const sessionName = (t.branch || t.title).replace(/^feat\//, '') + ' (spinoff)';
-        const newSession = store.createSession(workspaceId, {
+        const newSession = store.createSession({
+          workspaceId,
           name: sessionName,
           workingDir: worktreePath,
           command: 'claude',
@@ -5081,7 +5082,8 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
 
     // 2. Create a session in this workspace pointing at the worktree
     const sessionName = branch.replace(/^feat\//, '') + ' (worktree task)';
-    const session = store.createSession(workspaceId, {
+    const session = store.createSession({
+      workspaceId,
       name: sessionName,
       workingDir: worktreePath,
       command: 'claude',
