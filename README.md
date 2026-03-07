@@ -169,6 +169,21 @@ Category ("Side Projects", "Work")     -- optional top-level grouping
 
 ![Feature tracking Kanban board](docs/images/kanban-board.png)
 
+### td Integration (Optional)
+
+Myrlin optionally integrates with [td](https://github.com/marcus/td), a minimalist CLI task manager built for AI agent workflows. When `td` is installed and initialized in a repo, Myrlin surfaces its issues directly in the docs panel and sidebar — no context-switching to the terminal.
+
+**Install td:**
+```bash
+go install github.com/marcus/td@latest
+```
+
+**Enable:** Settings → td Task Management → toggle on. Set the binary path if `td` isn't on your PATH (e.g. `~/.local/bin/td` or `~/go/bin/td`).
+
+**Worktree promotion:** Click "→ Worktree" on any td issue to create a git worktree + Claude session in one click, with the issue description passed as the opening prompt to Claude.
+
+See [Why td alongside the built-in kanban?](#td-vs-built-in-kanban) for when this makes sense.
+
 ### Session Templates
 
 Save your common launch configurations. Pre-set working directory, model, flags, and spawn options. One click to launch a new session from a template.
@@ -264,6 +279,7 @@ A comprehensive list of everything Myrlin Workbook offers today.
 - **Kanban-style feature board** - Planned, Active, Review, Done columns
 - **Markdown editor** - with formatting toolbar
 - **AI Insights tab** - auto-generated summaries of project sessions
+- **td integration** (optional) - surface [td](https://github.com/marcus/td) issues in the docs panel and sidebar; promote any issue to a git worktree + Claude session in one click
 
 ### Conflict Detection
 
@@ -459,6 +475,27 @@ No other tool extracts tasks from a running session's conversation. Cursor spawn
 - Costs dashboard, tab grouping, session templates, session search
 - 13 themes, cost tracking, feature board, git worktree management
 - Port detection, mobile support, auto-trust dialogs
+
+---
+
+## td vs Built-in Kanban
+
+Myrlin's kanban board and `td` solve different problems and work well together.
+
+| | Myrlin Kanban | td |
+|---|---|---|
+| **Lives in** | Myrlin's state store | `.todos/` directory in the repo |
+| **Follows git?** | No | Yes — committed alongside code |
+| **AI agent access** | Via Myrlin GUI | Via `td` CLI in any terminal |
+| **Session isolation** | No | Yes — implementer can't approve own work |
+| **Handoff structured state** | No | Yes — `td handoff --done / --remaining / --decision` |
+| **Worktree per task** | Yes (Myrlin creates it) | Via Myrlin's "→ Worktree" button |
+| **PR tracking** | Yes (via gh) | No |
+| **Cross-context memory** | No | Yes — designed for AI agent workflows |
+
+**Use Myrlin's kanban** to orchestrate worktrees, track PR state, manage dependencies, and coordinate parallel agents at the project level.
+
+**Use td** inside those worktrees to track granular sub-tasks, log decisions, and hand off structured context to the next agent session — especially useful when a task spans multiple context windows or requires a review step by a separate session.
 
 ---
 
