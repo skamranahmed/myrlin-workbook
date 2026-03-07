@@ -3408,6 +3408,7 @@ class CWMApp {
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ… string).', category: 'Remote Access', type: 'tunnel' },
+      { key: 'tdBinary', label: 'td Binary Path', description: 'Absolute path to the td binary (github.com/marcus/td). Leave blank to use the TD_BINARY environment variable or "td" from PATH. Example: /home/marty/go/bin/td', category: 'Advanced', type: 'server-text', placeholder: 'e.g. /home/marty/go/bin/td', apiEndpoint: '/api/td/binary', apiField: 'binary' },
     ];
   }
 
@@ -3950,6 +3951,25 @@ class CWMApp {
                 ${optionsHtml}
               </select>
             </div>`;
+        } else if (item.type === 'server-text') {
+          // A text setting persisted on the server (not localStorage).
+          // Value is loaded async after render via loadServerTextSettings().
+          html += `
+            <div class="settings-row" data-setting-key="${item.key}">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="text" class="settings-server-text-input" id="server-text-${item.key}"
+                  data-api-endpoint="${this.escapeHtml(item.apiEndpoint || '')}"
+                  data-api-field="${this.escapeHtml(item.apiField || 'value')}"
+                  placeholder="${this.escapeHtml(item.placeholder || '')}"
+                  style="font-size:12px;padding:4px 8px;background:var(--mantle);border:1px solid var(--surface1);border-radius:4px;color:inherit;width:220px;" />
+                <button class="settings-server-text-save btn btn-ghost btn-sm" data-input-id="server-text-${item.key}" style="font-size:12px;">Save</button>
+                <span class="settings-server-text-status" id="server-text-status-${item.key}" style="font-size:11px;opacity:0.6;"></span>
+              </div>
+            </div>`;
         } else if (item.type === 'tunnel') {
           html += `
             <div class="settings-row" data-setting-key="${item.key}" style="flex-direction:column;align-items:flex-start;gap:8px;padding:10px 0;">
@@ -4130,6 +4150,50 @@ class CWMApp {
         this.saveSettings();
         this.applySettings();
       });
+    });
+
+    // Bind server-text Save buttons (settings persisted server-side)
+    this.els.settingsBody.querySelectorAll('.settings-server-text-save').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const inputId = btn.dataset.inputId;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        const endpoint = input.dataset.apiEndpoint;
+        const field = input.dataset.apiField || 'value';
+        const statusEl = document.getElementById('server-text-status-' + inputId.replace('server-text-', ''));
+        btn.disabled = true;
+        try {
+          const result = await this.api('PUT', endpoint, { [field]: input.value.trim() });
+          if (statusEl) {
+            statusEl.textContent = result.available ? '✓ found' : '⚠ not found';
+            statusEl.style.color = result.available ? 'var(--green)' : 'var(--yellow)';
+          }
+          this.showToast('Setting saved', 'success');
+        } catch (err) {
+          if (statusEl) { statusEl.textContent = '✗ error'; statusEl.style.color = 'var(--red)'; }
+          this.showToast(err.message || 'Failed to save', 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Load current server-text values from their respective API endpoints
+    this.els.settingsBody.querySelectorAll('.settings-server-text-input').forEach(async input => {
+      const endpoint = input.dataset.apiEndpoint;
+      const field = input.dataset.apiField || 'value';
+      const key = input.id.replace('server-text-', '');
+      const statusEl = document.getElementById('server-text-status-' + key);
+      try {
+        const result = await this.api('GET', endpoint);
+        input.value = result[field] || '';
+        if (statusEl) {
+          statusEl.textContent = result.available ? '✓ found' : '⚠ not on PATH';
+          statusEl.style.color = result.available ? 'var(--green)' : 'var(--yellow)';
+        }
+      } catch (_) {
+        if (statusEl) { statusEl.textContent = 'could not load'; }
+      }
     });
   }
 

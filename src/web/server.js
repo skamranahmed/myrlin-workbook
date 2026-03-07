@@ -20,6 +20,20 @@ const { launchSession, stopSession, restartSession } = require('../core/session-
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
 const td = require('../core/td-adapter');
 
+/**
+ * Resolve the td binary path in priority order:
+ *   1. store.settings.tdBinary (user-configured, persisted in workspaces.json)
+ *   2. TD_BINARY environment variable
+ *   3. 'td' (rely on PATH)
+ */
+function getTdBinary() {
+  try {
+    const stored = getStore().settings.tdBinary;
+    if (stored && stored.trim()) return stored.trim();
+  } catch (_) { /* store not ready yet */ }
+  return process.env.TD_BINARY || td.DEFAULT_TD_BINARY;
+}
+
 // ─── Input Sanitization ────────────────────────────────────
 // Validates user-controlled fields that flow into shell commands.
 // Rejects shell metacharacters to prevent command injection.
@@ -540,7 +554,7 @@ app.get('/api/workspaces/:id/td/status', requireAuth, async (req, res) => {
   if (!ws) return res.status(404).json({ error: 'Workspace not found.' });
 
   const repoDir = resolveTdRepoDir(store, req.params.id);
-  const available = await td.isAvailable().catch(() => false);
+  const available = await td.isAvailable(getTdBinary()).catch(() => false);
   const initialized = repoDir ? td.isInitialized(repoDir) : false;
   return res.json({ available, initialized, repoDir });
 });
@@ -564,7 +578,7 @@ app.post('/api/workspaces/:id/td/init', requireAuth, async (req, res) => {
     store.updateWorkspace(req.params.id, { tdRepoDir: repoDir });
   }
 
-  const output = await td.init(repoDir).catch(err => { throw err; });
+  const output = await td.init(repoDir, getTdBinary()).catch(err => { throw err; });
   return res.json({ success: true, output, repoDir });
 });
 
@@ -600,7 +614,7 @@ app.get('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
   if (!td.isInitialized(repoDir)) return res.status(400).json({ error: 'td is not initialized in this directory. POST /td/init first.' });
 
   const filters = req.query.status ? { status: req.query.status } : {};
-  const issues = await td.listIssues(repoDir, filters);
+  const issues = await td.listIssues(repoDir, filters, getTdBinary());
   return res.json({ issues, repoDir });
 });
 
@@ -621,8 +635,8 @@ app.post('/api/workspaces/:id/td/issues', requireAuth, async (req, res) => {
   const { title, type, priority } = req.body || {};
   if (!title || typeof title !== 'string') return res.status(400).json({ error: 'title is required.' });
 
-  const issueId = await td.createIssue(repoDir, title.trim(), { type, priority });
-  const issue = await td.showIssue(repoDir, issueId).catch(() => ({ id: issueId, title: title.trim() }));
+  const issueId = await td.createIssue(repoDir, title.trim(), { type, priority }, getTdBinary());
+  const issue = await td.showIssue(repoDir, issueId, getTdBinary()).catch(() => ({ id: issueId, title: title.trim() }));
   return res.status(201).json({ issue, issueId });
 });
 
@@ -638,7 +652,7 @@ app.delete('/api/workspaces/:id/td/issues/:issueId', requireAuth, async (req, re
   const repoDir = resolveTdRepoDir(store, req.params.id);
   if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
 
-  await td.deleteIssue(repoDir, req.params.issueId);
+  await td.deleteIssue(repoDir, req.params.issueId, getTdBinary());
   return res.json({ success: true });
 });
 
@@ -655,8 +669,8 @@ app.get('/api/workspaces/:id/td/issues/:issueId/context', requireAuth, async (re
   if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
 
   const [details, context] = await Promise.all([
-    td.showIssue(repoDir, req.params.issueId),
-    td.getContext(repoDir, req.params.issueId).catch(() => ''),
+    td.showIssue(repoDir, req.params.issueId, getTdBinary()),
+    td.getContext(repoDir, req.params.issueId, getTdBinary()).catch(() => ''),
   ]);
   return res.json({ details, context, repoDir });
 });
@@ -673,8 +687,31 @@ app.post('/api/workspaces/:id/td/issues/:issueId/start', requireAuth, async (req
   const repoDir = resolveTdRepoDir(store, req.params.id);
   if (!repoDir) return res.status(400).json({ error: 'No repo directory configured for this workspace.' });
 
-  await td.startIssue(repoDir, req.params.issueId);
+  await td.startIssue(repoDir, req.params.issueId, getTdBinary());
   return res.json({ success: true });
+});
+
+/**
+ * GET /api/td/binary
+ * Return the currently resolved td binary path and whether it is reachable.
+ */
+app.get('/api/td/binary', requireAuth, async (req, res) => {
+  const binary = getTdBinary();
+  const available = await td.isAvailable(binary).catch(() => false);
+  return res.json({ binary, available, source: getStore().settings.tdBinary ? 'settings' : (process.env.TD_BINARY ? 'env' : 'default') });
+});
+
+/**
+ * PUT /api/td/binary
+ * Persist the td binary path in the store settings.
+ * Body: { binary } — empty string clears it (falls back to env/default).
+ */
+app.put('/api/td/binary', requireAuth, async (req, res) => {
+  const binary = ((req.body && req.body.binary) || '').trim();
+  getStore().updateSettings({ tdBinary: binary });
+  const resolved = getTdBinary();
+  const available = await td.isAvailable(resolved).catch(() => false);
+  return res.json({ success: true, binary: resolved, available });
 });
 
 // ──────────────────────────────────────────────────────────

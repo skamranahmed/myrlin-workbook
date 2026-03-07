@@ -35,6 +35,7 @@ const DEFAULT_STATE = {
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
     theme: 'dark',
     confirmBeforeClose: true,
+    tdBinary: '',              // Absolute path to td binary (empty = use $TD_BINARY env or 'td')
   },
 };
 
