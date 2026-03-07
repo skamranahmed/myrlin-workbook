@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.4] - 2026-03-07
+
+### Fixed
+
+- **Worktree task session creation** - `createSession` was called with wrong signature, silently failing every time (#22)
+- **--continue on fresh directories** - Claude CLI exits with error on dirs with no history. Now checks for JSONL files before adding --continue (#23)
+- **Worktree path/branch collisions** - Handles both "path already exists" and "branch already checked out" cases when creating worktrees (#24)
+- **Double-dash flag values** - Flag checkbox values had `--` prefix, PTY manager also prepended `--`, producing `----flag` (#25)
+
+### Added
+
+- **Initial prompt passthrough** - Worktree task prompt is now passed to Claude CLI on first launch (#25)
+- **Session flags persistence** - CLI flags (skip-permissions, verbose, agent-teams) stored on session and applied on spawn (#25)
+
 ## [0.8.3] - 2026-03-07
 
 ### Fixed
