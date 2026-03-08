@@ -1815,6 +1815,22 @@ class CWMApp {
     // Restore sidebar width & collapse state from localStorage
     this.restoreSidebarState();
 
+    // Auto-login via URL ?password=xxx parameter
+    if (!this.state.token) {
+      const params = new URLSearchParams(window.location.search);
+      const urlPassword = params.get('password');
+      if (urlPassword) {
+        // Strip password from URL to avoid leaking in browser history/referrer
+        window.history.replaceState({}, '', window.location.pathname);
+        try {
+          await this.login(urlPassword);
+          return; // login() handles showApp/loadAll/connectSSE
+        } catch {
+          // Fall through to normal login form
+        }
+      }
+    }
+
     if (this.state.token) {
       const valid = await this.checkAuth();
       if (valid) {

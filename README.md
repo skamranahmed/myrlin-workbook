@@ -54,6 +54,14 @@ CWM_PASSWORD=mypassword npx myrlin-workbook
 
 Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./state/config.json` > auto-generate.
 
+You can also auto-login by passing the password as a URL query parameter:
+
+```
+http://localhost:3456?password=mypassword
+```
+
+The password is automatically stripped from the URL bar after login to avoid leaking in browser history or referrer headers.
+
 ### Prerequisites
 
 - **Node.js 18+** ([download](https://nodejs.org))

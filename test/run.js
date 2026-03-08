@@ -637,6 +637,55 @@ test('handles binary files in numstat (- marks)', () => {
 });
 
 // ──────────────────────────────────────────────────────
+// URL Auto-Login
+// ──────────────────────────────────────────────────────
+
+suite('URL Auto-Login - Parameter Extraction');
+
+/**
+ * Extract password from URL query params and build the cleaned URL.
+ * Mirrors the logic added to app.js init() method.
+ * Returns { password, cleanUrl } or { password: null } if no param.
+ */
+function extractUrlPassword(url) {
+  const parsed = new URL(url, 'http://localhost');
+  const password = parsed.searchParams.get('password');
+  if (!password) return { password: null, cleanUrl: null };
+  // Build clean URL (pathname only, no query)
+  return { password, cleanUrl: parsed.pathname };
+}
+
+test('extracts password from ?password=xxx', () => {
+  const result = extractUrlPassword('http://localhost:40932?password=test123');
+  assertEqual(result.password, 'test123');
+});
+
+test('returns clean URL without password param', () => {
+  const result = extractUrlPassword('http://localhost:40932?password=test123');
+  assertEqual(result.cleanUrl, '/');
+});
+
+test('returns null password when no param present', () => {
+  const result = extractUrlPassword('http://localhost:40932');
+  assertEqual(result.password, null);
+});
+
+test('returns null password for empty password param', () => {
+  const result = extractUrlPassword('http://localhost:40932?password=');
+  assertEqual(result.password, null);
+});
+
+test('handles password with special characters', () => {
+  const result = extractUrlPassword('http://localhost:40932?password=p%40ss%23word');
+  assertEqual(result.password, 'p@ss#word');
+});
+
+test('preserves pathname when stripping password', () => {
+  const result = extractUrlPassword('http://localhost:40932/some/path?password=abc');
+  assertEqual(result.cleanUrl, '/some/path');
+});
+
+// ──────────────────────────────────────────────────────
 // Results
 
 console.log('\n  ' + '─'.repeat(42));
