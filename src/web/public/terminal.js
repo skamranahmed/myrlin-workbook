@@ -1009,14 +1009,18 @@ class TerminalPane {
     // Track completion (debounced internally)
     this._trackActivityForCompletion();
 
-    // Debounce activity detection to at most once per 200ms
+    // Debounce activity detection to at most once per 200ms.
+    // Skip for unfocused terminals to avoid wasting CPU on regex
+    // parsing when the result won't be visible anyway.
     if (!this._activityDebounceTimer) {
       this._activityDebounceTimer = setTimeout(() => {
         this._activityDebounceTimer = null;
         const sample = this._activitySample;
         this._activitySample = '';
-        if (sample) this._detectActivity(sample);
-        this._analyzeForAutoTrust(sample);
+        if (sample && this._isFocused) {
+          this._detectActivity(sample);
+          this._analyzeForAutoTrust(sample);
+        }
       }, 200);
     }
   }

@@ -373,14 +373,17 @@ class PtySessionManager {
         }
       }
 
-      // Throttled lastActive update - fires immediately then at most once per 30s
+      // Throttled lastActive update - deferred via setImmediate to avoid
+      // blocking the PTY data path with synchronous JSON file I/O.
       if (!session._lastActiveTimer) {
-        try {
-          const store = getStore();
-          if (store.getSession(sessionId)) {
-            store.updateSession(sessionId, {});
-          }
-        } catch (_) {}
+        setImmediate(() => {
+          try {
+            const store = getStore();
+            if (store.getSession(sessionId)) {
+              store.updateSession(sessionId, {});
+            }
+          } catch (_) {}
+        });
         session._lastActiveTimer = setTimeout(() => {
           session._lastActiveTimer = null;
         }, 30000);
