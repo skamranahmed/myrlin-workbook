@@ -1816,12 +1816,12 @@ class CWMApp {
     this.restoreSidebarState();
 
     // Auto-login via URL ?password=xxx parameter
-    if (!this.state.token) {
-      const params = new URLSearchParams(window.location.search);
-      const urlPassword = params.get('password');
-      if (urlPassword) {
-        // Strip password from URL to avoid leaking in browser history/referrer
-        window.history.replaceState({}, '', window.location.pathname);
+    const params = new URLSearchParams(window.location.search);
+    const urlPassword = params.get('password');
+    if (urlPassword) {
+      // Always strip password from URL to avoid leaking in browser history/referrer
+      window.history.replaceState({}, '', window.location.pathname);
+      if (!this.state.token) {
         try {
           await this.login(urlPassword);
           return; // login() handles showApp/loadAll/connectSSE

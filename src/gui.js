@@ -16,6 +16,7 @@
 const { getStore } = require('./state/store');
 const { startServer, getPtyManager } = require('./web/server');
 const { backupFrontend } = require('./web/backup');
+const { AUTH_PASSWORD } = require('./web/auth');
 
 // ─── Initialize Store ──────────────────────────────────────
 
@@ -92,7 +93,8 @@ const port = parseInt(process.env.PORT, 10) || 3456;
 const host = process.env.CWM_HOST || '127.0.0.1';
 const server = startServer(port, host);
 
-console.log(`CWM GUI running at http://${host}:${port}`);
+const authUrl = `http://${host}:${port}?password=${encodeURIComponent(AUTH_PASSWORD)}`;
+console.log(`CWM GUI running at ${authUrl}`);
 console.log('Press Ctrl+C to stop.');
 
 // Snapshot frontend files as "last known good" on successful start
@@ -167,7 +169,7 @@ function openBrowserWithCDP(url, cdpPort) {
 if (!process.env.CWM_NO_OPEN) {
   const cdpEnabled = process.argv.includes('--cdp');
   const cdpPort = parseInt(process.env.CDP_PORT, 10) || 9222;
-  const url = `http://localhost:${port}`;
+  const url = authUrl;
 
   if (cdpEnabled) {
     openBrowserWithCDP(url, cdpPort);

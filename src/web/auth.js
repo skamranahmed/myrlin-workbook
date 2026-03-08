@@ -305,4 +305,5 @@ module.exports = {
   setupAuth,
   requireAuth,
   isValidToken,
+  AUTH_PASSWORD,
 };

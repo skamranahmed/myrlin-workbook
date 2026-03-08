@@ -60,7 +60,7 @@ You can also auto-login by passing the password as a URL query parameter:
 http://localhost:3456?password=mypassword
 ```
 
-The password is automatically stripped from the URL bar after login to avoid leaking in browser history or referrer headers.
+The password is automatically stripped from the URL bar after login to avoid leaking in browser history or referrer headers. The startup console message includes a clickable URL with the password pre-filled, so you can simply click it to open and authenticate in one step.
 
 ### Prerequisites
 
