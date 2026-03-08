@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.6] - 2026-03-08
+
+### Fixed
+
+- **npx install failure** - `scripts/postinstall.js` was excluded from the npm package by `.npmignore`, causing `MODULE_NOT_FOUND` on `npx myrlin-workbook`. Fixed by excluding only dev scripts instead of the entire `scripts/` directory (#27, reported by @dianshu)
+
 ## [0.8.5] - 2026-03-07
 
 ### Added

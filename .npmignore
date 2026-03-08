@@ -8,7 +8,15 @@ site/
 
 # Development & testing
 test/
-scripts/
+scripts/restart-gui.sh
+scripts/setup-autostart.ps1
+scripts/marketing/
+scripts/connect-mac.js
+scripts/infrastructure-memory.md
+scripts/refactor-delegation.js
+scripts/remote-desktop-rs/
+scripts/remote-desktop.py
+scripts/wake-mac.js
 .github/
 .claude/
 
