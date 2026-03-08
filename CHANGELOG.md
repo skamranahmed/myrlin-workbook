@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.7] - 2026-03-07
+
+### Fixed
+
+- **Terminal input freeze** - Deferred store lastActive updates off the PTY data path with `setImmediate` to prevent synchronous JSON I/O from blocking WebSocket sends during active output
+- **CPU waste on background terminals** - Activity detection regex (ANSI strip + tool matching) now skips unfocused terminal panes
+
+### Added
+
+- **Restart Session** - Right-click context menu option on terminals to kill and relaunch a session in-place (picks up MCP config changes, settings updates, etc.)
+
 ## [0.8.6] - 2026-03-08
 
 ### Fixed
