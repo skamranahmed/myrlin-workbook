@@ -8596,12 +8596,23 @@ class CWMApp {
           closeBtn.addEventListener('click', () => this.closeTerminalPane(slotIdx));
         }
 
-        // Expand button - 3 states: normal → stage1 (fills grid) → stage2 (fills viewport)
+        // Expand button: normal → stage1 (fills grid), stage1 → stage2 (fills viewport)
         const expandBtn = pane.querySelector('.terminal-pane-expand');
         if (expandBtn) {
           expandBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             this._cycleExpandPane(slotIdx);
+          });
+        }
+
+        // Collapse button: always collapses back to normal from any expanded state
+        const collapseBtn = pane.querySelector('.terminal-pane-collapse');
+        if (collapseBtn) {
+          collapseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._collapseExpandPane(slotIdx);
+            const tp = this.terminalPanes[slotIdx];
+            if (tp) requestAnimationFrame(() => tp.safeFit());
           });
         }
 
@@ -9022,6 +9033,8 @@ class CWMApp {
     this._collapseExpandPane(slotIdx);
     const expandBtn3 = paneEl.querySelector('.terminal-pane-expand');
     if (expandBtn3) expandBtn3.hidden = true;
+    const collapseBtn3 = paneEl.querySelector('.terminal-pane-collapse');
+    if (collapseBtn3) collapseBtn3.hidden = true;
     // Stop any active voice recognition and hide mic button on pane close
     this._stopVoiceRecognition(slotIdx);
     const micBtn3 = paneEl.querySelector('.terminal-pane-mic');
@@ -9061,50 +9074,42 @@ class CWMApp {
   }
 
   /**
-   * Cycle expand state for a terminal pane: normal → stage1 (grid fill) → stage2 (full viewport) → normal.
-   * At stage1, the expand button turns green (go further) and a red collapse button is also shown via CSS state.
-   * At stage2, only the red collapse button is shown.
+   * Cycle expand state: normal → stage1 (fills grid) → stage2 (fills full viewport).
+   * Expand button (outward arrows): visible at normal + stage1 (green at stage1), hidden at stage2.
+   * Collapse button (inward arrows, red): hidden at normal, visible at stage1 + stage2.
    * @param {number} slotIdx - The terminal pane slot index
    */
   _cycleExpandPane(slotIdx) {
     const paneEl = document.getElementById(`term-pane-${slotIdx}`);
     if (!paneEl) return;
     const expandBtn = paneEl.querySelector('.terminal-pane-expand');
+    const collapseBtn = paneEl.querySelector('.terminal-pane-collapse');
 
-    if (paneEl.classList.contains('pane-expanded-stage2')) {
-      // Stage2 → normal
-      paneEl.classList.remove('pane-expanded-stage2');
-      if (expandBtn) {
-        expandBtn.classList.remove('terminal-pane-expand-stage2');
-        expandBtn.title = 'Expand pane';
-      }
-    } else if (paneEl.classList.contains('pane-expanded-stage1')) {
-      // Stage1 → stage2
+    if (paneEl.classList.contains('pane-expanded-stage1')) {
+      // Stage1 → stage2: hide expand, keep collapse visible
       paneEl.classList.remove('pane-expanded-stage1');
       paneEl.classList.add('pane-expanded-stage2');
       if (expandBtn) {
         expandBtn.classList.remove('terminal-pane-expand-stage1');
         expandBtn.classList.add('terminal-pane-expand-stage2');
-        expandBtn.title = 'Collapse pane';
+        expandBtn.title = 'Expand pane';
       }
     } else {
-      // Normal → stage1
+      // Normal → stage1: expand turns green, collapse appears
       paneEl.classList.add('pane-expanded-stage1');
       if (expandBtn) {
         expandBtn.classList.add('terminal-pane-expand-stage1');
-        expandBtn.title = 'Expand further / Collapse';
+        expandBtn.title = 'Expand to full screen';
       }
+      if (collapseBtn) collapseBtn.hidden = false;
     }
 
-    // Refit terminal after layout change
     const tp = this.terminalPanes[slotIdx];
-    if (tp) {
-      requestAnimationFrame(() => tp.safeFit());
-    }
+    if (tp) requestAnimationFrame(() => tp.safeFit());
   }
 
   /**
-   * Collapse an expanded pane back to normal state (used when closing a pane).
+   * Collapse an expanded pane back to normal state.
    * @param {number} slotIdx - The terminal pane slot index
    */
   _collapseExpandPane(slotIdx) {
@@ -9116,6 +9121,8 @@ class CWMApp {
       expandBtn.classList.remove('terminal-pane-expand-stage1', 'terminal-pane-expand-stage2');
       expandBtn.title = 'Expand pane';
     }
+    const collapseBtn = paneEl.querySelector('.terminal-pane-collapse');
+    if (collapseBtn) collapseBtn.hidden = true;
   }
 
   /**

@@ -4702,14 +4702,23 @@ textarea.input {
 .terminal-pane-expand:hover {
   opacity: 1;
 }
-/* Stage 1: pane fills terminal grid area — green expand + red collapse visible */
+/* Stage 1: expand button turns green (advance to stage 2) */
 .terminal-pane-expand-stage1 {
   color: var(--green);
   opacity: 1;
 }
-/* Stage 2: pane fills full browser viewport — only red collapse visible */
+/* Stage 2: expand button hidden — already at max, no further expansion */
 .terminal-pane-expand-stage2 {
+  display: none !important;
+}
+
+/* Collapse button — inward arrows, always red, shown at stage1 + stage2 */
+.terminal-pane-collapse {
   color: var(--red);
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.terminal-pane-collapse:hover {
   opacity: 1;
 }
 
