@@ -4693,6 +4693,60 @@ textarea.input {
 }
 
 .terminal-pane-close { width: 20px; height: 20px; padding: 0; }
+
+/* Expand button - between mic and close, hidden until pane is active */
+.terminal-pane-expand {
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+.terminal-pane-expand:hover {
+  opacity: 1;
+}
+/* Stage 1: expand button turns green (advance to stage 2) */
+.terminal-pane-expand-stage1 {
+  color: var(--green);
+  opacity: 1;
+}
+/* Stage 2: expand button hidden — already at max, no further expansion */
+.terminal-pane-expand-stage2 {
+  display: none !important;
+}
+
+/* Collapse button — inward arrows, always red, shown at stage1 + stage2 */
+.terminal-pane-collapse {
+  color: var(--red);
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.terminal-pane-collapse:hover {
+  opacity: 1;
+}
+
+/* Stage 1: pane overlays entire terminal grid */
+.terminal-pane.pane-expanded-stage1 {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Stage 2: pane overlays entire browser viewport (covers sidebar too) */
+/* z-index 900: below all overlay panels (1000+) so modals/overlays remain accessible */
+.terminal-pane.pane-expanded-stage2 {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+/* Smooth expand/collapse transitions */
+.terminal-pane.pane-expanded-stage1,
+.terminal-pane.pane-expanded-stage2 {
+  transition: all 150ms ease;
+}
+
 /* Voice input mic button - in terminal pane header, between activity and close */
 .terminal-pane-mic {
   opacity: 0.5;
