@@ -4693,6 +4693,44 @@ textarea.input {
 }
 
 .terminal-pane-close { width: 20px; height: 20px; padding: 0; }
+
+/* Expand button - between mic and close, hidden until pane is active */
+.terminal-pane-expand {
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+}
+.terminal-pane-expand:hover {
+  opacity: 1;
+}
+/* Stage 1: pane fills terminal grid area — green expand + red collapse visible */
+.terminal-pane-expand-stage1 {
+  color: var(--green);
+  opacity: 1;
+}
+/* Stage 2: pane fills full browser viewport — only red collapse visible */
+.terminal-pane-expand-stage2 {
+  color: var(--red);
+  opacity: 1;
+}
+
+/* Stage 1: pane overlays entire terminal grid */
+.terminal-pane.pane-expanded-stage1 {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Stage 2: pane overlays entire browser viewport (covers sidebar too) */
+.terminal-pane.pane-expanded-stage2 {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
 /* Voice input mic button - in terminal pane header, between activity and close */
 .terminal-pane-mic {
   opacity: 0.5;

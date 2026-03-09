@@ -678,7 +678,18 @@ class CWMApp {
       this.hideContextMenu();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.hideContextMenu();
+      if (e.key === 'Escape') {
+        this.hideContextMenu();
+        // Collapse any expanded pane on Escape
+        for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+          const paneEl = document.getElementById(`term-pane-${i}`);
+          if (paneEl && (paneEl.classList.contains('pane-expanded-stage1') || paneEl.classList.contains('pane-expanded-stage2'))) {
+            this._collapseExpandPane(i);
+            const tp = this.terminalPanes[i];
+            if (tp) requestAnimationFrame(() => tp.safeFit());
+          }
+        }
+      }
     });
 
     // Image upload - file input change handler
@@ -8585,6 +8596,15 @@ class CWMApp {
           closeBtn.addEventListener('click', () => this.closeTerminalPane(slotIdx));
         }
 
+        // Expand button - 3 states: normal → stage1 (fills grid) → stage2 (fills viewport)
+        const expandBtn = pane.querySelector('.terminal-pane-expand');
+        if (expandBtn) {
+          expandBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._cycleExpandPane(slotIdx);
+          });
+        }
+
         // Mic (voice input) button - only show if SpeechRecognition API is available
         const micBtn = pane.querySelector('.terminal-pane-mic');
         if (micBtn && this._speechRecognitionAvailable) {
@@ -8722,6 +8742,8 @@ class CWMApp {
     // Show mic button if SpeechRecognition is supported
     const micBtn2 = paneEl.querySelector('.terminal-pane-mic');
     if (micBtn2 && this._speechRecognitionAvailable) micBtn2.hidden = false;
+    const expandBtn2 = paneEl.querySelector('.terminal-pane-expand');
+    if (expandBtn2) expandBtn2.hidden = false;
 
     // Create and mount TerminalPane
     const tp = new TerminalPane(containerId, sessionId, sessionName, spawnOpts);
@@ -8996,6 +9018,10 @@ class CWMApp {
     if (closeBtn) closeBtn.hidden = true;
     const uploadBtn3 = paneEl.querySelector('.terminal-pane-upload');
     if (uploadBtn3) uploadBtn3.hidden = true;
+    // Collapse any active expansion before closing
+    this._collapseExpandPane(slotIdx);
+    const expandBtn3 = paneEl.querySelector('.terminal-pane-expand');
+    if (expandBtn3) expandBtn3.hidden = true;
     // Stop any active voice recognition and hide mic button on pane close
     this._stopVoiceRecognition(slotIdx);
     const micBtn3 = paneEl.querySelector('.terminal-pane-mic');
@@ -9031,6 +9057,64 @@ class CWMApp {
 
     if (sessionName) {
       this.showToast(`"${sessionName}" moved to background - drag it back to reconnect`, 'info');
+    }
+  }
+
+  /**
+   * Cycle expand state for a terminal pane: normal → stage1 (grid fill) → stage2 (full viewport) → normal.
+   * At stage1, the expand button turns green (go further) and a red collapse button is also shown via CSS state.
+   * At stage2, only the red collapse button is shown.
+   * @param {number} slotIdx - The terminal pane slot index
+   */
+  _cycleExpandPane(slotIdx) {
+    const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+    if (!paneEl) return;
+    const expandBtn = paneEl.querySelector('.terminal-pane-expand');
+
+    if (paneEl.classList.contains('pane-expanded-stage2')) {
+      // Stage2 → normal
+      paneEl.classList.remove('pane-expanded-stage2');
+      if (expandBtn) {
+        expandBtn.classList.remove('terminal-pane-expand-stage2');
+        expandBtn.title = 'Expand pane';
+      }
+    } else if (paneEl.classList.contains('pane-expanded-stage1')) {
+      // Stage1 → stage2
+      paneEl.classList.remove('pane-expanded-stage1');
+      paneEl.classList.add('pane-expanded-stage2');
+      if (expandBtn) {
+        expandBtn.classList.remove('terminal-pane-expand-stage1');
+        expandBtn.classList.add('terminal-pane-expand-stage2');
+        expandBtn.title = 'Collapse pane';
+      }
+    } else {
+      // Normal → stage1
+      paneEl.classList.add('pane-expanded-stage1');
+      if (expandBtn) {
+        expandBtn.classList.add('terminal-pane-expand-stage1');
+        expandBtn.title = 'Expand further / Collapse';
+      }
+    }
+
+    // Refit terminal after layout change
+    const tp = this.terminalPanes[slotIdx];
+    if (tp) {
+      requestAnimationFrame(() => tp.safeFit());
+    }
+  }
+
+  /**
+   * Collapse an expanded pane back to normal state (used when closing a pane).
+   * @param {number} slotIdx - The terminal pane slot index
+   */
+  _collapseExpandPane(slotIdx) {
+    const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+    if (!paneEl) return;
+    paneEl.classList.remove('pane-expanded-stage1', 'pane-expanded-stage2');
+    const expandBtn = paneEl.querySelector('.terminal-pane-expand');
+    if (expandBtn) {
+      expandBtn.classList.remove('terminal-pane-expand-stage1', 'terminal-pane-expand-stage2');
+      expandBtn.title = 'Expand pane';
     }
   }
 
