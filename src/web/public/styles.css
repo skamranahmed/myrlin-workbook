@@ -4732,12 +4732,19 @@ textarea.input {
 }
 
 /* Stage 2: pane overlays entire browser viewport (covers sidebar too) */
+/* z-index 900: below all overlay panels (1000+) so modals/overlays remain accessible */
 .terminal-pane.pane-expanded-stage2 {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 900;
   width: 100vw !important;
   height: 100vh !important;
+}
+
+/* Smooth expand/collapse transitions */
+.terminal-pane.pane-expanded-stage1,
+.terminal-pane.pane-expanded-stage2 {
+  transition: all 150ms ease;
 }
 
 /* Voice input mic button - in terminal pane header, between activity and close */

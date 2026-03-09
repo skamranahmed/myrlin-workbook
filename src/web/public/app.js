@@ -678,18 +678,7 @@ class CWMApp {
       this.hideContextMenu();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.hideContextMenu();
-        // Collapse any expanded pane on Escape
-        for (let i = 0; i < CWMApp.MAX_PANES; i++) {
-          const paneEl = document.getElementById(`term-pane-${i}`);
-          if (paneEl && (paneEl.classList.contains('pane-expanded-stage1') || paneEl.classList.contains('pane-expanded-stage2'))) {
-            this._collapseExpandPane(i);
-            const tp = this.terminalPanes[i];
-            if (tp) requestAnimationFrame(() => tp.safeFit());
-          }
-        }
-      }
+      if (e.key === 'Escape') this.hideContextMenu();
     });
 
     // Image upload - file input change handler
@@ -1059,6 +1048,9 @@ class CWMApp {
           this.closeQuickSwitcher();
         } else if (!this.els.modalOverlay.hidden) {
           this.closeModal(null);
+        } else {
+          // Lowest priority: collapse any expanded terminal pane
+          this._collapseAllExpandedPanes();
         }
       }
     });
@@ -9123,6 +9115,21 @@ class CWMApp {
     }
     const collapseBtn = paneEl.querySelector('.terminal-pane-collapse');
     if (collapseBtn) collapseBtn.hidden = true;
+  }
+
+  /**
+   * Collapse all expanded terminal panes back to normal state.
+   * Used by the Escape key cascade as lowest-priority action.
+   */
+  _collapseAllExpandedPanes() {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      const paneEl = document.getElementById(`term-pane-${i}`);
+      if (paneEl && (paneEl.classList.contains('pane-expanded-stage1') || paneEl.classList.contains('pane-expanded-stage2'))) {
+        this._collapseExpandPane(i);
+        const tp = this.terminalPanes[i];
+        if (tp) requestAnimationFrame(() => tp.safeFit());
+      }
+    }
   }
 
   /**
