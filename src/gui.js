@@ -195,3 +195,19 @@ process.on('SIGTERM', () => {
   server.close();
   process.exit(0);
 });
+
+// ─── Global Error Handlers ───────────────────────────────
+// Prevent stray rejected promises or uncaught exceptions from
+// crashing the server (exit code 1). Log to crash.log and continue.
+
+const { logError, logWarning } = require('./crash-logger');
+
+process.on('unhandledRejection', (reason) => {
+  logWarning('server', 'Unhandled promise rejection', reason);
+  console.error('[Server] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  logError('server', 'Uncaught exception', err);
+  console.error('[Server] Uncaught exception:', err);
+});

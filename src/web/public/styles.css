@@ -4803,13 +4803,17 @@ textarea.input {
 .terminal-pane.image-drag-over { position: relative; }
 .terminal-pane.image-drag-over .terminal-container {
   outline: 2px dashed var(--blue); outline-offset: -2px;
+  filter: blur(4px) brightness(0.7);
+  transition: filter 150ms ease;
 }
 .terminal-pane.image-drag-over::after {
-  content: 'Drop image here'; position: absolute; top: 50%; left: 50%;
+  content: 'Drop image to send to this session'; position: absolute; top: 50%; left: 50%;
   transform: translate(-50%, -50%); color: var(--blue);
   font-size: 14px; font-weight: 600; pointer-events: none; z-index: 10;
+  background: var(--base); padding: 8px 16px; border-radius: 8px;
+  border: 1px solid var(--blue); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-.terminal-container { flex: 1; overflow: hidden; }
+.terminal-container { flex: 1; overflow: hidden; transition: filter 150ms ease; }
 .terminal-pane-empty .terminal-container {
   display: flex; align-items: center; justify-content: center;
   border: 2px dashed var(--surface1); margin: 8px;

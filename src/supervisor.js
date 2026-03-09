@@ -18,6 +18,7 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
+const { logCrash } = require('./crash-logger');
 
 // Forward all CLI args after supervisor.js to gui.js
 const guiArgs = process.argv.slice(2);
@@ -64,18 +65,28 @@ function startChild() {
     consecutiveRestarts++;
 
     if (consecutiveRestarts > MAX_RESTARTS) {
+    logCrash('supervisor', `Server crashed ${MAX_RESTARTS} times consecutively, giving up`, {
+        consecutiveRestarts,
+      });
       console.error(`[supervisor] Server crashed ${MAX_RESTARTS} times consecutively. Giving up.`);
       process.exit(1);
       return;
     }
 
     const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+    logCrash('supervisor', `Server exited (${reason}), restart #${consecutiveRestarts}`, {
+      exitCode: code,
+      signal,
+      uptimeMs: uptime,
+      consecutiveRestarts,
+    });
     console.log(`[supervisor] Server exited (${reason}). Restarting in ${RESTART_DELAY}ms...`);
 
     setTimeout(startChild, RESTART_DELAY);
   });
 
   child.on('error', (err) => {
+    logCrash('supervisor', `Failed to start server: ${err.message}`, err);
     console.error(`[supervisor] Failed to start server: ${err.message}`);
     child = null;
 

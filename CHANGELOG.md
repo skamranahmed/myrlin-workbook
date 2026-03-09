@@ -5,12 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.8] - 2026-03-09
+
+### Added
+
+- **Two-stage terminal pane expand** - Expand button on each terminal pane header cycles through: normal, grid-fill (stage 1), and full viewport (stage 2). Collapse button returns to normal. Escape key collapses expanded panes as lowest-priority action in the key cascade (PR #29 by @croakingtoad, with fixes)
+
+### Fixed
+
+- **Pane expand z-index collision** - Stage 2 z-index lowered from 1000 to 900 so overlay panels (session manager, conflict center, modals) remain accessible when a pane is expanded
+- **Escape handler conflict** - Pane collapse moved from standalone listener into the main Escape cascade, preventing double-firing when overlays are open
+
+### Improved
+
+- **Smooth expand/collapse transitions** - 150ms ease transition on expand/collapse for visual consistency with the rest of the UI
+
 ## [0.8.7] - 2026-03-07
 
 ### Fixed
 
 - **Terminal input freeze** - Deferred store lastActive updates off the PTY data path with `setImmediate` to prevent synchronous JSON I/O from blocking WebSocket sends during active output
 - **CPU waste on background terminals** - Activity detection regex (ANSI strip + tool matching) now skips unfocused terminal panes
+- **Image upload unauthorized** - Upload handler referenced `this.authToken` instead of `this.state.token`, causing all image uploads to fail with 401
+
+### Improved
+
+- **Image drag-and-drop UX** - Terminal pane blurs and dims when dragging an image over it, with a labeled pill overlay ("Drop image to send to this session") so it's clear which session receives the file
 
 ### Added
 

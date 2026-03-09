@@ -85,3 +85,18 @@ claude-workspace-manager/
 ├── state/             # Persisted workspace state (JSON)
 └── dist/              # Built output (if applicable)
 ```
+
+## Design System (GSD Agents: READ THIS)
+
+This project uses the **Myrlin Workbook** design system. All UI/frontend work MUST follow:
+
+1. **`C:\Users\Arthur\.claude\skills\ui-ux-pro-max.md`** - Full design skill with quality gates, MCP tools, and animation system
+2. **`C:\Users\Arthur\.claude\UI_DESIGN_STRATEGY.md`** - Design philosophy and token system
+3. **Catppuccin themes** (Mocha default, 4 flavors), CSS custom properties for all colors
+4. **Typography**: Plus Jakarta Sans (sans), JetBrains Mono (mono)
+5. **Animation**: 150-200ms transitions, skeleton loaders, no spinners
+6. **North Star**: Linear, Raycast, Vercel, Arc, Warp
+
+**Code standards**: `C:\Users\Arthur\.claude\skills\code-standards.md` - comments on every function, semantic versioning, changelog
+
+**Available design MCPs**: stitch (mockups), nanobanana (image gen), visual-qa (screenshots)

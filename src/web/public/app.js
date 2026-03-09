@@ -14358,7 +14358,7 @@ class CWMApp {
       const resp = await fetch(`/api/pty/${tp.sessionId}/upload-image`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.authToken}`,
+          'Authorization': `Bearer ${this.state.token}`,
           'Content-Type': file.type,
           'X-Filename': encodeURIComponent(file.name),
         },
