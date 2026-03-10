@@ -16,7 +16,7 @@
 const { getStore } = require('./state/store');
 const { startServer, getPtyManager } = require('./web/server');
 const { backupFrontend } = require('./web/backup');
-const { AUTH_PASSWORD } = require('./web/auth');
+const { generateStartupToken } = require('./web/auth');
 
 // ─── Initialize Store ──────────────────────────────────────
 
@@ -93,7 +93,8 @@ const port = parseInt(process.env.PORT, 10) || 3456;
 const host = process.env.CWM_HOST || '127.0.0.1';
 const server = startServer(port, host);
 
-const authUrl = `http://${host}:${port}?password=${encodeURIComponent(AUTH_PASSWORD)}`;
+const startupToken = generateStartupToken();
+const authUrl = `http://${host}:${port}?token=${encodeURIComponent(startupToken)}`;
 console.log(`CWM GUI running at ${authUrl}`);
 console.log('Press Ctrl+C to stop.');
 

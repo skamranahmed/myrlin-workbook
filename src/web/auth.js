@@ -25,6 +25,7 @@ const os = require('os');
 
 // ─── Configuration ─────────────────────────────────────────
 const TOKEN_BYTE_LENGTH = 32;
+const STARTUP_TOKEN_TTL_MS = 60 * 1000; // 60 seconds
 const HOME_CONFIG_DIR = path.join(os.homedir(), '.myrlin');
 const HOME_CONFIG_FILE = path.join(HOME_CONFIG_DIR, 'config.json');
 const LOCAL_CONFIG_DIR = path.join(__dirname, '..', '..', 'state');
@@ -165,6 +166,33 @@ const AUTH_PASSWORD = loadPassword();
 // for a local dev-tool).
 const activeTokens = new Set();
 
+// ─── One-Time Startup Tokens ──────────────────────────────
+// Map of token → { createdAt, used }. Single-use, short-lived tokens
+// embedded in the startup URL so the browser can auto-login without
+// exposing the actual password.
+const startupTokens = new Map();
+
+/**
+ * Generate a one-time startup token for URL-based auto-login.
+ * The token is single-use and expires after STARTUP_TOKEN_TTL_MS.
+ * @returns {string} The generated token
+ */
+function generateStartupToken() {
+  const token = crypto.randomBytes(TOKEN_BYTE_LENGTH).toString('hex');
+  startupTokens.set(token, { createdAt: Date.now(), used: false });
+  return token;
+}
+
+// Clean up expired/used startup tokens every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of startupTokens) {
+    if (entry.used || now - entry.createdAt > STARTUP_TOKEN_TTL_MS) {
+      startupTokens.delete(token);
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
 // ─── Helpers ───────────────────────────────────────────────
 
 /**
@@ -263,6 +291,67 @@ function setupAuth(app) {
   });
 
   /**
+   * POST /api/auth/token-login
+   * Body: { token: string }
+   * Exchanges a one-time startup token for a session Bearer token.
+   * The startup token must exist, not be expired (60s TTL), and not already used.
+   * Returns: { success: true, token: string } or { success: false, error: string }
+   */
+  app.post('/api/auth/token-login', (req, res) => {
+    // Rate limiting (same as login)
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    if (isRateLimited(clientIp)) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many login attempts. Try again in 1 minute.',
+      });
+    }
+
+    const { token: startupToken } = req.body || {};
+
+    if (!startupToken || typeof startupToken !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or invalid token field in request body.',
+      });
+    }
+
+    const entry = startupTokens.get(startupToken);
+    if (!entry) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid or expired startup token.',
+      });
+    }
+
+    // Check expiry
+    if (Date.now() - entry.createdAt > STARTUP_TOKEN_TTL_MS) {
+      startupTokens.delete(startupToken);
+      return res.status(403).json({
+        success: false,
+        error: 'Startup token has expired.',
+      });
+    }
+
+    // Check single-use
+    if (entry.used) {
+      return res.status(403).json({
+        success: false,
+        error: 'Startup token has already been used.',
+      });
+    }
+
+    // Mark as used and remove from map (single-use)
+    startupTokens.delete(startupToken);
+
+    // Issue a session token
+    const sessionToken = generateToken();
+    activeTokens.add(sessionToken);
+
+    return res.json({ success: true, token: sessionToken });
+  });
+
+  /**
    * POST /api/auth/logout
    * Requires Authorization: Bearer <token>
    * Removes the token from the active set.
@@ -305,5 +394,6 @@ module.exports = {
   setupAuth,
   requireAuth,
   isValidToken,
-  AUTH_PASSWORD,
+  generateStartupToken,
+  _startupTokens: startupTokens,
 };

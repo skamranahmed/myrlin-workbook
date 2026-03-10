@@ -54,13 +54,7 @@ CWM_PASSWORD=mypassword npx myrlin-workbook
 
 Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./state/config.json` > auto-generate.
 
-You can also auto-login by passing the password as a URL query parameter:
-
-```
-http://localhost:3456?password=mypassword
-```
-
-The password is automatically stripped from the URL bar after login to avoid leaking in browser history or referrer headers. The startup console message includes a clickable URL with the password pre-filled, so you can simply click it to open and authenticate in one step.
+On startup, the console prints a clickable URL with a one-time token (e.g., `http://127.0.0.1:3456?token=<random>`). Click it to auto-login — the token is single-use and expires after 60 seconds, so it's safe even if it appears in terminal logs. The token is stripped from the URL bar immediately after login.
 
 ### Prerequisites
 

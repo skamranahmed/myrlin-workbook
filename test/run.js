@@ -637,52 +637,84 @@ test('handles binary files in numstat (- marks)', () => {
 });
 
 // ──────────────────────────────────────────────────────
-// URL Auto-Login
+// URL Auto-Login (One-Time Startup Token)
 // ──────────────────────────────────────────────────────
 
-suite('URL Auto-Login - Parameter Extraction');
+suite('URL Auto-Login - Token Extraction');
 
 /**
- * Extract password from URL query params and build the cleaned URL.
- * Mirrors the logic added to app.js init() method.
- * Returns { password, cleanUrl } or { password: null } if no param.
+ * Extract one-time token from URL query params and build the cleaned URL.
+ * Mirrors the logic in app.js init() method.
+ * Returns { token, cleanUrl } or { token: null } if no param.
  */
-function extractUrlPassword(url) {
+function extractUrlToken(url) {
   const parsed = new URL(url, 'http://localhost');
-  const password = parsed.searchParams.get('password');
-  if (!password) return { password: null, cleanUrl: null };
+  const token = parsed.searchParams.get('token');
+  if (!token) return { token: null, cleanUrl: null };
   // Build clean URL (pathname only, no query)
-  return { password, cleanUrl: parsed.pathname };
+  return { token, cleanUrl: parsed.pathname };
 }
 
-test('extracts password from ?password=xxx', () => {
-  const result = extractUrlPassword('http://localhost:40932?password=test123');
-  assertEqual(result.password, 'test123');
+test('extracts token from ?token=xxx', () => {
+  const result = extractUrlToken('http://localhost:40932?token=abc123def');
+  assertEqual(result.token, 'abc123def');
 });
 
-test('returns clean URL without password param', () => {
-  const result = extractUrlPassword('http://localhost:40932?password=test123');
+test('returns clean URL without token param', () => {
+  const result = extractUrlToken('http://localhost:40932?token=abc123def');
   assertEqual(result.cleanUrl, '/');
 });
 
-test('returns null password when no param present', () => {
-  const result = extractUrlPassword('http://localhost:40932');
-  assertEqual(result.password, null);
+test('returns null token when no param present', () => {
+  const result = extractUrlToken('http://localhost:40932');
+  assertEqual(result.token, null);
 });
 
-test('returns null password for empty password param', () => {
-  const result = extractUrlPassword('http://localhost:40932?password=');
-  assertEqual(result.password, null);
+test('returns null token for empty token param', () => {
+  const result = extractUrlToken('http://localhost:40932?token=');
+  assertEqual(result.token, null);
 });
 
-test('handles password with special characters', () => {
-  const result = extractUrlPassword('http://localhost:40932?password=p%40ss%23word');
-  assertEqual(result.password, 'p@ss#word');
+test('handles token with special characters', () => {
+  const result = extractUrlToken('http://localhost:40932?token=abc%2Bdef%3D123');
+  assertEqual(result.token, 'abc+def=123');
 });
 
-test('preserves pathname when stripping password', () => {
-  const result = extractUrlPassword('http://localhost:40932/some/path?password=abc');
+test('preserves pathname when stripping token', () => {
+  const result = extractUrlToken('http://localhost:40932/some/path?token=abc');
   assertEqual(result.cleanUrl, '/some/path');
+});
+
+// ──────────────────────────────────────────────────────
+// Server-Side Startup Token
+// ──────────────────────────────────────────────────────
+
+suite('Startup Token - Generation & Validation');
+
+const { generateStartupToken, _startupTokens } = require('../src/web/auth');
+
+test('generateStartupToken returns a non-empty string', () => {
+  const token = generateStartupToken();
+  assert(typeof token === 'string' && token.length > 0, 'Token should be a non-empty string');
+});
+
+test('generateStartupToken returns unique tokens each call', () => {
+  const t1 = generateStartupToken();
+  const t2 = generateStartupToken();
+  assert(t1 !== t2, 'Tokens should be unique');
+});
+
+test('generated token is stored in startupTokens map', () => {
+  const token = generateStartupToken();
+  assert(_startupTokens.has(token), 'Token should be stored in startupTokens map');
+  const entry = _startupTokens.get(token);
+  assert(typeof entry.createdAt === 'number', 'Should have createdAt timestamp');
+  assertEqual(entry.used, false);
+});
+
+test('AUTH_PASSWORD is not exported from auth module', () => {
+  const authExports = require('../src/web/auth');
+  assertEqual(authExports.AUTH_PASSWORD, undefined, 'AUTH_PASSWORD should not be exported');
 });
 
 // ──────────────────────────────────────────────────────
