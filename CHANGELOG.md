@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.9] - 2026-03-09
+
+### Added
+
+- **Hidden items management** - Hide projects, categories, and sessions from the sidebar via right-click context menu. Manage all hidden items in Settings > Hidden Items with one-click unhide or "Unhide All". Hidden items shown with dimmed opacity when "Show hidden" is toggled.
+
 ## [0.8.8] - 2026-03-09
 
 ### Added

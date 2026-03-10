@@ -114,6 +114,8 @@ class CWMApp {
       hiddenSessions: new Set(JSON.parse(localStorage.getItem('cwm_hiddenSessions') || '[]')),
       hiddenProjectSessions: new Set(JSON.parse(localStorage.getItem('cwm_hiddenProjectSessions') || '[]')),
       hiddenProjects: new Set(JSON.parse(localStorage.getItem('cwm_hiddenProjects') || '[]')),
+      hiddenWorkspaces: new Set(JSON.parse(localStorage.getItem('cwm_hiddenWorkspaces') || '[]')),
+      hiddenGroups: new Set(JSON.parse(localStorage.getItem('cwm_hiddenGroups') || '[]')),
       projectSearchQuery: '',
       showHidden: false,
       resourceData: null,
@@ -2575,6 +2577,52 @@ class CWMApp {
     }
   }
 
+  /**
+   * Hide a workspace from the sidebar. Persisted in localStorage.
+   * @param {string} workspaceId - The workspace ID to hide
+   */
+  hideWorkspace(workspaceId) {
+    const ws = this.state.workspaces.find(w => w.id === workspaceId);
+    this.state.hiddenWorkspaces.add(workspaceId);
+    localStorage.setItem('cwm_hiddenWorkspaces', JSON.stringify([...this.state.hiddenWorkspaces]));
+    this.renderWorkspaces();
+    this.renderSessions();
+    this.showToast(`Hidden "${ws ? ws.name : 'project'}" - manage in Settings > Hidden Items`, 'info');
+  }
+
+  /**
+   * Unhide a workspace, making it visible in the sidebar again.
+   * @param {string} workspaceId - The workspace ID to unhide
+   */
+  unhideWorkspace(workspaceId) {
+    this.state.hiddenWorkspaces.delete(workspaceId);
+    localStorage.setItem('cwm_hiddenWorkspaces', JSON.stringify([...this.state.hiddenWorkspaces]));
+    this.renderWorkspaces();
+    this.renderSessions();
+  }
+
+  /**
+   * Hide a category (group) from the sidebar. Persisted in localStorage.
+   * @param {string} groupId - The group ID to hide
+   */
+  hideGroup(groupId) {
+    const group = (this.state.groups || []).find(g => g.id === groupId);
+    this.state.hiddenGroups.add(groupId);
+    localStorage.setItem('cwm_hiddenGroups', JSON.stringify([...this.state.hiddenGroups]));
+    this.renderWorkspaces();
+    this.showToast(`Hidden category "${group ? group.name : ''}" - manage in Settings > Hidden Items`, 'info');
+  }
+
+  /**
+   * Unhide a category (group), making it visible in the sidebar again.
+   * @param {string} groupId - The group ID to unhide
+   */
+  unhideGroup(groupId) {
+    this.state.hiddenGroups.delete(groupId);
+    localStorage.setItem('cwm_hiddenGroups', JSON.stringify([...this.state.hiddenGroups]));
+    this.renderWorkspaces();
+  }
+
   toggleShowHidden() {
     this.state.showHidden = !this.state.showHidden;
     if (this.els.toggleHiddenBtn) this.els.toggleHiddenBtn.classList.toggle('active', this.state.showHidden);
@@ -2582,6 +2630,97 @@ class CWMApp {
     this.renderWorkspaces();
     this.renderSessions();
     this.renderProjects();
+  }
+
+  /**
+   * Build a flat list of all currently hidden items for the settings panel.
+   * Returns array of { type, name, id } objects.
+   * @returns {Array<{type: string, name: string, id: string}>}
+   */
+  _getHiddenItemsList() {
+    const items = [];
+
+    // Hidden categories (groups)
+    for (const groupId of this.state.hiddenGroups) {
+      const group = (this.state.groups || []).find(g => g.id === groupId);
+      items.push({ type: 'category', name: group ? group.name : groupId, id: groupId });
+    }
+
+    // Hidden workspaces (projects)
+    for (const wsId of this.state.hiddenWorkspaces) {
+      const ws = this.state.workspaces.find(w => w.id === wsId);
+      items.push({ type: 'project', name: ws ? ws.name : wsId, id: wsId });
+    }
+
+    // Hidden sessions
+    for (const sessionId of this.state.hiddenSessions) {
+      const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
+      items.push({ type: 'session', name: session ? session.name : sessionId, id: sessionId });
+    }
+
+    // Hidden project folders (discovered projects)
+    for (const encoded of this.state.hiddenProjects) {
+      // Decode the encoded project name for display
+      const decoded = decodeURIComponent(encoded).replace(/\+/g, '/');
+      items.push({ type: 'folder', name: decoded, id: encoded });
+    }
+
+    // Hidden project sessions (by name)
+    for (const name of this.state.hiddenProjectSessions) {
+      items.push({ type: 'file', name: name, id: name });
+    }
+
+    return items;
+  }
+
+  /**
+   * Unhide a single item by type and ID. Called from the settings panel.
+   * @param {string} type - Item type: category, project, session, folder, file
+   * @param {string} id - The item identifier
+   */
+  _unhideItem(type, id) {
+    switch (type) {
+      case 'category':
+        this.unhideGroup(id);
+        break;
+      case 'project':
+        this.unhideWorkspace(id);
+        break;
+      case 'session':
+        this.unhideSession(id);
+        break;
+      case 'folder':
+        this.state.hiddenProjects.delete(id);
+        localStorage.setItem('cwm_hiddenProjects', JSON.stringify([...this.state.hiddenProjects]));
+        this.renderProjects();
+        break;
+      case 'file':
+        this.state.hiddenProjectSessions.delete(id);
+        localStorage.setItem('cwm_hiddenProjectSessions', JSON.stringify([...this.state.hiddenProjectSessions]));
+        this.renderProjects();
+        break;
+    }
+    this.showToast('Item unhidden', 'success');
+  }
+
+  /**
+   * Unhide all hidden items at once. Clears all hidden sets.
+   */
+  _unhideAllItems() {
+    this.state.hiddenGroups.clear();
+    this.state.hiddenWorkspaces.clear();
+    this.state.hiddenSessions.clear();
+    this.state.hiddenProjects.clear();
+    this.state.hiddenProjectSessions.clear();
+    localStorage.setItem('cwm_hiddenGroups', '[]');
+    localStorage.setItem('cwm_hiddenWorkspaces', '[]');
+    localStorage.setItem('cwm_hiddenSessions', '[]');
+    localStorage.setItem('cwm_hiddenProjects', '[]');
+    localStorage.setItem('cwm_hiddenProjectSessions', '[]');
+    this.renderWorkspaces();
+    this.renderSessions();
+    this.renderProjects();
+    this.showToast('All items unhidden', 'success');
   }
 
   async startSession(id) {
@@ -4042,7 +4181,56 @@ class CWMApp {
       html += `</div>`;
     }
 
+    // ── Hidden Items section ──────────────────────────────
+    // Build a list of all currently hidden items across all categories
+    const hiddenItems = this._getHiddenItemsList();
+    const hiddenMatchesFilter = !lowerFilter || 'hidden items'.includes(lowerFilter) || 'visibility'.includes(lowerFilter) || 'unhide'.includes(lowerFilter) || 'show'.includes(lowerFilter);
+    if (hiddenMatchesFilter) {
+      html += `<div class="settings-category">`;
+      html += `<div class="settings-category-label">Hidden Items</div>`;
+      if (hiddenItems.length === 0) {
+        html += `<div class="settings-row"><div class="settings-row-info"><div class="settings-row-desc" style="opacity:0.5;">No hidden items. Right-click projects or categories in the sidebar to hide them.</div></div></div>`;
+      } else {
+        html += `<div class="settings-row" style="flex-direction:column;align-items:stretch;gap:4px;">`;
+        html += `<div class="settings-row-info" style="margin-bottom:4px;"><div class="settings-row-desc">${hiddenItems.length} hidden item${hiddenItems.length !== 1 ? 's' : ''}. Click the eye icon to unhide.</div></div>`;
+        for (const item of hiddenItems) {
+          html += `
+            <div class="settings-hidden-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--surface0);border-radius:6px;">
+              <span class="settings-hidden-item-type" style="font-size:10px;text-transform:uppercase;opacity:0.5;min-width:60px;">${this.escapeHtml(item.type)}</span>
+              <span class="settings-hidden-item-name" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.escapeHtml(item.name)}</span>
+              <button class="btn btn-ghost btn-icon btn-sm settings-unhide-btn" data-unhide-type="${item.type}" data-unhide-id="${this.escapeHtml(item.id)}" title="Unhide" style="opacity:0.5;flex-shrink:0;">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3C4.5 3 1.7 5.1 1 8c.7 2.9 3.5 5 7 5s6.3-2.1 7-5c-.7-2.9-3.5-5-7-5zm0 8a3 3 0 110-6 3 3 0 010 6zm0-5a2 2 0 100 4 2 2 0 000-4z"/></svg>
+              </button>
+            </div>`;
+        }
+        // Unhide All button
+        html += `<button class="btn btn-ghost btn-sm settings-unhide-all-btn" style="margin-top:4px;font-size:11px;opacity:0.7;">Unhide All</button>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
     this.els.settingsBody.innerHTML = html;
+
+    // ── Hidden items event bindings ────────────────────────
+    this.els.settingsBody.querySelectorAll('.settings-unhide-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.unhideType;
+        const id = btn.dataset.unhideId;
+        this._unhideItem(type, id);
+        // Re-render settings to update the hidden items list
+        const filter = this.els.settingsSearchInput ? this.els.settingsSearchInput.value : '';
+        this.renderSettingsBody(filter);
+      });
+    });
+    const unhideAllBtn = this.els.settingsBody.querySelector('.settings-unhide-all-btn');
+    if (unhideAllBtn) {
+      unhideAllBtn.addEventListener('click', () => {
+        this._unhideAllItems();
+        const filter = this.els.settingsSearchInput ? this.els.settingsSearchInput.value : '';
+        this.renderSettingsBody(filter);
+      });
+    }
 
     // ── Named tunnel controls ──────────────────────────────
     const ntStatus = document.getElementById('named-tunnel-status');
@@ -7447,9 +7635,10 @@ class CWMApp {
       // Respect persisted collapse state: active workspace stays open unless user manually collapsed it
       const isManuallyCollapsed = this._wsCollapseState && this._wsCollapseState[ws.id] === true;
       const showBody = isActive && !isManuallyCollapsed;
+      const isWsHidden = this.state.hiddenWorkspaces.has(ws.id);
 
       return `
-        <div class="workspace-accordion" data-id="${ws.id}">
+        <div class="workspace-accordion${isWsHidden ? ' hidden-item' : ''}" data-id="${ws.id}">
           <div class="workspace-item${isActive ? ' active' : ''}" data-id="${ws.id}" draggable="true">
             <span class="ws-chevron${showBody ? ' open' : ''}">&#9654;</span>
             <div class="workspace-color-dot" style="background: ${color}"></div>
@@ -7478,10 +7667,14 @@ class CWMApp {
     };
 
     // Split workspaces into grouped and ungrouped
-    const groups = this.state.groups || [];
+    const allGroups = this.state.groups || [];
+    // Filter hidden groups (unless showHidden is on)
+    const groups = allGroups.filter(g => this.state.showHidden || !this.state.hiddenGroups.has(g.id));
     const groupedIds = new Set();
-    groups.forEach(g => (g.workspaceIds || []).forEach(id => groupedIds.add(id)));
-    const ungrouped = workspaces.filter(ws => !groupedIds.has(ws.id));
+    allGroups.forEach(g => (g.workspaceIds || []).forEach(id => groupedIds.add(id)));
+    const ungrouped = workspaces
+      .filter(ws => !groupedIds.has(ws.id))
+      .filter(ws => this.state.showHidden || !this.state.hiddenWorkspaces.has(ws.id));
 
     let html = '';
 
@@ -7490,17 +7683,19 @@ class CWMApp {
       const groupColor = colorMap[group.color] || colorMap.mauve;
       const groupWorkspaces = (group.workspaceIds || [])
         .map(id => workspaces.find(ws => ws.id === id))
-        .filter(Boolean);
+        .filter(Boolean)
+        .filter(ws => this.state.showHidden || !this.state.hiddenWorkspaces.has(ws.id));
 
       // Show empty groups too so user can drag workspaces into them
       const groupCount = groupWorkspaces.length;
       const isCollapsed = this._groupCollapseState && this._groupCollapseState[group.id] === true;
+      const isGroupHidden = this.state.hiddenGroups.has(group.id);
       const groupItemsHtml = groupCount > 0
         ? groupWorkspaces.map(ws => renderWorkspaceItem(ws)).join('')
         : '<div class="workspace-group-empty">Drag projects here</div>';
 
       html += `
-        <div class="workspace-group" data-group-id="${group.id}">
+        <div class="workspace-group${isGroupHidden ? ' hidden-item' : ''}" data-group-id="${group.id}">
           <div class="workspace-group-header" data-group-id="${group.id}" style="--group-color: ${groupColor}">
             <span class="group-chevron${isCollapsed ? '' : ' open'}">&#9662;</span>
             <span class="group-color-dot" style="background: ${groupColor}"></span>
@@ -7618,6 +7813,7 @@ class CWMApp {
     }
 
     items.push({ type: 'sep' });
+    items.push({ label: 'Hide Project', icon: '&#128065;', action: () => this.hideWorkspace(workspaceId) });
     items.push({ label: 'Delete Project', icon: '&#10005;', action: () => this.deleteWorkspace(workspaceId), danger: true });
 
     this._renderContextItems(ws.name, items, x, y);
@@ -7753,6 +7949,7 @@ class CWMApp {
     const items = [
       { label: 'Edit Category', icon: '&#9998;', action: () => this.renameGroup(groupId) },
       { type: 'sep' },
+      { label: 'Hide Category', icon: '&#128065;', action: () => this.hideGroup(groupId) },
       { label: 'Delete Category', icon: '&#10005;', danger: true, action: () => this.deleteGroup(groupId) },
     ];
 
