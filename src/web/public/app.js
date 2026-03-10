@@ -3571,6 +3571,7 @@ class CWMApp {
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
+      { key: 'anthropicApiKey', label: 'Anthropic API Key', description: 'Required for AI-powered session finder. Uses Claude Haiku for fast, low-cost semantic search across your projects and sessions. Get a key at console.anthropic.com.', category: 'AI', type: 'server-text', placeholder: 'sk-ant-...', apiEndpoint: '/api/keys/anthropic', apiField: 'key' },
       { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ… string).', category: 'Remote Access', type: 'tunnel' },
     ];
   }
@@ -8489,92 +8490,170 @@ class CWMApp {
 
 
   /* ═══════════════════════════════════════════════════════════
-     FIND A CONVERSATION
+     FIND A SESSION (AI-POWERED)
      ═══════════════════════════════════════════════════════════ */
 
+  /**
+   * Open the AI-powered session finder overlay.
+   * Uses Claude Haiku to semantically match a natural language description
+   * against all known projects and sessions. Falls back to keyword matching
+   * when no Anthropic API key is configured.
+   */
   openFindConversation() {
     const overlay = document.getElementById('find-convo-overlay');
     const input = document.getElementById('find-convo-input');
     const results = document.getElementById('find-convo-results');
     const closeBtn = document.getElementById('find-convo-close');
+    const searchBtn = document.getElementById('find-convo-search-btn');
+    const modeIndicator = document.getElementById('find-convo-mode');
 
     if (!overlay || !input || !results) return;
 
     overlay.hidden = false;
     input.value = '';
-    results.innerHTML = '<div class="find-convo-empty">Enter keywords to search across all conversations</div>';
+    results.innerHTML = '<div class="find-convo-empty">Describe the session or project you\'re looking for</div>';
     setTimeout(() => input.focus(), 50);
 
-    // Debounced search
-    let searchTimer = null;
+    // Check if AI mode is available (API key configured)
+    this.api('GET', '/api/keys/anthropic')
+      .then(data => {
+        if (modeIndicator) {
+          if (data.configured) {
+            modeIndicator.innerHTML = '<span class="find-convo-mode-ai">&#10024; AI search</span>';
+          } else {
+            modeIndicator.innerHTML = '<span class="find-convo-mode-keyword">Keyword search <a href="#" class="find-convo-setup-link">(add API key for AI)</a></span>';
+          }
+          // Wire up the "add API key" link to open settings
+          const setupLink = modeIndicator.querySelector('.find-convo-setup-link');
+          if (setupLink) {
+            setupLink.addEventListener('click', (e) => {
+              e.preventDefault();
+              this.closeFindConversation();
+              this.openSettings();
+            });
+          }
+        }
+      })
+      .catch(() => {});
+
+    /** Execute the AI find search */
     const doSearch = () => {
       const query = input.value.trim();
-      if (query.length < 2) {
-        results.innerHTML = '<div class="find-convo-empty">Enter at least 2 characters to search</div>';
+      if (query.length < 3) {
+        results.innerHTML = '<div class="find-convo-empty">Enter at least 3 characters to search</div>';
         return;
       }
-      results.innerHTML = '<div class="find-convo-loading">Searching conversations...</div>';
-      this.api('POST', '/api/search-conversations', { query })
+
+      // Show skeleton loading cards
+      results.innerHTML = Array.from({ length: 3 }, () => `
+        <div class="ai-find-card ai-find-card-skeleton">
+          <div class="ai-find-card-header">
+            <span class="skeleton-line" style="width: 60%"></span>
+            <span class="skeleton-line" style="width: 30px"></span>
+          </div>
+          <div class="ai-find-card-summary">
+            <span class="skeleton-line" style="width: 90%"></span>
+            <span class="skeleton-line" style="width: 70%"></span>
+          </div>
+          <div class="ai-find-card-meta">
+            <span class="skeleton-line" style="width: 50%"></span>
+          </div>
+        </div>
+      `).join('');
+
+      if (searchBtn) {
+        searchBtn.disabled = true;
+        searchBtn.textContent = 'Searching...';
+      }
+
+      this.api('POST', '/api/ai/find-session', { query })
         .then(data => {
           const items = data.results || [];
+
           if (items.length === 0) {
-            results.innerHTML = '<div class="find-convo-empty">No conversations matched your search</div>';
+            results.innerHTML = '<div class="find-convo-empty">No matching sessions or projects found</div>';
             return;
           }
-          results.innerHTML = items.map(r => `
-            <div class="find-convo-result" data-session-id="${this.escapeHtml(r.sessionId)}" data-project-path="${this.escapeHtml(r.projectPath)}" data-project-encoded="${this.escapeHtml(r.projectEncoded)}">
-              <div class="find-convo-result-header">
-                <span class="find-convo-result-project">${this.escapeHtml(r.projectName)}</span>
-                <span class="find-convo-result-meta">${this.formatSize(r.size)} &middot; ${this.relativeTime(r.modified)}</span>
-              </div>
-              <div class="find-convo-result-topic">${this.escapeHtml(r.topic)}</div>
-              <div class="find-convo-result-preview">${this.escapeHtml(r.preview)}</div>
-              <div class="find-convo-result-id">${r.sessionId}</div>
-            </div>
-          `).join('');
 
-          // Bind click on results
-          results.querySelectorAll('.find-convo-result').forEach(el => {
-            el.addEventListener('click', () => {
-              const sessionId = el.dataset.sessionId;
-              const projectPath = el.dataset.projectPath;
-              this.openConversationResult(sessionId, projectPath);
-              this.closeFindConversation();
+          // Show fallback hint when AI is not configured
+          const fallbackHint = data.fallback
+            ? '<div class="find-convo-fallback-hint">Showing keyword matches. Add an Anthropic API key in Settings for smarter AI-powered search.</div>'
+            : '';
+
+          results.innerHTML = fallbackHint + items.map(r => {
+            const confidence = Math.round((r.confidence || 0) * 100);
+            const lastActive = r.lastActive ? this.relativeTime(r.lastActive) : 'unknown';
+            const statusBadge = r.status === 'running'
+              ? '<span class="ai-find-card-status ai-find-card-status-running">running</span>'
+              : '';
+            const sessionCount = r.sessionCount != null ? `${r.sessionCount} sessions` : '';
+            const typeBadge = r.type === 'workspace' ? 'project' : r.type === 'project' ? 'discovered' : 'session';
+
+            return `
+              <div class="ai-find-card" data-type="${this.escapeHtml(r.type)}" data-id="${this.escapeHtml(r.id)}" data-path="${this.escapeHtml(r.path || '')}" data-workspace-id="${this.escapeHtml(r.workspaceId || '')}">
+                <div class="ai-find-card-header">
+                  <span class="ai-find-card-name">${this.escapeHtml(r.name || r.id)}</span>
+                  <span class="ai-find-card-badge">${typeBadge}</span>
+                  <span class="ai-find-card-confidence">${confidence}%</span>
+                </div>
+                <div class="ai-find-card-summary">${this.escapeHtml(r.summary || '')}</div>
+                <div class="ai-find-card-meta">
+                  ${r.path ? `<span class="ai-find-card-path">${this.escapeHtml(r.path)}</span>` : ''}
+                  <span class="ai-find-card-time">${lastActive}</span>
+                  ${sessionCount ? `<span class="ai-find-card-sessions">${sessionCount}</span>` : ''}
+                  ${statusBadge}
+                </div>
+                <button class="ai-find-card-open" title="Open in terminal pane">Open &#8594;</button>
+              </div>
+            `;
+          }).join('');
+
+          // Bind click handlers on cards (open button only, not the whole card)
+          results.querySelectorAll('.ai-find-card-open').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const card = btn.closest('.ai-find-card');
+              if (!card) return;
+              this._openFindResult(card);
             });
+          });
+
+          // Also allow clicking the whole card
+          results.querySelectorAll('.ai-find-card').forEach(card => {
+            card.addEventListener('click', () => this._openFindResult(card));
           });
         })
         .catch(err => {
           results.innerHTML = `<div class="find-convo-empty" style="color: var(--red);">Search failed: ${this.escapeHtml(err.message || 'Unknown error')}</div>`;
+        })
+        .finally(() => {
+          if (searchBtn) {
+            searchBtn.disabled = false;
+            searchBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>`;
+          }
         });
     };
 
-    // Remove old listener if any
-    if (this._findConvoInputHandler) {
-      input.removeEventListener('input', this._findConvoInputHandler);
-    }
-    this._findConvoInputHandler = () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(doSearch, 400);
-    };
-    input.addEventListener('input', this._findConvoInputHandler);
-
-    // Enter key triggers immediate search
+    // Remove old listeners
     if (this._findConvoKeyHandler) {
       input.removeEventListener('keydown', this._findConvoKeyHandler);
     }
     this._findConvoKeyHandler = (e) => {
-      if (e.key === 'Enter') {
-        clearTimeout(searchTimer);
-        doSearch();
-      } else if (e.key === 'Escape') {
-        this.closeFindConversation();
-      }
+      if (e.key === 'Enter') doSearch();
+      else if (e.key === 'Escape') this.closeFindConversation();
     };
     input.addEventListener('keydown', this._findConvoKeyHandler);
 
+    // Search button click
+    if (this._findConvoSearchHandler && searchBtn) {
+      searchBtn.removeEventListener('click', this._findConvoSearchHandler);
+    }
+    this._findConvoSearchHandler = doSearch;
+    if (searchBtn) searchBtn.addEventListener('click', this._findConvoSearchHandler);
+
     // Close handlers
     if (this._findConvoCloseHandler) {
-      closeBtn.removeEventListener('click', this._findConvoCloseHandler);
+      if (closeBtn) closeBtn.removeEventListener('click', this._findConvoCloseHandler);
       overlay.removeEventListener('click', this._findConvoCloseHandler);
     }
     this._findConvoCloseHandler = (e) => {
@@ -8582,29 +8661,54 @@ class CWMApp {
         this.closeFindConversation();
       }
     };
-    closeBtn.addEventListener('click', this._findConvoCloseHandler);
+    if (closeBtn) closeBtn.addEventListener('click', this._findConvoCloseHandler);
     overlay.addEventListener('click', this._findConvoCloseHandler);
   }
 
-  closeFindConversation() {
-    const overlay = document.getElementById('find-convo-overlay');
-    if (overlay) overlay.hidden = true;
-  }
+  /**
+   * Open a find result in a terminal pane.
+   * Does NOT close the overlay so the user can open multiple results.
+   */
+  _openFindResult(card) {
+    const type = card.dataset.type;
+    const id = card.dataset.id;
+    const cardPath = card.dataset.path;
+    const wsId = card.dataset.workspaceId;
 
-  openConversationResult(sessionId, projectPath) {
-    // Open the session in a terminal pane - not added to any workspace
+    // Mark this card as opened
+    card.classList.add('ai-find-card-opened');
+
     const emptySlot = this.terminalPanes.findIndex(p => p === null);
     if (emptySlot === -1) {
       this.showToast('All terminal panes full. Close one first.', 'warning');
       return;
     }
+
     this.setViewMode('terminal');
-    this.openTerminalInPane(emptySlot, sessionId, sessionId, {
-      cwd: projectPath,
-      resumeSessionId: sessionId,
-      command: 'claude',
-    });
-    this.showToast('Opening conversation in terminal', 'info');
+
+    if (type === 'session') {
+      // Resume existing session
+      this.openTerminalInPane(emptySlot, id, id, {
+        cwd: cardPath,
+        resumeSessionId: id,
+        command: 'claude',
+      });
+      this.showToast('Opening session in terminal', 'info');
+    } else {
+      // Workspace or discovered project: open a new session in the project directory
+      const name = card.querySelector('.ai-find-card-name')?.textContent || 'new-session';
+      this.openTerminalInPane(emptySlot, null, name, {
+        cwd: cardPath,
+        command: 'claude',
+      });
+      this.showToast(`Opening ${name} in terminal`, 'info');
+    }
+  }
+
+  /** Close the find conversation overlay and clean up listeners. */
+  closeFindConversation() {
+    const overlay = document.getElementById('find-convo-overlay');
+    if (overlay) overlay.hidden = true;
   }
 
 

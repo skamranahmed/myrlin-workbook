@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-03-10
+
+### Added
+
+- **AI-powered session finder** - "Find a Session" now uses Claude Haiku to semantically match natural language descriptions against all your projects and sessions. Describe what you're looking for ("that React auth project from last week") and get ranked results with AI-generated explanations of why each matches. Results appear as rich cards with confidence scores, project path, last active time, and session count. Click any card to open it in a terminal pane; results stay on screen so you can open multiple sessions. Falls back to keyword matching when no API key is configured.
+- **Anthropic API key setting** - New "AI" category in Settings for configuring your Anthropic API key (used by the session finder). Key is stored server-side and displayed masked.
+
 ## [0.8.10] - 2026-03-10
 
 ### Fixed

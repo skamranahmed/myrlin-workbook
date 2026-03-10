@@ -1864,6 +1864,236 @@ app.post('/api/search-conversations', requireAuth, async (req, res) => {
 
 
 // ──────────────────────────────────────────────────────────
+//  ANTHROPIC API KEY
+// ──────────────────────────────────────────────────────────
+
+/**
+ * GET /api/keys/anthropic
+ * Returns whether an Anthropic API key is configured and a masked preview.
+ */
+app.get('/api/keys/anthropic', requireAuth, (req, res) => {
+  const store = getStore();
+  const key = (store.getState().settings || {}).anthropicApiKey || '';
+  if (!key) return res.json({ configured: false, masked: null });
+  const masked = '...' + key.slice(-8);
+  return res.json({ configured: true, masked });
+});
+
+/**
+ * PUT /api/keys/anthropic
+ * Persist an Anthropic API key in the store settings.
+ * Body: { key } - the full API key string (empty string clears it).
+ */
+app.put('/api/keys/anthropic', requireAuth, (req, res) => {
+  const key = ((req.body && req.body.key) || '').trim();
+  getStore().updateSettings({ anthropicApiKey: key });
+  const masked = key ? '...' + key.slice(-8) : null;
+  return res.json({ success: true, configured: !!key, masked });
+});
+
+// ──────────────────────────────────────────────────────────
+//  AI-POWERED SESSION FINDER
+// ──────────────────────────────────────────────────────────
+
+/**
+ * POST /api/ai/find-session
+ * Uses Claude to semantically match a natural language description against
+ * all known workspaces, sessions, and discovered projects.
+ * Falls back to keyword matching when no API key is configured.
+ * Body: { query: "description of the session" }
+ * Returns: { results: [...], model?: string, fallback: boolean }
+ */
+app.post('/api/ai/find-session', requireAuth, async (req, res) => {
+  const { query } = req.body;
+  if (!query || typeof query !== 'string' || query.trim().length < 3) {
+    return res.status(400).json({ error: 'Query must be at least 3 characters' });
+  }
+
+  const store = getStore();
+  const apiKey = (store.getState().settings || {}).anthropicApiKey || '';
+
+  // Gather all metadata
+  const workspaces = store.getAllWorkspacesList();
+  const sessions = store.getAllSessionsList();
+
+  // Discover projects from Claude's local data
+  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  let discoveredProjects = [];
+  if (fs.existsSync(claudeProjectsDir)) {
+    try {
+      const dirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory());
+      discoveredProjects = dirs.map(d => {
+        const projectDir = path.join(claudeProjectsDir, d.name);
+        const realPath = resolveProjectPath(projectDir, d.name);
+        const pathParts = realPath.replace(/\\/g, '/').split('/').filter(Boolean);
+        const name = pathParts[pathParts.length - 1] || d.name;
+        let sessionCount = 0;
+        let lastActive = null;
+        try {
+          const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+          sessionCount = files.length;
+          for (const f of files) {
+            try {
+              const stat = fs.statSync(path.join(projectDir, f));
+              if (!lastActive || stat.mtime > new Date(lastActive)) lastActive = stat.mtime;
+            } catch (_) {}
+          }
+        } catch (_) {}
+        return { encodedName: d.name, name, path: realPath, sessionCount, lastActive };
+      });
+    } catch (_) {}
+  }
+
+  // Build compact metadata for AI matching
+  const metadata = {
+    workspaces: workspaces.map(ws => ({
+      id: ws.id, name: ws.name, description: ws.description || ''
+    })),
+    sessions: sessions.map(s => ({
+      id: s.id, name: s.name, topic: s.topic || '',
+      workspaceId: s.workspaceId, workingDir: s.workingDir || '',
+      status: s.status, lastActive: s.lastActive, createdAt: s.createdAt
+    })),
+    discoveredProjects: discoveredProjects.map(p => ({
+      encodedName: p.encodedName, name: p.name, path: p.path,
+      sessionCount: p.sessionCount, lastActive: p.lastActive
+    }))
+  };
+
+  /**
+   * Enrich a raw match object with full metadata from our data sources.
+   * Adds name, path, lastActive, sessionCount, status, etc.
+   */
+  function enrichMatch(m) {
+    const enriched = { ...m };
+    if (m.type === 'session') {
+      const session = sessions.find(s => s.id === m.id);
+      if (session) {
+        enriched.name = session.name;
+        enriched.path = session.workingDir || '';
+        enriched.lastActive = session.lastActive;
+        enriched.status = session.status;
+        enriched.workspaceId = session.workspaceId;
+        enriched.topic = session.topic || '';
+        const ws = workspaces.find(w => w.id === session.workspaceId);
+        enriched.workspaceName = ws ? ws.name : '';
+      }
+    } else if (m.type === 'workspace') {
+      const ws = workspaces.find(w => w.id === m.id);
+      if (ws) {
+        enriched.name = ws.name;
+        enriched.description = ws.description || '';
+        const wsSessions = sessions.filter(s => s.workspaceId === ws.id);
+        enriched.sessionCount = wsSessions.length;
+        enriched.lastActive = wsSessions.reduce((latest, s) => {
+          if (!s.lastActive) return latest;
+          return !latest || new Date(s.lastActive) > new Date(latest) ? s.lastActive : latest;
+        }, null);
+        const firstDir = wsSessions.find(s => s.workingDir);
+        enriched.path = firstDir ? firstDir.workingDir : '';
+      }
+    } else if (m.type === 'project') {
+      const proj = discoveredProjects.find(p => p.encodedName === m.id);
+      if (proj) {
+        enriched.name = proj.name;
+        enriched.path = proj.path;
+        enriched.sessionCount = proj.sessionCount;
+        enriched.lastActive = proj.lastActive;
+      }
+    }
+    return enriched;
+  }
+
+  // Keyword fallback when no API key is configured
+  if (!apiKey) {
+    const terms = query.toLowerCase().split(/\s+/);
+    const scored = [];
+
+    for (const ws of workspaces) {
+      const text = `${ws.name} ${ws.description || ''}`.toLowerCase();
+      const score = terms.filter(t => text.includes(t)).length / terms.length;
+      if (score > 0.2) scored.push({ type: 'workspace', id: ws.id, confidence: score, summary: 'Matched by name or description' });
+    }
+    for (const s of sessions) {
+      const text = `${s.name} ${s.topic || ''} ${s.workingDir || ''}`.toLowerCase();
+      const score = terms.filter(t => text.includes(t)).length / terms.length;
+      if (score > 0.2) scored.push({ type: 'session', id: s.id, confidence: score, summary: 'Matched by name, topic, or path' });
+    }
+    for (const p of discoveredProjects) {
+      const text = `${p.name} ${p.path}`.toLowerCase();
+      const score = terms.filter(t => text.includes(t)).length / terms.length;
+      if (score > 0.2) scored.push({ type: 'project', id: p.encodedName, confidence: score, summary: 'Matched by project name or path' });
+    }
+
+    scored.sort((a, b) => b.confidence - a.confidence);
+    const results = scored.slice(0, 5).map(enrichMatch).filter(m => m.name);
+    return res.json({ results, fallback: true });
+  }
+
+  // AI-powered search via Claude Haiku
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: `You are a project/session finder for a workspace manager. Given a user's natural language description, analyze all available projects and sessions to find the best matches.
+
+Return ONLY a valid JSON array (no markdown, no explanation outside the array). Each element:
+{
+  "type": "session" or "workspace" or "project",
+  "id": "<session id, workspace id, or project encodedName>",
+  "confidence": 0.0 to 1.0,
+  "summary": "1-2 sentence explanation of why this matches"
+}
+
+Rules:
+- Return up to 5 matches, ordered by confidence (highest first)
+- Only include matches with confidence above 0.3
+- Consider name similarity, path keywords, topic relevance, recency
+- "project" type means a discovered Claude project not yet tracked in a workspace
+- If the description mentions recency ("last week", "yesterday"), weight lastActive heavily
+- If nothing matches well, return an empty array []
+- Do NOT use em dashes in summaries`,
+        messages: [{
+          role: 'user',
+          content: `Find sessions/projects matching: "${query.trim()}"\n\nAvailable data:\n${JSON.stringify(metadata)}`
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => 'Unknown error');
+      return res.status(502).json({ error: `Claude API returned ${response.status}`, detail: errText });
+    }
+
+    const data = await response.json();
+    const content = (data.content && data.content[0] && data.content[0].text) || '[]';
+
+    // Parse Claude's JSON response (handle potential markdown wrapping)
+    let matches;
+    try {
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      matches = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    } catch (e) {
+      matches = [];
+    }
+
+    const results = matches.map(enrichMatch).filter(m => m.name);
+    return res.json({ results, model: data.model, fallback: false });
+
+  } catch (err) {
+    return res.status(502).json({ error: 'Failed to reach Claude API: ' + err.message });
+  }
+});
+
+// ──────────────────────────────────────────────────────────
 //  COST TRACKING
 // ──────────────────────────────────────────────────────────
 
