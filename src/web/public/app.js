@@ -15856,12 +15856,28 @@ class CWMApp {
         }
       }
 
+      // If no workspace matched by directory, try matching by project folder name
+      if (!workspaceId) {
+        const matchByName = (this.state.workspaces || []).find(
+          ws => ws.name.toLowerCase() === projectName.toLowerCase()
+        );
+        if (matchByName) workspaceId = matchByName.id;
+      }
+
+      // If still no workspace found, auto-create one for this project
+      if (!workspaceId) {
+        const wsData = await this.api('POST', '/api/workspaces', { name: projectName });
+        const newWs = wsData.workspace || wsData;
+        workspaceId = newWs.id;
+        await this.loadWorkspaces();
+      }
+
       const payload = {
         name,
         workingDir: dir,
+        workspaceId,
         command: 'claude',
       };
-      if (workspaceId) payload.workspaceId = workspaceId;
       if (model) payload.model = model;
 
       const data = await this.api('POST', '/api/sessions', payload);

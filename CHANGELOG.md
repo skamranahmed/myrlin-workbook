@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.10] - 2026-03-10
+
+### Fixed
+
+- **Launcher "workspaceId is required" error** - Fixed session creation from the Launcher failing when the selected project had no existing sessions. The Launcher now matches workspaces by name as a fallback, and auto-creates a new workspace if no match is found (fixes #30, reported by @falceso)
+
 ## [0.8.9] - 2026-03-09
 
 ### Added
