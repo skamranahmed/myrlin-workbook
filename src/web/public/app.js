@@ -2787,9 +2787,11 @@ class CWMApp {
     const currentModel = session.model || null;
 
     const modelOptions = [
-      { id: 'claude-opus-4-6', label: 'Opus' },
-      { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet' },
-      { id: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+      { id: 'opus',        label: 'Opus' },
+      { id: 'sonnet',      label: 'Sonnet' },
+      { id: 'haiku',       label: 'Haiku' },
+      { id: 'sonnet[1m]',  label: 'Sonnet 1M' },
+      { id: 'opusplan',    label: 'OpusPlan' },
     ];
 
     const items = [];
@@ -3569,8 +3571,8 @@ class CWMApp {
       { key: 'enableTd', label: 'td Task Management', description: 'Show td issue tracking integration (github.com/marcus/td). When disabled, hides all td UI including the docs panel section and sidebar toggle.', category: 'Advanced' },
       { key: 'tdBinary', label: 'td Binary Path', description: 'Optional. td is an alternative task management system (github.com/marcus/td) — Myrlin works fine without it. If installed, set the absolute path to the binary here, or leave blank to use the TD_BINARY environment variable or "td" from PATH. Example: /home/user/go/bin/td', category: 'Advanced', type: 'server-text', placeholder: 'e.g. /home/user/go/bin/td', apiEndpoint: '/api/td/binary', apiField: 'binary' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
-      { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
-      { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'claude-haiku-4-5-20251001', label: 'Haiku (fast, cheap)' }, { value: 'claude-sonnet-4-6', label: 'Sonnet (balanced)' }, { value: 'claude-opus-4-6', label: 'Opus (thorough)' }] },
+      { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'haiku', label: 'Haiku (fast, cheap)' }, { value: 'sonnet', label: 'Sonnet (balanced)' }, { value: 'opus', label: 'Opus (thorough)' }, { value: 'opusplan', label: 'OpusPlan' }] },
+      { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'haiku', label: 'Haiku (fast, cheap)' }, { value: 'sonnet', label: 'Sonnet (balanced)' }, { value: 'opus', label: 'Opus (thorough)' }, { value: 'sonnet[1m]', label: 'Sonnet 1M' }, { value: 'opusplan', label: 'OpusPlan' }] },
       { key: 'anthropicApiKey', label: 'Anthropic API Key', description: 'Required for AI-powered session finder. Uses Claude Haiku for fast, low-cost semantic search across your projects and sessions. Get a key at console.anthropic.com.', category: 'AI', type: 'server-text', placeholder: 'sk-ant-...', apiEndpoint: '/api/keys/anthropic', apiField: 'key' },
       { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ… string).', category: 'Remote Access', type: 'tunnel' },
     ];
@@ -5226,10 +5228,12 @@ class CWMApp {
 
     // Model selection submenu
     const modelOptions = [
-      { id: '', label: 'Default' },
-      { id: 'claude-opus-4-6', label: 'Opus' },
-      { id: 'claude-sonnet-4-6', label: 'Sonnet' },
-      { id: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+      { id: '',           label: 'Default' },
+      { id: 'opus',       label: 'Opus' },
+      { id: 'sonnet',     label: 'Sonnet' },
+      { id: 'haiku',      label: 'Haiku' },
+      { id: 'sonnet[1m]', label: 'Sonnet 1M' },
+      { id: 'opusplan',   label: 'OpusPlan' },
     ];
     const currentTaskModel = task.model || '';
     const currentModelLabel = currentTaskModel ? (modelOptions.find(m => m.id === currentTaskModel)?.label || 'Custom') : 'Default';
@@ -13733,10 +13737,12 @@ class CWMApp {
 
     // Add model selector
     fields.push({ key: 'model', label: 'Model', type: 'select', options: [
-      { value: '', label: 'Default' },
-      { value: 'claude-opus-4-6', label: 'Opus' },
-      { value: 'claude-sonnet-4-6', label: 'Sonnet' },
-      { value: 'claude-haiku-4-5-20251001', label: 'Haiku' },
+      { value: '',           label: 'Default' },
+      { value: 'opus',       label: 'Opus' },
+      { value: 'sonnet',     label: 'Sonnet' },
+      { value: 'haiku',      label: 'Haiku' },
+      { value: 'sonnet[1m]', label: 'Sonnet 1M' },
+      { value: 'opusplan',   label: 'OpusPlan' },
     ]});
 
     const result = await this.showPromptModal({
