@@ -26,8 +26,9 @@ scripts/wake-mac.js
 # Backup files
 src/web/public/.backup/
 
-# Log files
+# Log and data files
 *.log
+cron-*.json
 
 # Internal docs
 IDEAS.md
@@ -45,6 +46,9 @@ RELEASING.md
 CLAUDE.md
 reddit-launch-post.md
 nul
+
+# Root assets (duplicated in src/web/public/)
+logo-cropped.png
 
 # Dev config
 .gitignore
