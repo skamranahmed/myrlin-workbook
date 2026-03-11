@@ -1816,25 +1816,42 @@ class CWMApp {
 
 
 
+  async _initializeApp() {
+    this.showApp();
+    this.initDragAndDrop();
+    this.initTerminalResize();
+    this.initTerminalGroups();
+    this.initTerminalPaneSwipe();
+    this.initNotesEditor();
+    this.initAIInsights();
+    await this.loadAll();
+    this.connectSSE();
+    this.startConflictChecks();
+    this.checkForUpdates();
+  }
+
   async init() {
     // Restore sidebar width & collapse state from localStorage
     this.restoreSidebarState();
 
+    // Auto-login via URL ?token=xxx parameter (one-time startup token)
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      // Always strip token from URL to avoid leaking in browser history/referrer
+      window.history.replaceState({}, '', window.location.pathname);
+      try {
+        await this.tokenLogin(urlToken);
+        return; // tokenLogin() handles showApp/loadAll/connectSSE
+      } catch {
+        // Fall through to normal login form
+      }
+    }
+
     if (this.state.token) {
       const valid = await this.checkAuth();
       if (valid) {
-        this.showApp();
-        this.initDragAndDrop();
-        this.initTerminalResize();
-        this.initTerminalGroups();
-        // Initialize mobile swipe gestures for pane switching
-        this.initTerminalPaneSwipe();
-        this.initNotesEditor();
-        this.initAIInsights();
-        await this.loadAll();
-        this.connectSSE();
-        this.startConflictChecks();
-        this.checkForUpdates();
+        await this._initializeApp();
       } else {
         this.state.token = null;
         localStorage.removeItem('cwm_token');
@@ -1911,18 +1928,7 @@ class CWMApp {
       if (data.success && data.token) {
         this.state.token = data.token;
         localStorage.setItem('cwm_token', data.token);
-        this.showApp();
-        this.initDragAndDrop();
-        this.initTerminalResize();
-        this.initTerminalGroups();
-        // Initialize mobile swipe gestures for pane switching
-        this.initTerminalPaneSwipe();
-        this.initNotesEditor();
-        this.initAIInsights();
-        await this.loadAll();
-        this.connectSSE();
-        this.startConflictChecks();
-        this.checkForUpdates();
+        await this._initializeApp();
       } else {
         this.els.loginError.textContent = 'Invalid password. Please try again.';
       }
@@ -1931,6 +1937,17 @@ class CWMApp {
     } finally {
       this.els.loginBtn.classList.remove('loading');
       this.els.loginBtn.disabled = false;
+    }
+  }
+
+  async tokenLogin(startupToken) {
+    const data = await this.api('POST', '/api/auth/token-login', { token: startupToken });
+    if (data.success && data.token) {
+      this.state.token = data.token;
+      localStorage.setItem('cwm_token', data.token);
+      await this._initializeApp();
+    } else {
+      throw new Error(data.error || 'Token login failed');
     }
   }
 

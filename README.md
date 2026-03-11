@@ -54,6 +54,8 @@ CWM_PASSWORD=mypassword npx myrlin-workbook
 
 Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./state/config.json` > auto-generate.
 
+On startup, the console prints a clickable URL with a one-time token (e.g., `http://127.0.0.1:3456?token=<random>`). Click it to auto-login — the token is single-use and expires after 60 seconds, so it's safe even if it appears in terminal logs. The token is stripped from the URL bar immediately after login.
+
 ### Prerequisites
 
 - **Node.js 18+** ([download](https://nodejs.org))
