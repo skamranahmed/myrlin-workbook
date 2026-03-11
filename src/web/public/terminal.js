@@ -252,6 +252,11 @@ class TerminalPane {
     this._needsInput = false;        // Whether a question was detected that wasn't auto-answered
     this._needsInputTimer = null;    // Timer to clear needsInput after new output
     this._autoTrustEnabled = false;  // Set by app layer for worktree task terminals
+    // Write batching buffers — must be initialized here so _status() calls in
+    // mount() (before connectWs runs) don't produce "undefined" prefixes.
+    this._writeBuf = '';
+    this._activitySample = '';
+    this._writeRaf = null;
   }
 
   _log(msg) {

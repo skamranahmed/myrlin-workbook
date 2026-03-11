@@ -186,7 +186,10 @@ class PtySessionManager {
       fullCommand += ' --verbose';
     }
     if (model) {
-      fullCommand += ' --model ' + model;
+      // Single-quote the model value so shell glob characters in aliases like
+      // sonnet[1m] are not expanded by bash before being passed to claude.
+      const safeModel = "'" + model.replace(/'/g, "'\\''") + "'";
+      fullCommand += ' --model ' + safeModel;
     }
     // Extra flags (e.g. from worktree task flags checkboxes), validated upstream
     if (Array.isArray(flags)) {
