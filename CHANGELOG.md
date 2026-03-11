@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-03-11
+
+### Added
+
+- **One-time startup token** - Auto-login URL now uses a single-use, 60-second token instead of the plaintext password. Token is consumed on first use and cannot be replayed. The actual password never appears in URLs, terminal scrollback, or process listings (PR #28 by @dianshu)
+- **Model aliases** - All model pickers now use official Claude Code aliases (opus, sonnet, haiku, sonnet[1m], opusplan) that auto-resolve to the latest version. Added Sonnet 1M and OpusPlan options (PR #31 by @croakingtoad)
+
+### Fixed
+
+- **Shell glob expansion bug** - `sonnet[1m]` was being mangled by bash before reaching Claude. Model values are now single-quoted in PTY commands (PR #31 by @croakingtoad)
+- **Terminal "undefined" prefix** - Write buffers initialized in constructor to prevent "undefinedConnecting to session..." on first mount (PR #31 by @croakingtoad)
+- **Missing crash-logger** - `src/crash-logger.js` was never committed, causing MODULE_NOT_FOUND in uncaught exception handlers (fixes #32, reported by @croakingtoad)
+
 ## [0.9.0] - 2026-03-10
 
 ### Added
