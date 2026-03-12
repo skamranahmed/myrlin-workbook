@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.3] - 2026-03-12
+
+### Fixed
+
+- **Header logo broken on npx install** - Header referenced `logo-cropped.png` which was excluded from the npm package. Changed to `logo.png` for consistency with the login page (fixes #33, reported by @dianshu)
+
 ## [0.9.2] - 2026-03-12
 
 ### Fixed
