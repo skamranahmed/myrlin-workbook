@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-03-12
+
+### Fixed
+
+- **Cost dashboard period totals** - "Last 24 hours", "Last 7 days", and "Last month" were counting the entire lifetime cost of any session active within the window, instead of only the cost incurred during that period. Now apportions cost per message using timestamps, so each period reflects only the spending that actually happened within it.
+
 ## [0.9.1] - 2026-03-11
 
 ### Added

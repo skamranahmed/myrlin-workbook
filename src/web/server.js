@@ -2846,10 +2846,21 @@ app.get('/api/cost/dashboard', requireAuth, (req, res) => {
             }
           }
 
-          // Check if within period for periodCost
-          if (cutoffDate && costData.lastMessage && costData.lastMessage >= cutoffDate) {
+          // Apportion session cost to the period using per-message cost and
+          // message timestamps, not the full session cost. This ensures "Last 24h"
+          // only counts cost from messages sent in the last 24 hours, not the
+          // entire lifetime of any session that was recently active.
+          if (!cutoffDate) {
             periodCost += sessionCost;
-          } else if (!cutoffDate) {
+          } else if (samples && samples.length > 0 && costData.messageCount > 0) {
+            const perMsgCost = sessionCost / costData.messageCount;
+            let periodMessages = 0;
+            for (const sample of samples) {
+              if (sample.ts && sample.ts >= cutoffDate) periodMessages++;
+            }
+            periodCost += perMsgCost * periodMessages;
+          } else if (costData.lastMessage && costData.lastMessage >= cutoffDate) {
+            // Fallback: no timestamp samples available, use full cost
             periodCost += sessionCost;
           }
 
