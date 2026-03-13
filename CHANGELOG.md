@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.4] - 2026-03-13
+
+### Fixed
+
+- **Double paste in terminal** - Pasted text was sent twice via WebSocket because both the custom Ctrl+V handler and xterm.js native paste processing fired. Now blocks xterm.js native `insertFromPaste` events since we handle paste manually with bracketed paste sequences (PR #34 by @benoitmidon)
+
 ## [0.9.3] - 2026-03-12
 
 ### Fixed
