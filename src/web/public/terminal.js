@@ -400,6 +400,13 @@ class TerminalPane {
       const xtermTextarea = container.querySelector('.xterm-helper-textarea');
       if (xtermTextarea) {
         xtermTextarea.addEventListener('beforeinput', (e) => {
+          // Block paste events - we handle Ctrl+V/Cmd+V ourselves via
+          // pasteFromClipboard() to avoid xterm.js onData firing twice
+          if (e.inputType === 'insertFromPaste') {
+            e.preventDefault();
+            return;
+          }
+
           if (e.inputType === 'insertReplacementText') {
             e.preventDefault();
             const replacement = e.data || (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
@@ -417,7 +424,13 @@ class TerminalPane {
             const backspaces = '\x7f'.repeat(deleteCount) || '\b'.repeat(deleteCount);
             this.ws.send(JSON.stringify({ type: 'input', data: backspaces + replacement }));
           }
-        });
+        }, { capture: true });
+
+        // Also block native paste event as a fallback
+        xtermTextarea.addEventListener('paste', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }, { capture: true });
       }
 
       this.term.onData((data) => {
