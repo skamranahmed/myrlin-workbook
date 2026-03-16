@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.5] - 2026-03-16
+
+### Fixed
+
+- **Cost request spam on page load** - Session costs were fetched with individual HTTP requests per session (N+1 pattern), causing 20+ requests on every page load and tab switch. Replaced with a single batch endpoint `GET /api/cost/batch` that returns all session costs in one response. Sidebar only re-renders when cost values actually change, eliminating the render loop.
+
 ## [0.9.4] - 2026-03-13
 
 ### Fixed
