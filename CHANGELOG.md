@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.6] - 2026-03-16
+
+### Fixed
+
+- **Duplicate terminal panes on restart** - Saved pane layouts were restored twice due to an unwaited async race condition. `loadTerminalLayout()` fired without being awaited, so pane restoration raced against subsequent initialization. The second restore found the target slots occupied and spilled into empty slots, doubling the pane count. Fixed by awaiting layout load before continuing init, and adding slot-occupied guards in both restore paths (fixes #35)
+
 ## [0.9.5] - 2026-03-16
 
 ### Fixed

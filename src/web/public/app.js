@@ -1820,7 +1820,7 @@ class CWMApp {
     this.showApp();
     this.initDragAndDrop();
     this.initTerminalResize();
-    this.initTerminalGroups();
+    await this.initTerminalGroups();
     this.initTerminalPaneSwipe();
     this.initNotesEditor();
     this.initAIInsights();
@@ -11521,15 +11521,16 @@ class CWMApp {
      PHASE 4: TERMINAL TAB GROUPS
      ═══════════════════════════════════════════════════════════ */
 
-  initTerminalGroups() {
+  async initTerminalGroups() {
     // Load layout from server
     this._tabGroups = [];
     this._tabFolders = []; // Tab group folders: { id, name, color, collapsed }
     this._activeGroupId = null;
     this._layoutSaveTimer = null;
+    this._layoutRestored = false;
 
-    // Load saved layout
-    this.loadTerminalLayout();
+    // Load saved layout (must complete before SSE or other init touches panes)
+    await this.loadTerminalLayout();
   }
 
   async loadTerminalLayout() {
@@ -11557,11 +11558,12 @@ class CWMApp {
     const group = this._tabGroups.find(g => g.id === this._activeGroupId);
     if (group && group.panes && group.panes.length > 0) {
       group.panes.forEach(p => {
-        if (p.sessionId) {
+        if (p.sessionId && !this.terminalPanes[p.slot]) {
           this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
         }
       });
     }
+    this._layoutRestored = true;
   }
 
   /**
@@ -11959,11 +11961,11 @@ class CWMApp {
         }
       });
     } else {
-      // No cache — create fresh connections (first time opening this group)
+      // No cache, create fresh connections (first time opening this group)
       const group = this._tabGroups.find(g => g.id === groupId);
       if (group && group.panes) {
         group.panes.forEach(p => {
-          if (p.sessionId) {
+          if (p.sessionId && !this.terminalPanes[p.slot]) {
             this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
           }
         });
