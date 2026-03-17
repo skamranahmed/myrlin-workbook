@@ -2578,6 +2578,57 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
 });
 
 /**
+ * GET /api/cost/batch
+ * Returns cost totals for all sessions in a single response, avoiding N+1 requests.
+ * Each entry includes sessionId, totalCost, and lastActive for sidebar badge rendering.
+ * Uses the same cache as per-session cost endpoints.
+ */
+app.get('/api/cost/batch', requireAuth, (req, res) => {
+  try {
+    const store = getStore();
+    const allWorkspaces = store.getAllWorkspacesList();
+    const costs = {};
+
+    for (const workspace of allWorkspaces) {
+      const sessions = store.getWorkspaceSessions(workspace.id);
+      for (const session of sessions) {
+        const resumeSessionId = session.resumeSessionId;
+        if (!resumeSessionId) continue;
+        const jsonlPath = findJsonlFile(resumeSessionId);
+        if (!jsonlPath) continue;
+
+        try {
+          const stat = fs.statSync(jsonlPath);
+          if (stat.size >= 500 * 1024 * 1024) continue;
+          const mtimeMs = stat.mtimeMs;
+          const cached = _costCache.get(resumeSessionId);
+          const now = Date.now();
+          let costData;
+
+          if (cached && cached.mtimeMs === mtimeMs && (now - cached.timestamp) < COST_CACHE_TTL) {
+            costData = cached.result;
+          } else {
+            costData = calculateSessionCost(jsonlPath);
+            const result = { sessionId: session.id, resumeSessionId, ...costData };
+            _costCache.set(resumeSessionId, { mtimeMs, timestamp: now, result });
+            costData = result;
+          }
+
+          costs[session.id] = {
+            cost: costData.cost ? costData.cost.total : 0,
+            lastActive: costData.lastMessage || session.lastActive || null,
+          };
+        } catch (_) {}
+      }
+    }
+
+    return res.json({ costs });
+  } catch (err) {
+    return res.status(500).json({ error: 'Batch cost failed: ' + err.message });
+  }
+});
+
+/**
  * GET /api/quota-overview
  * Returns all sessions ranked by context window size (heaviness).
  * Helps identify sessions that need compaction or are consuming the most tokens.

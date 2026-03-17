@@ -1820,7 +1820,7 @@ class CWMApp {
     this.showApp();
     this.initDragAndDrop();
     this.initTerminalResize();
-    this.initTerminalGroups();
+    await this.initTerminalGroups();
     this.initTerminalPaneSwipe();
     this.initNotesEditor();
     this.initAIInsights();
@@ -7740,13 +7740,8 @@ class CWMApp {
 
     list.innerHTML = html;
 
-    // Fire off async cost fetches for visible sessions (best-effort, non-blocking)
-    const visibleSessionIds = (this.state.allSessions || this.state.sessions)
-      .filter(s => s.status === 'running' || s.status === 'idle')
-      .map(s => s.id);
-    if (visibleSessionIds.length > 0) {
-      this._fetchSessionCostsAsync(visibleSessionIds);
-    }
+    // Fetch all session costs in a single batch request (non-blocking)
+    this._fetchSessionCostsAsync();
 
 
     this.els.workspaceCount.textContent = `${workspaces.length} project${workspaces.length !== 1 ? 's' : ''}`;
@@ -11526,15 +11521,16 @@ class CWMApp {
      PHASE 4: TERMINAL TAB GROUPS
      ═══════════════════════════════════════════════════════════ */
 
-  initTerminalGroups() {
+  async initTerminalGroups() {
     // Load layout from server
     this._tabGroups = [];
     this._tabFolders = []; // Tab group folders: { id, name, color, collapsed }
     this._activeGroupId = null;
     this._layoutSaveTimer = null;
+    this._layoutRestored = false;
 
-    // Load saved layout
-    this.loadTerminalLayout();
+    // Load saved layout (must complete before SSE or other init touches panes)
+    await this.loadTerminalLayout();
   }
 
   async loadTerminalLayout() {
@@ -11562,11 +11558,12 @@ class CWMApp {
     const group = this._tabGroups.find(g => g.id === this._activeGroupId);
     if (group && group.panes && group.panes.length > 0) {
       group.panes.forEach(p => {
-        if (p.sessionId) {
+        if (p.sessionId && !this.terminalPanes[p.slot]) {
           this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
         }
       });
     }
+    this._layoutRestored = true;
   }
 
   /**
@@ -11964,11 +11961,11 @@ class CWMApp {
         }
       });
     } else {
-      // No cache — create fresh connections (first time opening this group)
+      // No cache, create fresh connections (first time opening this group)
       const group = this._tabGroups.find(g => g.id === groupId);
       if (group && group.panes) {
         group.panes.forEach(p => {
-          if (p.sessionId) {
+          if (p.sessionId && !this.terminalPanes[p.slot]) {
             this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
           }
         });
@@ -14745,30 +14742,34 @@ class CWMApp {
     return null;
   }
 
-  _fetchSessionCostsAsync(sessionIds) {
+  /**
+   * Fetch costs for all sessions in a single batch request instead of N+1
+   * individual requests. Results are cached for 5 minutes. Only re-renders
+   * the sidebar once after all costs are received.
+   */
+  _fetchSessionCostsAsync() {
     if (!this._costCache) this._costCache = {};
-    if (!this._costFetchInFlight) this._costFetchInFlight = new Set();
+    // Skip if a batch fetch is already in flight or cache is fresh
+    if (this._costBatchInFlight) return;
+    if (this._costBatchTs && (Date.now() - this._costBatchTs < 300000)) return;
 
-    sessionIds.forEach(sid => {
-      // Don't re-fetch if already in flight or recently cached
-      if (this._costFetchInFlight.has(sid)) return;
-      const entry = this._costCache[sid];
-      if (entry && (Date.now() - entry.ts < 300000)) return;
-
-      this._costFetchInFlight.add(sid);
-      this.api('GET', `/api/sessions/${sid}/cost`).then(data => {
-        this._costFetchInFlight.delete(sid);
-        if (data && (data.totalCost !== undefined || data.cost !== undefined)) {
-          const cost = data.totalCost ?? (data.cost && typeof data.cost === 'object' ? data.cost.total : data.cost) ?? null;
-          this._costCache[sid] = { cost, ts: Date.now() };
-          // Trigger a soft re-render of workspaces to show updated cost badges
-          this.renderWorkspaces();
+    this._costBatchInFlight = true;
+    this.api('GET', '/api/cost/batch').then(data => {
+      this._costBatchInFlight = false;
+      this._costBatchTs = Date.now();
+      if (data && data.costs) {
+        let changed = false;
+        for (const [sid, entry] of Object.entries(data.costs)) {
+          const prev = this._costCache[sid];
+          if (!prev || prev.cost !== entry.cost) changed = true;
+          this._costCache[sid] = { cost: entry.cost, ts: Date.now() };
         }
-      }).catch(() => {
-        this._costFetchInFlight.delete(sid);
-        // Cache a null so we don't keep retrying for 5 minutes
-        this._costCache[sid] = { cost: null, ts: Date.now() };
-      });
+        // Only re-render if any cost value actually changed
+        if (changed) this.renderWorkspaces();
+      }
+    }).catch(() => {
+      this._costBatchInFlight = false;
+      this._costBatchTs = Date.now();
     });
   }
 
