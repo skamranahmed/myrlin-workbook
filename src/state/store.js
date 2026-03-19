@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const docsManager = require('./docs-manager');
+const { expandHome } = require('../utils/path-utils');
 
 const STATE_DIR = path.join(__dirname, '..', '..', 'state');
 const BACKUP_DIR = path.join(STATE_DIR, 'backups');
@@ -320,7 +321,7 @@ class Store extends EventEmitter {
       id,
       name,
       workspaceId,
-      workingDir,
+      workingDir: expandHome(workingDir) || '',
       topic,
       command,
       resumeSessionId,

@@ -6,6 +6,7 @@
 
 const { spawn } = require('child_process');
 const { getStore } = require('../state/store');
+const { expandHome } = require('../utils/path-utils');
 
 /**
  * Allowlist of known-safe login shells.
@@ -59,7 +60,7 @@ function launchSession(sessionId) {
     const baseCommand = session.command || 'claude';
     const bypassFlag = session.bypassPermissions ? ' --dangerously-skip-permissions' : '';
     const command = baseCommand + bypassFlag;
-    const workingDir = session.workingDir || process.cwd();
+    const workingDir = expandHome(session.workingDir) || process.cwd();
 
     let child;
     if (process.platform === 'win32') {

@@ -1141,9 +1141,15 @@ app.get('/api/discover', requireAuth, (req, res) => {
         dirExists = fs.existsSync(realPath);
       } catch (_) {}
 
+      // Generate a display name that handles failed CJK decoding gracefully
+      const displayName = getProjectDisplayName(entry.name, realPath);
+      const failedDecode = isLikelyFailedCJKDecode(entry.name);
+
       projects.push({
         encodedName: entry.name,
         realPath,
+        displayName,
+        failedDecode,
         dirExists,
         hasClaudeMd,
         sessionCount: sessionFiles.length,
@@ -1269,9 +1275,66 @@ function greedyFsWalk(root, tokens) {
 }
 
 /**
+ * Read the original path from a jsonl file's cwd field.
+ * This contains the full path with Chinese characters, unlike the encoded directory name.
+ * Only reads the first 4KB to avoid loading large files into memory.
+ *
+ * @param {string} projectDir - Absolute path to the project dir
+ * @returns {string|null} The original path from cwd field, or null if not found
+ */
+function getOriginalPathFromJsonl(projectDir) {
+  try {
+    const files = fs.readdirSync(projectDir);
+    // Find the first .jsonl file (skip subdirectories)
+    const jsonlFile = files.find(f => {
+      if (!f.endsWith('.jsonl')) return false;
+      try {
+        return !fs.statSync(path.join(projectDir, f)).isDirectory();
+      } catch (_) {
+        return false;
+      }
+    });
+    if (!jsonlFile) return null;
+
+    const jsonlPath = path.join(projectDir, jsonlFile);
+
+    // Only read first 4KB to find cwd field (avoids loading large files)
+    const fd = fs.openSync(jsonlPath, 'r');
+    const buffer = Buffer.alloc(4096);
+    let content;
+    try {
+      const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
+      content = buffer.toString('utf-8', 0, bytesRead);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // Parse first 3 lines to find cwd field
+    const lines = content.split('\n').slice(0, 3);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.cwd && typeof record.cwd === 'string') {
+          return record.cwd;
+        }
+      } catch (_) {
+        // Skip invalid JSON lines
+        continue;
+      }
+    }
+  } catch (_) {
+    // Silently fail and return null
+  }
+  return null;
+}
+
+/**
  * Resolve the real filesystem path for a Claude projects directory.
- * Reads originalPath from sessions-index.json when available (reliable on
- * all platforms), falling back to decodeClaudePath for legacy/Windows dirs.
+ * Tries sources in order of reliability:
+ * 1. sessions-index.json (reliable on all platforms)
+ * 2. jsonl file's cwd field (contains original Chinese path)
+ * 3. decodeClaudePath (legacy fallback)
  *
  * @param {string} projectDir - Absolute path to the project dir under ~/.claude/projects/
  * @param {string} encodedName - The encoded directory name (e.g. "-Users-jane-project")
@@ -1279,6 +1342,7 @@ function greedyFsWalk(root, tokens) {
  */
 function resolveProjectPath(projectDir, encodedName) {
   try {
+    // 1. Try sessions-index.json first
     const indexPath = path.join(projectDir, 'sessions-index.json');
     if (fs.existsSync(indexPath)) {
       const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
@@ -1290,7 +1354,77 @@ function resolveProjectPath(projectDir, encodedName) {
       }
     }
   } catch (_) {}
+
+  // 2. Try to read from jsonl file's cwd field (for Chinese paths)
+  const jsonlPath = getOriginalPathFromJsonl(projectDir);
+  if (jsonlPath) return jsonlPath;
+
+  // 3. Fall back to decoding the directory name
   return decodeClaudePath(encodedName);
+}
+
+/**
+ * Regex to match CJK characters (Chinese, Japanese, Korean).
+ * Covers: Hiragana, Katakana, CJK Extension A, CJK Unified Ideographs,
+ * Hangul Syllables, and Fullwidth/Halfwidth forms.
+ */
+const CJK_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uFF00-\uFFEF]/;
+
+/**
+ * Extract a readable display name from an encoded directory name.
+ * When realPath contains CJK characters (from jsonl cwd field), use it directly.
+ * Otherwise, fall back to extracting from realPath or showing drive info.
+ *
+ * @param {string} encodedName - The encoded directory name (e.g. "D--Projects-CU------")
+ * @param {string} realPath - The decoded path from resolveProjectPath
+ * @returns {string} A human-readable display name
+ */
+function getProjectDisplayName(encodedName, realPath) {
+  // If realPath contains CJK characters, it came from jsonl cwd - use it directly
+  if (realPath && CJK_REGEX.test(realPath)) {
+    const parts = realPath.split(/[\\/]/).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : encodedName;
+  }
+
+  // Check if the encoded name has failed CJK encoding indicators
+  // Claude Code replaces CJK characters with "-" during encoding
+  // This creates long sequences of "-" in the encoded name (e.g., "CU------" where 6 dashes = 3 CJK chars)
+  const longDashSequence = encodedName.match(/-{3,}/);
+  if (longDashSequence) {
+    // Extract drive letter and the rest (supports A-Z and a-z)
+    const driveMatch = encodedName.match(/^([A-Za-z])--(.*)/);
+    if (driveMatch) {
+      const drive = driveMatch[1];
+      const rest = driveMatch[2];
+      // Try to extract meaningful parts (non-dash sequences)
+      const parts = rest.split('-').filter(p => p.length > 0);
+      // Take the last meaningful part as project name
+      const name = parts.length > 0 ? parts[parts.length - 1] : encodedName;
+      return `[${drive}:] ${name}`;
+    }
+  }
+
+  // Default: extract the last path component from realPath
+  if (realPath) {
+    const parts = realPath.split(/[\\/]/).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : encodedName;
+  }
+
+  return encodedName;
+}
+
+/**
+ * Check if an encoded directory name likely contains CJK characters that were
+ * replaced with dashes during encoding.
+ * Returns true if the name contains long sequences of consecutive dashes.
+ *
+ * @param {string} encodedName - The encoded directory name
+ * @returns {boolean} True if encoding likely replaced CJK characters
+ */
+function isLikelyFailedCJKDecode(encodedName) {
+  if (!encodedName) return false;
+  // Long sequences of dashes (3 or more) indicate CJK chars were replaced
+  return /-{3,}/.test(encodedName);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -1745,7 +1879,7 @@ app.post('/api/search-conversations', requireAuth, async (req, res) => {
 
       const projectDir = path.join(claudeProjectsDir, dir.name);
       const realPath = resolveProjectPath(projectDir, dir.name);
-      const projectName = realPath.split('\\').pop() || realPath.split('/').pop() || dir.name;
+      const projectName = getProjectDisplayName(dir.name, realPath);
 
       let jsonlFiles;
       try {
@@ -1926,8 +2060,7 @@ app.post('/api/ai/find-session', requireAuth, async (req, res) => {
       discoveredProjects = dirs.map(d => {
         const projectDir = path.join(claudeProjectsDir, d.name);
         const realPath = resolveProjectPath(projectDir, d.name);
-        const pathParts = realPath.replace(/\\/g, '/').split('/').filter(Boolean);
-        const name = pathParts[pathParts.length - 1] || d.name;
+        const name = getProjectDisplayName(d.name, realPath);
         let sessionCount = 0;
         let lastActive = null;
         try {
@@ -6353,7 +6486,7 @@ function getSearchableFiles() {
 
       const projectDir = path.join(claudeDir, entry.name);
       const realPath = resolveProjectPath(projectDir, entry.name);
-      const projectName = realPath.split('\\').pop() || realPath.split('/').pop() || entry.name;
+      const projectName = getProjectDisplayName(entry.name, realPath);
 
       try {
         const dirFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
