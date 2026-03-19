@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.7] - 2026-03-19
+
+### Added
+
+- **Home directory expansion** - Session working directories now support `~/path` syntax on all platforms. The `~` is expanded to the user's home directory at session creation time (PR #36 by @inorixu)
+- **CJK path support** - Projects with Chinese, Japanese, or Korean characters in their paths are now discovered and displayed correctly. Falls back to reading the original path from JSONL session data when UTF-8 decoding fails (PR #36 by @inorixu)
+
 ## [0.9.6] - 2026-03-16
 
 ### Fixed
