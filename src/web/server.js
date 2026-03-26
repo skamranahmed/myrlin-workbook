@@ -19,6 +19,70 @@ const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
 const td = require('../core/td-adapter');
+const { getDataDir } = require('../utils/data-dir');
+const { Worker } = require('worker_threads');
+
+// ─── Cost Worker Thread ──────────────────────────────────
+// Offloads JSONL parsing to a background thread to prevent
+// terminal I/O freezes during cost calculation.
+let _costWorker = null;
+let _costWorkerId = 0;
+const _costWorkerCallbacks = new Map();
+
+/**
+ * Get or create the cost calculation worker thread.
+ * Lazy-initialized on first cost request.
+ * @returns {Worker} The cost worker thread
+ */
+function getCostWorker() {
+  if (_costWorker) return _costWorker;
+  _costWorker = new Worker(path.join(__dirname, 'cost-worker.js'));
+  _costWorker.on('message', (msg) => {
+    const cb = _costWorkerCallbacks.get(msg.id);
+    if (cb) {
+      _costWorkerCallbacks.delete(msg.id);
+      if (msg.error) cb.reject(new Error(msg.error));
+      else cb.resolve(msg.result);
+    }
+  });
+  _costWorker.on('error', (err) => {
+    console.error('[CostWorker] Error:', err.message);
+  });
+  _costWorker.on('exit', (code) => {
+    console.warn('[CostWorker] Exited with code', code);
+    _costWorker = null;
+    // Reject any pending callbacks
+    for (const [id, cb] of _costWorkerCallbacks) {
+      cb.reject(new Error('Worker exited'));
+      _costWorkerCallbacks.delete(id);
+    }
+  });
+  return _costWorker;
+}
+
+/**
+ * Calculate session cost asynchronously via the worker thread.
+ * Falls back to sync calculation if the worker fails.
+ * @param {string} jsonlPath - Path to the JSONL file
+ * @returns {Promise<object>} Cost breakdown
+ */
+function calculateSessionCostAsync(jsonlPath) {
+  return new Promise((resolve, reject) => {
+    const id = ++_costWorkerId;
+    _costWorkerCallbacks.set(id, { resolve, reject });
+    try {
+      getCostWorker().postMessage({
+        id,
+        jsonlPath,
+        pricing: TOKEN_PRICING,
+        defaultPricing: DEFAULT_PRICING,
+      });
+    } catch (err) {
+      _costWorkerCallbacks.delete(id);
+      reject(err);
+    }
+  });
+}
 
 /**
  * Resolve the td binary path in priority order:
@@ -2561,17 +2625,27 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
       return res.json(cached.result);
     }
 
-    const costData = calculateSessionCost(jsonlPath);
-    const result = {
-      sessionId: req.params.id,
-      resumeSessionId,
-      ...costData,
-    };
-
-    // Store in cache
-    _costCache.set(resumeSessionId, { mtimeMs, timestamp: now, result });
-
-    return res.json(result);
+    // Use worker thread for async cost calculation to avoid blocking terminal I/O
+    calculateSessionCostAsync(jsonlPath).then((costData) => {
+      const result = {
+        sessionId: req.params.id,
+        resumeSessionId,
+        ...costData,
+      };
+      // Store in cache
+      _costCache.set(resumeSessionId, { mtimeMs, timestamp: now, result });
+      res.json(result);
+    }).catch((err) => {
+      // Fallback to sync calculation if worker fails
+      try {
+        const costData = calculateSessionCost(jsonlPath);
+        const result = { sessionId: req.params.id, resumeSessionId, ...costData };
+        _costCache.set(resumeSessionId, { mtimeMs, timestamp: now, result });
+        res.json(result);
+      } catch (syncErr) {
+        res.status(500).json({ error: 'Failed to calculate cost: ' + syncErr.message });
+      }
+    });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to calculate cost: ' + err.message });
   }
@@ -4881,7 +4955,7 @@ function attachStoreEvents() {
 //  LAYOUT PERSISTENCE
 // ──────────────────────────────────────────────────────────
 
-const LAYOUT_FILE = path.join(__dirname, '..', '..', 'state', 'layout.json');
+const LAYOUT_FILE = path.join(getDataDir(), 'layout.json');
 
 /**
  * GET /api/layout
@@ -4905,9 +4979,9 @@ app.get('/api/layout', requireAuth, (req, res) => {
  */
 app.put('/api/layout', requireAuth, (req, res) => {
   try {
-    const stateDir = path.join(__dirname, '..', '..', 'state');
-    if (!fs.existsSync(stateDir)) {
-      fs.mkdirSync(stateDir, { recursive: true });
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
     fs.writeFileSync(LAYOUT_FILE, JSON.stringify(req.body, null, 2), 'utf-8');
     return res.json({ success: true });
@@ -6292,7 +6366,7 @@ app.delete('/api/tunnels/:id', requireAuth, (req, res) => {
 //  NAMED TUNNEL (Cloudflare token-based, persistent domain)
 // ──────────────────────────────────────────────────────────
 
-const NAMED_TUNNEL_HOME_CONFIG = path.join(os.homedir(), '.myrlin', 'config.json');
+const NAMED_TUNNEL_HOME_CONFIG = path.join(getDataDir(), 'config.json');
 const NAMED_TUNNEL_LOCAL_CONFIG = path.join(__dirname, '..', '..', 'state', 'config.json');
 
 function readMyrlinConfig() {

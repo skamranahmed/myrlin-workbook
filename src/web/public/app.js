@@ -7420,6 +7420,27 @@ class CWMApp {
     }
   }
 
+  /**
+   * Throttled versions of loadSessions and loadStats to prevent
+   * rapid-fire SSE events from triggering dozens of API calls.
+   * At most one call per 500ms for sessions, 2000ms for stats.
+   */
+  _throttledLoadSessions() {
+    if (this._loadSessionsTimer) return;
+    this._loadSessionsTimer = setTimeout(() => {
+      this._loadSessionsTimer = null;
+      this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
+    }, 500);
+  }
+
+  _throttledLoadStats() {
+    if (this._loadStatsTimer) return;
+    this._loadStatsTimer = setTimeout(() => {
+      this._loadStatsTimer = null;
+      this.loadStats();
+    }, 2000);
+  }
+
   handleSSEEvent(data) {
     // Queue events while a modal is open to prevent UI glitches and race conditions
     if (this._modalOpen) {
@@ -7431,30 +7452,30 @@ class CWMApp {
     switch (data.type) {
       case 'session:started':
         this.showToast(`Session "${data.name || 'unknown'}" started`, 'success');
-        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
-        this.loadStats();
+        this._throttledLoadSessions();
+        this._throttledLoadStats();
         break;
       case 'session:stopped':
         this.showToast(`Session "${data.name || 'unknown'}" stopped`, 'info');
-        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
-        this.loadStats();
+        this._throttledLoadSessions();
+        this._throttledLoadStats();
         break;
       case 'session:error':
         this.showToast(`Session "${data.name || 'unknown'}" encountered an error`, 'error');
-        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
-        this.loadStats();
+        this._throttledLoadSessions();
+        this._throttledLoadStats();
         break;
       case 'session:created':
       case 'session:deleted':
       case 'session:updated':
-        this.loadSessions().then(() => { if (this._smOpen) this.renderSessionManager(); });
-        this.loadStats();
+        this._throttledLoadSessions();
+        this._throttledLoadStats();
         break;
       case 'workspace:created':
       case 'workspace:deleted':
       case 'workspace:updated':
         this.loadWorkspaces();
-        this.loadStats();
+        this._throttledLoadStats();
         break;
       case 'stats:updated':
         if (data.stats) {

@@ -1,7 +1,8 @@
 /**
  * Core state store for Claude Workspace Manager
  * Handles JSON persistence, CRUD operations, and state transitions.
- * All state is persisted to ./state/workspaces.json
+ * All state is persisted to ~/.myrlin/workspaces.json so that every
+ * launch method (npm run gui, npx, global install) shares the same data.
  */
 
 const fs = require('fs');
@@ -10,8 +11,12 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const docsManager = require('./docs-manager');
 const { expandHome } = require('../utils/path-utils');
+const { getDataDir, migrateFromLegacy } = require('../utils/data-dir');
 
-const STATE_DIR = path.join(__dirname, '..', '..', 'state');
+// Legacy project-local state dir (for migration on first run)
+const LEGACY_STATE_DIR = path.join(__dirname, '..', '..', 'state');
+
+const STATE_DIR = getDataDir();
 const BACKUP_DIR = path.join(STATE_DIR, 'backups');
 const STATE_FILE = path.join(STATE_DIR, 'workspaces.json');
 const BACKUP_FILE = path.join(STATE_DIR, 'workspaces.backup.json');
@@ -57,6 +62,8 @@ class Store extends EventEmitter {
     if (!fs.existsSync(STATE_DIR)) {
       fs.mkdirSync(STATE_DIR, { recursive: true });
     }
+    // Migrate legacy project-local state to ~/.myrlin/ on first run
+    migrateFromLegacy(LEGACY_STATE_DIR);
     docsManager.ensureDocsDir();
     // Create a timestamped backup BEFORE loading (preserves last known good state)
     this.createTimestampedBackup();
@@ -161,22 +168,86 @@ class Store extends EventEmitter {
   /**
    * Save state to disk (with backup).
    * Uses write-to-temp-then-rename for atomic writes on crash.
+   * Verifies written data after rename to detect zero-fill corruption.
    */
   save() {
     try {
-      // Backup current file before overwriting
+      // Only backup current file if it contains real data (not zero-filled)
       if (fs.existsSync(STATE_FILE)) {
-        fs.copyFileSync(STATE_FILE, BACKUP_FILE);
+        if (this._isFileValid(STATE_FILE)) {
+          fs.copyFileSync(STATE_FILE, BACKUP_FILE);
+        } else {
+          console.warn('[Store] Skipping backup of corrupt primary file');
+        }
       }
       // Atomic write: write to PID-unique temp file, then rename over the target.
       // PID suffix prevents collisions when TUI and GUI write concurrently.
+      const json = JSON.stringify(this._state, null, 2);
       const tmpFile = STATE_FILE + '.' + process.pid + '.tmp';
-      fs.writeFileSync(tmpFile, JSON.stringify(this._state, null, 2), 'utf-8');
+      fs.writeFileSync(tmpFile, json, 'utf-8');
+
+      // Verify the temp file before renaming: re-read and check for zero-fill
+      // corruption (Windows write-cache failure mode)
+      const written = fs.readFileSync(tmpFile, 'utf-8');
+      if (!written.trim() || written.charCodeAt(0) === 0) {
+        console.error('[Store] CORRUPTION DETECTED: temp file is zero-filled, aborting save');
+        try { fs.unlinkSync(tmpFile); } catch (_) {}
+        this.emit('error', { type: 'save_corruption', error: 'Written file was zero-filled' });
+        return;
+      }
+      // Sanity check: verify it parses as valid JSON with workspaces
+      try {
+        const check = JSON.parse(written);
+        if (!check.workspaces) {
+          throw new Error('Missing workspaces key');
+        }
+      } catch (parseErr) {
+        console.error('[Store] CORRUPTION DETECTED: temp file not valid JSON, aborting save');
+        try { fs.unlinkSync(tmpFile); } catch (_) {}
+        this.emit('error', { type: 'save_corruption', error: parseErr.message });
+        return;
+      }
+
       fs.renameSync(tmpFile, STATE_FILE);
+
+      // Post-rename verification: re-read the final file to catch filesystem-level corruption
+      try {
+        const final = fs.readFileSync(STATE_FILE, 'utf-8');
+        if (!final.trim() || final.charCodeAt(0) === 0) {
+          console.error('[Store] POST-RENAME CORRUPTION: primary file is zero-filled after rename');
+          // Restore from backup if available
+          if (fs.existsSync(BACKUP_FILE) && this._isFileValid(BACKUP_FILE)) {
+            fs.copyFileSync(BACKUP_FILE, STATE_FILE);
+            console.warn('[Store] Restored primary from backup after corruption');
+          }
+        }
+      } catch (_) {}
+
       this._recordDiskMtime();
       this._dirty = false;
     } catch (err) {
       this.emit('error', { type: 'save_failed', error: err.message });
+    }
+  }
+
+  /**
+   * Check if a file contains real data (not zero-filled or empty).
+   * Returns false for zero-filled files, empty files, or unreadable files.
+   * @param {string} filePath - Path to check
+   * @returns {boolean} true if the file has valid non-zero content
+   */
+  _isFileValid(filePath) {
+    try {
+      const buf = fs.readFileSync(filePath);
+      if (buf.length === 0) return false;
+      // Check first 64 bytes for any non-zero content
+      const checkLen = Math.min(buf.length, 64);
+      for (let i = 0; i < checkLen; i++) {
+        if (buf[i] !== 0) return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -187,6 +258,11 @@ class Store extends EventEmitter {
   createTimestampedBackup() {
     try {
       if (!fs.existsSync(STATE_FILE)) return;
+      // Never back up a corrupt/zero-filled file
+      if (!this._isFileValid(STATE_FILE)) {
+        console.warn('[Store] Skipping timestamped backup: primary file is corrupt/zero-filled');
+        return;
+      }
       if (!fs.existsSync(BACKUP_DIR)) {
         fs.mkdirSync(BACKUP_DIR, { recursive: true });
       }
@@ -208,12 +284,54 @@ class Store extends EventEmitter {
   }
 
   /**
-   * Debounced save - batches rapid changes
+   * Async save - performs all disk I/O off the event loop.
+   * Falls back to sync save() on error.
+   */
+  async saveAsync() {
+    try {
+      const json = JSON.stringify(this._state, null, 2);
+      const tmpFile = STATE_FILE + '.' + process.pid + '.tmp';
+
+      // Backup current file if it exists and is valid
+      if (fs.existsSync(STATE_FILE) && this._isFileValid(STATE_FILE)) {
+        await fs.promises.copyFile(STATE_FILE, BACKUP_FILE);
+      }
+
+      await fs.promises.writeFile(tmpFile, json, 'utf-8');
+
+      // Verify temp file before rename
+      const written = await fs.promises.readFile(tmpFile, 'utf-8');
+      if (!written.trim() || written.charCodeAt(0) === 0) {
+        console.error('[Store] CORRUPTION DETECTED in async save, aborting');
+        try { await fs.promises.unlink(tmpFile); } catch (_) {}
+        return;
+      }
+      try {
+        const check = JSON.parse(written);
+        if (!check.workspaces) throw new Error('Missing workspaces key');
+      } catch (parseErr) {
+        console.error('[Store] CORRUPTION DETECTED: invalid JSON in async save');
+        try { await fs.promises.unlink(tmpFile); } catch (_) {}
+        return;
+      }
+
+      await fs.promises.rename(tmpFile, STATE_FILE);
+      this._recordDiskMtime();
+      this._dirty = false;
+    } catch (err) {
+      console.error('[Store] Async save failed, falling back to sync:', err.message);
+      this.save();
+    }
+  }
+
+  /**
+   * Debounced save - batches rapid changes, uses async I/O
+   * to avoid blocking the event loop during frequent updates.
    */
   _debouncedSave() {
     this._dirty = true;
     if (this._saveTimer) clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => this.save(), 150);
+    this._saveTimer = setTimeout(() => this.saveAsync(), 150);
   }
 
   // ─── Getters ─────────────────────────────────────────────
