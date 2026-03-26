@@ -1762,10 +1762,12 @@ class CWMApp {
         const sessionItem = e.target.closest('.project-session-item');
         if (sessionItem) {
           e.stopPropagation();
+          const nameEl = sessionItem.querySelector('.project-session-name');
           e.dataTransfer.setData('cwm/project-session', JSON.stringify({
             sessionName: sessionItem.dataset.sessionName,
             projectPath: sessionItem.dataset.projectPath,
             projectEncoded: sessionItem.dataset.projectEncoded,
+            displayName: nameEl ? nameEl.textContent : '',
           }));
           e.dataTransfer.effectAllowed = 'copy';
           sessionItem.classList.add('dragging');
@@ -3057,7 +3059,8 @@ class CWMApp {
           return;
         }
         this.setViewMode('terminal');
-        this.openTerminalInPane(emptySlot, sessionName, sessionName, {
+        const title = this.getProjectSessionTitle(sessionName) || sessionName;
+        this.openTerminalInPane(emptySlot, sessionName, title, {
           cwd: projectPath,
           resumeSessionId: sessionName,
           command: 'claude',
@@ -8832,10 +8835,11 @@ class CWMApp {
             try {
               const ps = JSON.parse(projSessJson);
               const claudeSessionId = ps.sessionName; // This IS the Claude session UUID
+              const displayName = ps.displayName || this.getProjectSessionTitle(claudeSessionId) || claudeSessionId;
               console.log('[DnD] Project-session drop - resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath);
               // Open terminal directly - use the Claude session UUID as the PTY session ID
               // so the PTY manager can reuse it on subsequent drops
-              this.openTerminalInPane(slotIdx, claudeSessionId, claudeSessionId, {
+              this.openTerminalInPane(slotIdx, claudeSessionId, displayName, {
                 cwd: ps.projectPath,
                 resumeSessionId: claudeSessionId,
                 command: 'claude',
