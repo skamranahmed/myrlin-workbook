@@ -9056,6 +9056,11 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   openTerminalInPane(slotIdx, sessionId, sessionName, spawnOpts) {
+    // Check localStorage for a previously saved name for this session
+    const savedTitle = this.getProjectSessionTitle(sessionId);
+    if (savedTitle && (!sessionName || sessionName === sessionId)) {
+      sessionName = savedTitle;
+    }
     console.log('[DnD] openTerminalInPane slot:', slotIdx, 'session:', sessionId, 'name:', sessionName);
     // If the target slot already has an active terminal, find the next empty slot
     if (this.terminalPanes[slotIdx]) {
@@ -11495,6 +11500,10 @@ class CWMApp {
             // Project session - sessionId IS the Claude UUID
             this.syncSessionTitle(sessionId, newName);
           }
+
+          // Always persist to localStorage keyed by the terminal's sessionId
+          // so ad-hoc sessions (not in store, not in projects) keep their names
+          this.syncSessionTitle(sessionId, newName);
 
           // Update TerminalPane instance
           const tp = this.terminalPanes[slotIdx];
