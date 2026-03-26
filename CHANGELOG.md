@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.8] - 2026-03-26
+
+### Fixed
+
+- **Session name in terminal pane titles** - Discovered sessions opened via drag-and-drop or context menu now show the custom renamed title instead of the raw Claude session UUID. Falls back to UUID when no custom name exists (PR #37 by @snmo2546)
+
 ## [0.9.7] - 2026-03-19
 
 ### Added
