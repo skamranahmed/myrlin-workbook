@@ -10123,6 +10123,8 @@ class CWMApp {
         this.terminalPanes.forEach(tp => {
           if (tp) tp.safeFit();
         });
+        // Persist split ratios for this tab group
+        this.saveTerminalLayout();
       };
 
       document.addEventListener('mousemove', onMove);
@@ -11597,6 +11599,14 @@ class CWMApp {
         }
       });
     }
+
+    // Restore split ratios for the active tab group
+    if (group && group.gridColSizes) {
+      this._gridColSizes = [...group.gridColSizes];
+    }
+    if (group && group.gridRowSizes) {
+      this._gridRowSizes = [...group.gridRowSizes];
+    }
     this._layoutRestored = true;
   }
 
@@ -11953,6 +11963,19 @@ class CWMApp {
 
     this._activeGroupId = groupId;
 
+    // ── Restore this tab group's split ratios (or reset to equal) ──
+    const targetGroup = this._tabGroups.find(g => g.id === groupId);
+    if (targetGroup && targetGroup.gridColSizes) {
+      this._gridColSizes = [...targetGroup.gridColSizes];
+    } else {
+      this._gridColSizes = [1, 1];
+    }
+    if (targetGroup && targetGroup.gridRowSizes) {
+      this._gridRowSizes = [...targetGroup.gridRowSizes];
+    } else {
+      this._gridRowSizes = [1, 1];
+    }
+
     // ── Restore target group: try cache first, fall back to fresh connections ──
     const cached = this._groupPaneCache[groupId];
     if (cached) {
@@ -12038,6 +12061,10 @@ class CWMApp {
         });
       }
     }
+
+    // Persist this tab group's split ratios so switching tabs restores layout
+    group.gridColSizes = [...this._gridColSizes];
+    group.gridRowSizes = [...this._gridRowSizes];
   }
 
   /**
