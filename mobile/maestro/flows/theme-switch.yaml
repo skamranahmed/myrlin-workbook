@@ -1,0 +1,15 @@
+# theme-switch.yaml - Captures the default Catppuccin Mocha theme baseline.
+# This flow will be expanded in later phases when the theme picker UI is built.
+# For now it navigates to the More tab (where settings/theme will live)
+# and captures a screenshot for visual comparison.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to the More tab where theme settings will be located
+- tapOn: "More"
+- assertVisible: "More"
+
+# Capture the default Mocha theme state as a baseline for future comparison
+- takeScreenshot: theme-mocha-default

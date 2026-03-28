@@ -1,0 +1,31 @@
+# navigation.yaml - Verifies all 5 tabs are reachable via bottom tab navigation.
+# Tab labels match the titles defined in mobile/app/(tabs)/_layout.tsx:
+# Sessions, Tasks, Costs, Docs, More
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Tab 1: Sessions (default, already visible after launch)
+- assertVisible: "Sessions"
+- takeScreenshot: nav-sessions
+
+# Tab 2: Tasks
+- tapOn: "Tasks"
+- assertVisible: "Tasks"
+- takeScreenshot: nav-tasks
+
+# Tab 3: Costs
+- tapOn: "Costs"
+- assertVisible: "Costs"
+- takeScreenshot: nav-costs
+
+# Tab 4: Docs
+- tapOn: "Docs"
+- assertVisible: "Docs"
+- takeScreenshot: nav-docs
+
+# Tab 5: More
+- tapOn: "More"
+- assertVisible: "More"
+- takeScreenshot: nav-more

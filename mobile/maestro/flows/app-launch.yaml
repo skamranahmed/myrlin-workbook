@@ -1,0 +1,12 @@
+# app-launch.yaml - Smoke test: verifies the app launches and renders the default tab.
+# The Sessions tab is the first/default tab in the bottom navigator.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Verify the default Sessions tab is visible after launch
+- assertVisible: "Sessions"
+
+# Capture a screenshot of the initial app state
+- takeScreenshot: app-launch-sessions
