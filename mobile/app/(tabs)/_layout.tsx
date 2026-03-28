@@ -1,68 +1,106 @@
-import React from 'react';
-import { SymbolView } from 'expo-symbols';
-import { Link, Tabs } from 'expo-router';
-import { Platform, Pressable } from 'react-native';
+/**
+ * (tabs)/_layout.tsx - Bottom tab navigator layout.
+ *
+ * Configures the 5 main app tabs (Sessions, Tasks, Costs, Docs, More)
+ * with Catppuccin-themed colors from useTheme(). Each tab uses an icon
+ * from @expo/vector-icons/Ionicons and themed header/tab bar styles.
+ */
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
+import React, { useMemo } from 'react';
+import { Tabs } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
+import { useTheme } from '@/hooks/useTheme';
+import { fonts } from '@/theme/fonts';
+
+/** Icon name mapping for each tab */
+const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+  sessions: 'terminal-outline',
+  tasks: 'checkbox-outline',
+  costs: 'bar-chart-outline',
+  docs: 'document-text-outline',
+  more: 'ellipsis-horizontal',
+};
+
+/**
+ * TabLayout - Renders the bottom tab navigator with 5 themed tabs.
+ *
+ * Uses the MyrlinTheme from context for all colors: tab bar background,
+ * active/inactive tints, header background, and header title style.
+ */
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const { theme } = useTheme();
+
+  const screenOptions = useMemo(
+    () => ({
+      tabBarActiveTintColor: theme.colors.accent,
+      tabBarInactiveTintColor: theme.colors.overlay1,
+      tabBarStyle: {
+        backgroundColor: theme.colors.mantle,
+        borderTopColor: theme.colors.surface0,
+        borderTopWidth: 1,
+      },
+      tabBarLabelStyle: {
+        fontFamily: fonts.sans.medium,
+        fontSize: 11,
+      },
+      headerStyle: {
+        backgroundColor: theme.colors.base,
+      },
+      headerTintColor: theme.colors.text,
+      headerTitleStyle: {
+        fontFamily: fonts.sans.semibold,
+        fontSize: theme.typography.sizes.lg,
+      },
+      headerShadowVisible: false,
+    }),
+    [theme]
+  );
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme].tint,
-        // Disable the static render of the header on web
-        // to prevent a hydration error in React Navigation v6.
-        headerShown: useClientOnlyValue(false, true),
-      }}>
+    <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
-        name="index"
+        name="sessions"
         options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => (
-            <SymbolView
-              name={{
-                ios: 'chevron.left.forwardslash.chevron.right',
-                android: 'code',
-                web: 'code',
-              }}
-              tintColor={color}
-              size={28}
-            />
-          ),
-          headerRight: () => (
-            <Link href="/modal" asChild>
-              <Pressable style={{ marginRight: 15 }}>
-                {({ pressed }) => (
-                  <SymbolView
-                    name={{ ios: 'info.circle', android: 'info', web: 'info' }}
-                    size={25}
-                    tintColor={Colors[colorScheme].text}
-                    style={{ opacity: pressed ? 0.5 : 1 }}
-                  />
-                )}
-              </Pressable>
-            </Link>
+          title: 'Sessions',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={TAB_ICONS.sessions} size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="two"
+        name="tasks"
         options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => (
-            <SymbolView
-              name={{
-                ios: 'chevron.left.forwardslash.chevron.right',
-                android: 'code',
-                web: 'code',
-              }}
-              tintColor={color}
-              size={28}
-            />
+          title: 'Tasks',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={TAB_ICONS.tasks} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="costs"
+        options={{
+          title: 'Costs',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={TAB_ICONS.costs} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="docs"
+        options={{
+          title: 'Docs',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={TAB_ICONS.docs} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="more"
+        options={{
+          title: 'More',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name={TAB_ICONS.more} size={size} color={color} />
           ),
         }}
       />

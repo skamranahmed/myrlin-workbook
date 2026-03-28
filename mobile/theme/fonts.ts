@@ -34,6 +34,12 @@ export const fonts = {
  * ```
  */
 export const fontAssets = {
+  // Plus Jakarta Sans (from @expo-google-fonts package)
+  [fonts.sans.regular]: require('@expo-google-fonts/plus-jakarta-sans/400Regular/PlusJakartaSans_400Regular.ttf'),
+  [fonts.sans.medium]: require('@expo-google-fonts/plus-jakarta-sans/500Medium/PlusJakartaSans_500Medium.ttf'),
+  [fonts.sans.semibold]: require('@expo-google-fonts/plus-jakarta-sans/600SemiBold/PlusJakartaSans_600SemiBold.ttf'),
+  [fonts.sans.bold]: require('@expo-google-fonts/plus-jakarta-sans/700Bold/PlusJakartaSans_700Bold.ttf'),
+  // JetBrains Mono (bundled in assets)
   [fonts.mono.regular]: require('../assets/fonts/JetBrainsMono-Regular.ttf'),
   [fonts.mono.medium]: require('../assets/fonts/JetBrainsMono-Medium.ttf'),
   [fonts.mono.bold]: require('../assets/fonts/JetBrainsMono-Bold.ttf'),
