@@ -6,6 +6,10 @@
 
 const path = require('path');
 
+// Force data directory to project-local ./state/ for test isolation
+// (prevents tests from reading/writing ~/.myrlin/ production data)
+process.env.CWM_DATA_DIR = path.join(__dirname, '..', 'state');
+
 // Simple test framework
 let passed = 0;
 let failed = 0;

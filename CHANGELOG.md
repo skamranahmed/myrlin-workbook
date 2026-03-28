@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.9] - 2026-03-28
+
+### Fixed
+
+- **Missing data-dir.js crashes server on startup** - `src/utils/data-dir.js` was referenced by store.js but never committed, causing MODULE_NOT_FOUND on fresh installs. State now persists to `~/.myrlin/` so all launch methods (npm, npx, global) share the same data. Includes one-time migration from legacy project-local `./state/` directory. Override with `CWM_DATA_DIR` env var for custom installs (fixes #39, reported by @inorixu, PR #38 by @b2r66sun)
+
 ## [0.9.8] - 2026-03-26
 
 ### Fixed
