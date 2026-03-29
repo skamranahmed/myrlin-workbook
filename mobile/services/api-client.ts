@@ -13,6 +13,15 @@ import {
   type AuthCheckResponse,
   type LoginResponse,
   type PairResponse,
+  type Session,
+  type SessionCost,
+  type Workspace,
+  type WorkspaceGroup,
+  type SessionTemplate,
+  type FileConflict,
+  type CreateSessionInput,
+  type SearchResult,
+  type Subagent,
   APIError,
 } from '../types/api';
 
@@ -147,6 +156,380 @@ export class MyrlinAPIClient {
       // Pairing is pre-auth; omit Bearer header
       headers: { Authorization: '' },
     });
+  }
+
+  // ─── Sessions ───────────────────────────────────────────
+
+  /**
+   * Fetch sessions from the server with optional mode and filters.
+   * @param mode - View mode: "all", "workspace", or "recent"
+   * @param params - Optional filters (workspaceId for workspace mode, count for recent)
+   * @returns Sessions list and optional recent sessions
+   */
+  async getSessions(
+    mode: 'all' | 'workspace' | 'recent' = 'all',
+    params?: { workspaceId?: string; count?: number }
+  ): Promise<{ sessions: Session[]; recentSessions?: Session[] }> {
+    const query = new URLSearchParams({ mode });
+    if (params?.workspaceId) query.set('workspaceId', params.workspaceId);
+    if (params?.count) query.set('count', String(params.count));
+    return this._fetch(`/api/sessions?${query.toString()}`);
+  }
+
+  /**
+   * Fetch a single session by ID.
+   * The server returns all sessions; this filters client-side.
+   * @param id - Session ID to find
+   * @returns The matching session
+   */
+  async getSession(id: string): Promise<Session | undefined> {
+    const { sessions } = await this.getSessions();
+    return sessions.find((s) => s.id === id);
+  }
+
+  /**
+   * Create a new session on the server.
+   * @param data - Session creation parameters
+   * @returns The newly created session
+   */
+  async createSession(data: CreateSessionInput): Promise<{ session: Session }> {
+    return this._fetch('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an existing session (rename, move, tag, etc.).
+   * @param id - Session ID to update
+   * @param data - Partial session fields to update
+   * @returns The updated session
+   */
+  async updateSession(
+    id: string,
+    data: Partial<Session>
+  ): Promise<{ session: Session }> {
+    return this._fetch(`/api/sessions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete (hide) a session.
+   * @param id - Session ID to delete
+   * @returns Success indicator
+   */
+  async deleteSession(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Start a stopped session.
+   * @param id - Session ID to start
+   * @returns Success indicator and new PID
+   */
+  async startSession(id: string): Promise<{ success: boolean; pid: number }> {
+    return this._fetch(`/api/sessions/${id}/start`, { method: 'POST' });
+  }
+
+  /**
+   * Stop a running session.
+   * @param id - Session ID to stop
+   * @returns Success indicator
+   */
+  async stopSession(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/sessions/${id}/stop`, { method: 'POST' });
+  }
+
+  /**
+   * Restart a session (stop then start).
+   * @param id - Session ID to restart
+   * @returns Success indicator and new PID
+   */
+  async restartSession(
+    id: string
+  ): Promise<{ success: boolean; pid: number }> {
+    return this._fetch(`/api/sessions/${id}/restart`, { method: 'POST' });
+  }
+
+  /**
+   * Get cost breakdown for a session from JSONL usage data.
+   * @param id - Session ID
+   * @returns Cost breakdown by category and model
+   */
+  async getSessionCost(id: string): Promise<SessionCost> {
+    return this._fetch(`/api/sessions/${id}/cost`);
+  }
+
+  /**
+   * Get subagent tree for a session.
+   * @param id - Session ID
+   * @returns List of subagents
+   */
+  async getSessionSubagents(
+    id: string
+  ): Promise<{ subagents: Subagent[] }> {
+    return this._fetch(`/api/sessions/${id}/subagents`);
+  }
+
+  /**
+   * Generate an AI-powered title for a session.
+   * @param id - Session ID
+   * @returns Generated title string
+   */
+  async autoTitle(id: string): Promise<{ title: string }> {
+    return this._fetch(`/api/sessions/${id}/auto-title`, { method: 'POST' });
+  }
+
+  /**
+   * Generate an AI-powered summary of a session.
+   * @param id - Session ID
+   * @returns Generated summary string
+   */
+  async summarize(id: string): Promise<{ summary: string }> {
+    return this._fetch(`/api/sessions/${id}/summarize`, { method: 'POST' });
+  }
+
+  // ─── Workspaces ─────────────────────────────────────────
+
+  /**
+   * Fetch all workspaces and their ordering.
+   * @returns Workspaces list and workspace order array
+   */
+  async getWorkspaces(): Promise<{
+    workspaces: Workspace[];
+    workspaceOrder: string[];
+  }> {
+    return this._fetch('/api/workspaces');
+  }
+
+  /**
+   * Fetch a single workspace by ID with its sessions.
+   * @param id - Workspace ID
+   * @returns The workspace
+   */
+  async getWorkspace(id: string): Promise<{ workspace: Workspace }> {
+    return this._fetch(`/api/workspaces/${id}`);
+  }
+
+  /**
+   * Create a new workspace.
+   * @param data - Workspace name, optional description and color
+   * @returns The created workspace
+   */
+  async createWorkspace(data: {
+    name: string;
+    description?: string;
+    color?: string;
+  }): Promise<{ workspace: Workspace }> {
+    return this._fetch('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an existing workspace.
+   * @param id - Workspace ID
+   * @param data - Partial workspace fields to update
+   * @returns The updated workspace
+   */
+  async updateWorkspace(
+    id: string,
+    data: Partial<Workspace>
+  ): Promise<{ workspace: Workspace }> {
+    return this._fetch(`/api/workspaces/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a workspace.
+   * @param id - Workspace ID
+   * @returns Success indicator
+   */
+  async deleteWorkspace(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/workspaces/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Reorder workspaces by providing the full ordering.
+   * @param order - Ordered array of workspace IDs
+   * @returns Success indicator
+   */
+  async reorderWorkspaces(
+    order: string[]
+  ): Promise<{ success: boolean }> {
+    return this._fetch('/api/workspaces/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ order }),
+    });
+  }
+
+  // ─── Groups ─────────────────────────────────────────────
+
+  /**
+   * Fetch all workspace groups.
+   * @returns List of groups
+   */
+  async getGroups(): Promise<{ groups: WorkspaceGroup[] }> {
+    return this._fetch('/api/groups');
+  }
+
+  /**
+   * Create a new workspace group.
+   * @param data - Group name and optional color
+   * @returns The created group
+   */
+  async createGroup(data: {
+    name: string;
+    color?: string;
+  }): Promise<{ group: WorkspaceGroup }> {
+    return this._fetch('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an existing workspace group.
+   * @param id - Group ID
+   * @param data - Partial group fields to update
+   * @returns The updated group
+   */
+  async updateGroup(
+    id: string,
+    data: Partial<WorkspaceGroup>
+  ): Promise<{ group: WorkspaceGroup }> {
+    return this._fetch(`/api/groups/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a workspace group.
+   * @param id - Group ID
+   * @returns Success indicator
+   */
+  async deleteGroup(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/groups/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Add a workspace to a group.
+   * @param groupId - Group ID
+   * @param workspaceId - Workspace ID to add
+   * @returns Success indicator
+   */
+  async addWorkspaceToGroup(
+    groupId: string,
+    workspaceId: string
+  ): Promise<{ success: boolean }> {
+    return this._fetch(`/api/groups/${groupId}/add`, {
+      method: 'POST',
+      body: JSON.stringify({ workspaceId }),
+    });
+  }
+
+  // ─── Templates ──────────────────────────────────────────
+
+  /**
+   * Fetch all session templates.
+   * @returns List of templates
+   */
+  async getTemplates(): Promise<{ templates: SessionTemplate[] }> {
+    return this._fetch('/api/templates');
+  }
+
+  /**
+   * Create a new session template.
+   * @param data - Template configuration
+   * @returns The created template
+   */
+  async createTemplate(
+    data: Partial<SessionTemplate>
+  ): Promise<{ template: SessionTemplate }> {
+    return this._fetch('/api/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a session template.
+   * @param id - Template ID
+   * @returns Success indicator
+   */
+  async deleteTemplate(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/templates/${id}`, { method: 'DELETE' });
+  }
+
+  // ─── Search ─────────────────────────────────────────────
+
+  /**
+   * Keyword search across session JSONL files.
+   * @param query - Search query string
+   * @param limit - Maximum number of results
+   * @returns Matching search results
+   */
+  async search(
+    query: string,
+    limit?: number
+  ): Promise<{ results: SearchResult[] }> {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set('limit', String(limit));
+    return this._fetch(`/api/search?${params.toString()}`);
+  }
+
+  /**
+   * AI-powered semantic search across session conversations.
+   * @param data - Search query and optional workspace filter
+   * @returns Matching search results
+   */
+  async searchConversations(data: {
+    query: string;
+    workspaceId?: string;
+  }): Promise<{ results: SearchResult[] }> {
+    return this._fetch('/api/search-conversations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ─── Conflicts ──────────────────────────────────────────
+
+  /**
+   * Get all detected file conflicts across sessions.
+   * @returns List of file conflicts
+   */
+  async getConflicts(): Promise<{ conflicts: FileConflict[] }> {
+    return this._fetch('/api/conflicts');
+  }
+
+  // ─── Discovery ──────────────────────────────────────────
+
+  /**
+   * Discover Claude sessions on the server's filesystem.
+   * @returns List of discovered sessions
+   */
+  async discover(): Promise<{ sessions: any[] }> {
+    return this._fetch('/api/discover');
+  }
+
+  /**
+   * Browse directories on the server for working directory selection.
+   * @param dirPath - Directory path to browse
+   * @returns Lists of subdirectories and files
+   */
+  async browse(
+    dirPath: string
+  ): Promise<{ directories: string[]; files: string[] }> {
+    return this._fetch(
+      `/api/browse?path=${encodeURIComponent(dirPath)}`
+    );
   }
 }
 
