@@ -17,6 +17,7 @@ const express = require('express');
 const { setupAuth, requireAuth, isValidToken, addToken, generateToken, isRateLimited, reloadTokensFromStore, setStoreGetter } = require('./auth');
 const { setupPairing } = require('./pairing');
 const { setupPushRoutes, setupPushListeners } = require('./push');
+const { setupDeviceRoutes } = require('./device-manager');
 const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
@@ -296,6 +297,15 @@ setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited, getStor
 // ─── Push Notification Routes (mobile device push tokens) ───
 setupPushRoutes(app, requireAuth, getStore);
 setupPushListeners(getStore());
+
+// ─── Device Management Routes (paired device CRUD) ────────────
+setupDeviceRoutes(app, {
+  requireAuth,
+  getStore: () => getStore(),
+  removeToken: require('./auth').removeToken,
+  sendPush: require('./push').sendPush,
+  getSSEClients: () => sseClients,
+});
 
 // ─── Protected API Routes ──────────────────────────────────
 // All routes below require a valid Bearer token.
@@ -4876,8 +4886,9 @@ app.post('/api/pty/:sessionId/upload-image',
 //  SSE - Server-Sent Events for live updates
 // ──────────────────────────────────────────────────────────
 
-// Track connected SSE clients
-const sseClients = new Set();
+// Track connected SSE clients: clientId -> { res, token }
+const sseClients = new Map();
+let _sseClientId = 0;
 
 /**
  * GET /api/events
@@ -4905,17 +4916,18 @@ app.get('/api/events', (req, res) => {
   // Send initial connection confirmation
   res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
 
-  // Add client to tracking set
-  sseClients.add(res);
+  // Add client to tracking map with auth token for device online detection
+  const clientId = ++_sseClientId;
+  sseClients.set(clientId, { res, token });
 
   // Clean up on disconnect
   req.on('close', () => {
-    sseClients.delete(res);
+    sseClients.delete(clientId);
   });
 
   // Also handle request errors (e.g. aborted connections) to prevent stale client references
   req.on('error', () => {
-    sseClients.delete(res);
+    sseClients.delete(clientId);
   });
 });
 
@@ -4929,17 +4941,17 @@ function broadcastSSE(eventType, data) {
   // Send as unnamed event so EventSource.onmessage fires (named events require addEventListener per type)
   const message = `data: ${payload}\n\n`;
 
-  for (const client of sseClients) {
+  for (const [clientId, client] of sseClients) {
     // Skip and remove clients whose writable stream has already ended
-    if (client.writableEnded) {
-      sseClients.delete(client);
+    if (client.res.writableEnded) {
+      sseClients.delete(clientId);
       continue;
     }
     try {
-      client.write(message);
+      client.res.write(message);
     } catch (_) {
       // Client may have disconnected; remove it
-      sseClients.delete(client);
+      sseClients.delete(clientId);
     }
   }
 }
