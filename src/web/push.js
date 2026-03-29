@@ -47,6 +47,17 @@ function getRunningSessionCount(store) {
   return count;
 }
 
+// ─── Push Batching Queue ─────────────────────────────────────
+
+/**
+ * Module-level batching state.
+ * Maps pushToken -> array of pending notification objects.
+ * Events within BATCH_WINDOW_MS are coalesced into a single push per device.
+ */
+const pushQueue = new Map();
+let flushTimer = null;
+const BATCH_WINDOW_MS = 2000;
+
 // ─── Route Setup ─────────────────────────────────────────────
 
 /**
@@ -141,10 +152,11 @@ function setupPushListeners(store) {
 
     // Session completed: running -> stopped
     if (previousStatus === 'running' && session.status === 'stopped') {
-      sendPush(store, {
+      queuePush(store, {
         title: 'Session completed',
         body: `${session.name || session.id} has finished`,
         data: { type: 'session', sessionId: session.id },
+        route: '/(tabs)/sessions',
       });
     }
 
@@ -153,10 +165,11 @@ function setupPushListeners(store) {
       const lastLog = session.logs[session.logs.length - 1];
       const logText = (typeof lastLog === 'string' ? lastLog : lastLog.message || '').toLowerCase();
       if (logText.includes('needs input') || logText.includes('waiting for')) {
-        sendPush(store, {
+        queuePush(store, {
           title: 'Input needed',
           body: `${session.name || session.id} needs your input`,
           data: { type: 'session', sessionId: session.id },
+          route: '/(tabs)/sessions',
         });
       }
     }
@@ -178,10 +191,11 @@ function setupPushListeners(store) {
   store.on('worktreeTask:updated', (task) => {
     if (!task) return;
     if (task.status === 'review') {
-      sendPush(store, {
+      queuePush(store, {
         title: 'Task ready for review',
         body: task.description || `Task ${task.id}`,
         data: { type: 'task', taskId: task.id },
+        route: '/(tabs)/sessions',
       });
     }
   });
@@ -189,10 +203,11 @@ function setupPushListeners(store) {
   // File conflict detected (if the event exists in the system)
   store.on('conflict:detected', (conflict) => {
     const file = (conflict && conflict.file) || 'unknown file';
-    sendPush(store, {
+    queuePush(store, {
       title: 'File conflict',
       body: `Conflict detected in ${file}`,
       data: { type: 'conflict' },
+      route: '/(tabs)/sessions',
     });
   });
 }
@@ -323,14 +338,105 @@ async function sendPush(store, notification) {
   }
 }
 
+// ─── Push Batching ───────────────────────────────────────────
+
 /**
- * Placeholder for push queue flush (implemented in Task 2).
- * Exported so callers can import it immediately.
+ * Queue a push notification for batching.
+ * Adds the notification to each eligible device's queue, then starts
+ * a 2-second flush timer if one is not already running.
+ * Multiple events within the batch window are coalesced into a single
+ * summary notification per device.
  *
- * @param {import('../state/store').Store} _store - Unused until Task 2
+ * @param {import('../state/store').Store} store - Store instance
+ * @param {{ title: string, body: string, data?: Object, route?: string }} notification - Notification to queue
  */
-function flushPushQueue(_store) {
-  // No-op placeholder; Task 2 replaces this with batching logic
+function queuePush(store, notification) {
+  const devices = store.getPairedDevices().filter(d => d.pushToken);
+  if (devices.length === 0) return;
+
+  for (const device of devices) {
+    const token = device.pushToken;
+    if (!pushQueue.has(token)) {
+      pushQueue.set(token, []);
+    }
+    pushQueue.get(token).push(notification);
+  }
+
+  // Start flush timer if not already running
+  if (flushTimer === null) {
+    flushTimer = setTimeout(() => flushPushQueue(store), BATCH_WINDOW_MS);
+  }
+}
+
+/**
+ * Flush the push queue, sending one notification per device.
+ * If a device has a single queued event, the original notification is sent.
+ * If a device has multiple queued events, a summary notification is created
+ * that aggregates the event types (e.g. "2 sessions completed, 1 needs input").
+ *
+ * @param {import('../state/store').Store} store - Store instance
+ */
+function flushPushQueue(store) {
+  // Clear the timer
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
+  const badge = getRunningSessionCount(store);
+
+  for (const [pushToken, events] of pushQueue) {
+    if (events.length === 0) continue;
+
+    let message;
+
+    if (events.length === 1) {
+      // Single event: send as-is with badge
+      const evt = events[0];
+      message = {
+        to: pushToken,
+        title: evt.title,
+        body: evt.body,
+        data: {
+          ...(evt.data || {}),
+          route: evt.route || null,
+        },
+        sound: 'default',
+        badge,
+      };
+    } else {
+      // Multiple events: create summary notification
+      const typeCounts = {};
+      for (const evt of events) {
+        const label = evt.title || 'update';
+        typeCounts[label] = (typeCounts[label] || 0) + 1;
+      }
+      const parts = Object.entries(typeCounts).map(
+        ([label, count]) => `${count} ${label.toLowerCase()}`
+      );
+      const body = parts.join(', ');
+
+      message = {
+        to: pushToken,
+        title: `${events.length} updates`,
+        body,
+        data: {
+          type: 'batch',
+          count: events.length,
+          route: '/(tabs)/sessions',
+        },
+        sound: 'default',
+        badge,
+      };
+    }
+
+    // Fire and forget (best-effort with retry)
+    sendPushWithRetry(store, message).catch(err => {
+      console.error(`[Push] Batch send failed for token ${pushToken.slice(0, 20)}...: ${err.message}`);
+    });
+  }
+
+  pushQueue.clear();
 }
 
 // ─── Exports ─────────────────────────────────────────────────
@@ -339,5 +445,6 @@ module.exports = {
   setupPushRoutes,
   setupPushListeners,
   sendPush,
+  queuePush,
   flushPushQueue,
 };
