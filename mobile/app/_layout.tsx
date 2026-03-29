@@ -17,12 +17,29 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
 import { ThemeProvider } from '@/hooks/useTheme';
 import { useThemeStore } from '@/stores/theme-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { useServerStore } from '@/stores/server-store';
 import { fontAssets } from '@/theme/fonts';
 import { BiometricGate } from '@/components/BiometricGate';
+
+/**
+ * Singleton QueryClient for TanStack Query.
+ * Created at module scope so it persists across re-renders but not across
+ * full app restarts. Default staleTime of 5s prevents excessive refetching
+ * while SSE events handle cache invalidation for real-time updates.
+ */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5000,
+      retry: 2,
+    },
+  },
+});
 
 export {
   /** Catch any errors thrown by the Layout component */
@@ -88,6 +105,24 @@ function RootLayoutNav() {
   // If no server is paired, redirect to onboarding
   if (!activeServer) {
     return (
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <StatusBar style={theme.isDark ? 'light' : 'dark'} />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: theme.colors.base },
+            }}
+          >
+            <Stack.Screen name="(auth)" />
+          </Stack>
+        </ThemeProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <StatusBar style={theme.isDark ? 'light' : 'dark'} />
         <Stack
@@ -96,25 +131,11 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: theme.colors.base },
           }}
         >
+          <Stack.Screen name="(tabs)" />
           <Stack.Screen name="(auth)" />
         </Stack>
+        {biometricEnabled && isLocked && <BiometricGate />}
       </ThemeProvider>
-    );
-  }
-
-  return (
-    <ThemeProvider>
-      <StatusBar style={theme.isDark ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.base },
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="(auth)" />
-      </Stack>
-      {biometricEnabled && isLocked && <BiometricGate />}
-    </ThemeProvider>
+    </QueryClientProvider>
   );
 }
