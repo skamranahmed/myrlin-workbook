@@ -349,6 +349,75 @@ app.get('/api/server-info', (req, res) => {
   });
 });
 
+// ─── Mobile Sync (single-request bootstrap) ────────────────
+
+/**
+ * GET /api/mobile/sync
+ * Returns all data needed for mobile app bootstrap in a single response.
+ * Sessions use sparse fields only (omits logs, workingDir, command, flags,
+ * initialPrompt, createdAt) to keep the payload small on slow connections.
+ * Includes a syncVersion number for future delta sync support.
+ */
+app.get('/api/mobile/sync', requireAuth, (req, res) => {
+  const store = getStore();
+  const state = store.state;
+
+  // Sparse session fields for list view (omit heavy fields)
+  const SPARSE_SESSION_FIELDS = ['id', 'name', 'workspaceId', 'status', 'topic', 'tags', 'lastActive', 'pid', 'resumeSessionId'];
+
+  const sessions = Object.values(state.sessions || {}).map(s => {
+    const sparse = {};
+    for (const field of SPARSE_SESSION_FIELDS) {
+      if (s[field] !== undefined) sparse[field] = s[field];
+    }
+    return sparse;
+  });
+
+  // Find requesting device by token
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '');
+  const device = store.findDeviceByToken(token);
+
+  // Compute stats
+  const allSessions = Object.values(state.sessions || {});
+  const runningCount = allSessions.filter(s => s.status === 'running').length;
+
+  // Build recent session IDs (last 10 by lastActive)
+  const recentSessions = [...allSessions]
+    .sort((a, b) => (b.lastActive || '').localeCompare(a.lastActive || ''))
+    .slice(0, 10)
+    .map(s => s.id);
+
+  // Strip token from device info before sending
+  const deviceInfo = device ? (() => {
+    const { token: _, ...rest } = device;
+    return rest;
+  })() : null;
+
+  res.json({
+    server: {
+      name: state.settings?.serverName || 'Myrlin Workbook',
+      version: require('../../package.json').version,
+      uptime: Math.floor(process.uptime()),
+    },
+    workspaces: Object.values(state.workspaces || {}),
+    workspaceOrder: state.workspaceOrder || [],
+    workspaceGroups: Object.values(state.workspaceGroups || {}),
+    sessions,
+    recentSessions,
+    templates: Object.values(state.templates || {}),
+    settings: state.settings || {},
+    device: deviceInfo,
+    stats: {
+      runningCount,
+      totalCount: allSessions.length,
+      totalCost: 0,
+    },
+    syncVersion: 1,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ─── Protected API Routes ──────────────────────────────────
 // All routes below require a valid Bearer token.
 
