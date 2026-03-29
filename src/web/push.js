@@ -47,6 +47,46 @@ function getRunningSessionCount(store) {
   return count;
 }
 
+// ─── Preference Checking ────────────────────────────────────
+
+/**
+ * Event type to pushPreferences key mapping.
+ * Maps push notification event types to the corresponding
+ * boolean key in device.pushPreferences.
+ */
+const EVENT_TYPE_TO_PREF_KEY = {
+  'session:complete': 'sessionComplete',
+  'session:needs-input': 'sessionNeedsInput',
+  'conflict:detected': 'fileConflicts',
+  'task:review': 'taskReview',
+};
+
+/**
+ * Check whether a device should receive a push notification for a given event type.
+ * Looks up the event type in the device's pushPreferences object.
+ * If the device has no pushPreferences or the event type is unknown, defaults to true.
+ *
+ * @param {Object} device - Paired device record from the store
+ * @param {string} eventType - Event type string (e.g. 'session:complete')
+ * @returns {boolean} True if the device should receive the notification
+ */
+function shouldNotify(device, eventType) {
+  // No preferences set means send everything
+  if (!device || !device.pushPreferences) return true;
+
+  const prefKey = EVENT_TYPE_TO_PREF_KEY[eventType];
+
+  // Unknown event type: default to sending
+  if (!prefKey) return true;
+
+  const value = device.pushPreferences[prefKey];
+
+  // If the key is not explicitly set, default to sending
+  if (typeof value !== 'boolean') return true;
+
+  return value;
+}
+
 // ─── Push Batching Queue ─────────────────────────────────────
 
 /**
@@ -153,10 +193,11 @@ function setupPushListeners(store) {
     // Session completed: running -> stopped
     if (previousStatus === 'running' && session.status === 'stopped') {
       queuePush(store, {
+        type: 'session:complete',
         title: 'Session completed',
         body: `${session.name || session.id} has finished`,
         data: { type: 'session', sessionId: session.id },
-        route: '/(tabs)/sessions',
+        route: `/(tabs)/sessions/${session.id}`,
       });
     }
 
@@ -166,10 +207,11 @@ function setupPushListeners(store) {
       const logText = (typeof lastLog === 'string' ? lastLog : lastLog.message || '').toLowerCase();
       if (logText.includes('needs input') || logText.includes('waiting for')) {
         queuePush(store, {
+          type: 'session:needs-input',
           title: 'Input needed',
           body: `${session.name || session.id} needs your input`,
           data: { type: 'session', sessionId: session.id },
-          route: '/(tabs)/sessions',
+          route: `/(tabs)/sessions/${session.id}`,
         });
       }
     }
@@ -192,10 +234,11 @@ function setupPushListeners(store) {
     if (!task) return;
     if (task.status === 'review') {
       queuePush(store, {
+        type: 'task:review',
         title: 'Task ready for review',
         body: task.description || `Task ${task.id}`,
         data: { type: 'task', taskId: task.id },
-        route: '/(tabs)/sessions',
+        route: '/(tabs)/tasks',
       });
     }
   });
@@ -204,6 +247,7 @@ function setupPushListeners(store) {
   store.on('conflict:detected', (conflict) => {
     const file = (conflict && conflict.file) || 'unknown file';
     queuePush(store, {
+      type: 'conflict:detected',
       title: 'File conflict',
       body: `Conflict detected in ${file}`,
       data: { type: 'conflict' },
@@ -355,6 +399,12 @@ function queuePush(store, notification) {
   if (devices.length === 0) return;
 
   for (const device of devices) {
+    // Check per-device push preferences before queuing
+    if (!shouldNotify(device, notification.type)) {
+      console.log(`[Push] Skipping ${device.deviceName || device.deviceId} for ${notification.type} (preference disabled)`);
+      continue;
+    }
+
     const token = device.pushToken;
     if (!pushQueue.has(token)) {
       pushQueue.set(token, []);
