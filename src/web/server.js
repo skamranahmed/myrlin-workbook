@@ -14,7 +14,7 @@ const path = require('path');
 const { execFile, execSync } = require('child_process');
 const express = require('express');
 
-const { setupAuth, requireAuth, isValidToken, addToken, generateToken, isRateLimited } = require('./auth');
+const { setupAuth, requireAuth, isValidToken, addToken, generateToken, isRateLimited, reloadTokensFromStore, setStoreGetter } = require('./auth');
 const { setupPairing } = require('./pairing');
 const { setupPushRoutes, setupPushListeners } = require('./push');
 const { getStore } = require('../state/store');
@@ -175,6 +175,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // CORS headers - restrict to localhost and local network origins
+// Mobile clients with valid Bearer tokens are allowed from any origin
 app.use((req, res, next) => {
   const origin = req.headers.origin || '';
   const allowedOrigins = [
@@ -197,7 +198,15 @@ app.use((req, res, next) => {
       isSameHost = originHostname === reqHostname;
     } catch (_) { /* malformed origin -- deny */ }
   }
-  if (isSameHost) {
+
+  // Trust Bearer tokens from any origin (mobile clients on LAN, Tailscale, tunnel)
+  const authHeader = req.headers.authorization || '';
+  const hasValidToken = authHeader.startsWith('Bearer ') && isValidToken(authHeader.split(' ')[1]);
+
+  if (hasValidToken) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else if (isSameHost) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -206,6 +215,14 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
+    // Preflight: if requesting Authorization header, allow from any origin
+    // (preflight requests do not carry Bearer tokens themselves)
+    const requestedHeaders = (req.headers['access-control-request-headers'] || '').toLowerCase();
+    if (requestedHeaders.includes('authorization')) {
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
     return res.sendStatus(204);
   }
   next();
@@ -274,7 +291,7 @@ app.post('/api/fallback/restore', requireAuth, (req, res) => {
 setupAuth(app);
 
 // ─── Pairing Routes (mobile device authentication) ─────────
-setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited });
+setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited, getStore });
 
 // ─── Push Notification Routes (mobile device push tokens) ───
 setupPushRoutes(app, requireAuth, getStore);
@@ -7188,6 +7205,10 @@ function backfillResumeSessionIds() {
 function startServer(port = 3456, host = '127.0.0.1') {
   // Wire store events to SSE before accepting connections
   attachStoreEvents();
+
+  // Restore device tokens from disk so mobile stays authenticated across restarts
+  setStoreGetter(getStore);
+  reloadTokensFromStore(getStore);
 
   // Backfill missing resumeSessionIds so cost tracking works for all sessions
   setImmediate(() => backfillResumeSessionIds());

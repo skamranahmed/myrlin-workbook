@@ -162,9 +162,16 @@ function loadPassword() {
 const AUTH_PASSWORD = loadPassword();
 
 // In-memory set of valid tokens. Tokens survive for the lifetime of
-// the server process. A restart invalidates all tokens (acceptable
-// for a local dev-tool).
+// the server process. Device tokens are reloaded from disk on startup
+// via reloadTokensFromStore() so paired devices survive restarts.
 const activeTokens = new Set();
+
+// Store getter for device activity tracking (set via setStoreGetter)
+let _getStore = null;
+
+// Debounce lastSeenAt updates: at most once per 60 seconds per device
+const _lastSeenTimers = new Map();
+const LAST_SEEN_DEBOUNCE_MS = 60 * 1000;
 
 // ─── One-Time Startup Tokens ──────────────────────────────
 // Map of token → { createdAt, used }. Single-use, short-lived tokens
@@ -234,6 +241,12 @@ function requireAuth(req, res, next) {
 
   // Attach token to request for downstream use (e.g. logout)
   req.authToken = token;
+
+  // Track device activity (debounced, updates lastSeenAt)
+  if (_getStore) {
+    trackDeviceActivity(token, _getStore);
+  }
+
   next();
 }
 
@@ -397,6 +410,68 @@ function addToken(token) {
   activeTokens.add(token);
 }
 
+/**
+ * Remove a token from the active token set.
+ * Used when revoking a paired device.
+ * @param {string} token
+ */
+function removeToken(token) {
+  activeTokens.delete(token);
+}
+
+/**
+ * Set the store getter function for device activity tracking.
+ * Must be called before the server starts accepting requests.
+ * @param {Function} fn - Function that returns the store instance
+ */
+function setStoreGetter(fn) {
+  _getStore = fn;
+}
+
+/**
+ * Update lastSeenAt for the device matching this token, debounced.
+ * Only updates at most once per 60 seconds per device to avoid
+ * excessive disk writes on every API request.
+ * @param {string} token
+ * @param {Function} getStoreFn
+ */
+function trackDeviceActivity(token, getStoreFn) {
+  if (_lastSeenTimers.has(token)) return;
+  _lastSeenTimers.set(token, true);
+  setTimeout(() => _lastSeenTimers.delete(token), LAST_SEEN_DEBOUNCE_MS);
+
+  const store = getStoreFn();
+  const device = store.findDeviceByToken(token);
+  if (device) {
+    store.updatePairedDevice(device.deviceId, { lastSeenAt: new Date().toISOString() });
+  }
+}
+
+/**
+ * Reload valid device tokens from the store into the active token set.
+ * Called on server startup to restore auth state after restart.
+ * Also cleans up expired devices (> 90 days).
+ * @param {Function} getStoreFn - Function that returns the store instance
+ */
+function reloadTokensFromStore(getStoreFn) {
+  const store = getStoreFn();
+  const removed = store.cleanExpiredDevices();
+  if (removed > 0) {
+    console.log(`[Auth] Cleaned ${removed} expired device token(s)`);
+  }
+  const devices = store.getPairedDevices();
+  let loaded = 0;
+  for (const device of devices) {
+    if (device.token) {
+      activeTokens.add(device.token);
+      loaded++;
+    }
+  }
+  if (loaded > 0) {
+    console.log(`[Auth] Restored ${loaded} device token(s) from disk`);
+  }
+}
+
 // ─── Exports ───────────────────────────────────────────────
 
 module.exports = {
@@ -406,6 +481,9 @@ module.exports = {
   generateStartupToken,
   generateToken,
   addToken,
+  removeToken,
   isRateLimited,
+  reloadTokensFromStore,
+  setStoreGetter,
   _startupTokens: startupTokens,
 };

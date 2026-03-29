@@ -60,7 +60,7 @@ function getServerInfo() {
  * @param {Function} deps.generateToken - Creates a cryptographically random hex token
  * @param {Function} deps.isRateLimited - Checks if an IP is rate-limited
  */
-function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited }) {
+function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited, getStore }) {
   const serverInfo = getServerInfo();
 
   /**
@@ -156,11 +156,54 @@ function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited
     const token = generateToken();
     addToken(token);
 
+    // Extract device metadata from request body
+    const { deviceName, platform, appVersion } = req.body || {};
+    const deviceId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Build device record and persist via store
+    const deviceRecord = {
+      deviceId,
+      token,
+      deviceName: deviceName || 'Unknown Device',
+      platform: platform || 'unknown',
+      appVersion: appVersion || '0.0.0',
+      pairedAt: now,
+      lastSeenAt: now,
+      expiresAt,
+      pushToken: null,
+      pushPreferences: {
+        sessionComplete: true,
+        sessionNeedsInput: true,
+        fileConflicts: true,
+        taskReview: true,
+        serverOnline: false,
+      },
+    };
+
+    // Persist device to store (survives server restart)
+    if (getStore) {
+      try {
+        getStore().addPairedDevice(deviceRecord);
+      } catch (err) {
+        console.error('[Pairing] Failed to persist device record:', err.message);
+      }
+    }
+
     return res.json({
       success: true,
       token,
+      deviceId,
       serverName: serverInfo.name,
       serverVersion: serverInfo.version,
+      capabilities: {
+        push: true,
+        sse: true,
+        terminal: true,
+        search: true,
+        costTracking: true,
+      },
     });
   });
 }
