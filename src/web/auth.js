@@ -388,6 +388,15 @@ function isValidToken(token) {
   return !!token && activeTokens.has(token);
 }
 
+/**
+ * Register a new token in the active token set.
+ * Used by the pairing module to add tokens generated during the pairing flow.
+ * @param {string} token - The token to register
+ */
+function addToken(token) {
+  activeTokens.add(token);
+}
+
 // ─── Exports ───────────────────────────────────────────────
 
 module.exports = {
@@ -395,5 +404,8 @@ module.exports = {
   requireAuth,
   isValidToken,
   generateStartupToken,
+  generateToken,
+  addToken,
+  isRateLimited,
   _startupTokens: startupTokens,
 };
