@@ -27,7 +27,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '@/hooks/useTheme';
-import { useSession, useUpdateSession, useStartSession, useStopSession, useRestartSession } from '@/hooks/useSessions';
+import { useSession, useSessions, useUpdateSession, useStartSession, useStopSession, useRestartSession } from '@/hooks/useSessions';
 import { useAPIClient } from '@/hooks/useAPIClient';
 import { useWorkspaces } from '@/hooks/useWorkspaces';
 import { fonts } from '@/theme/fonts';
@@ -148,6 +148,22 @@ export default function SessionDetailScreen() {
     }
     return map;
   }, [workspacesQuery.data]);
+
+  // All sessions query (for carousel mode: collect running session IDs)
+  const allSessionsQuery = useSessions('all');
+
+  /**
+   * Build a comma-separated list of running/idle session IDs for carousel navigation.
+   * This lets the user swipe between all active terminals from the terminal view.
+   */
+  const runningSessionIds = useMemo(() => {
+    const sessions = allSessionsQuery.data?.sessions ?? allSessionsQuery.data ?? [];
+    if (!Array.isArray(sessions)) return '';
+    return sessions
+      .filter((s: Session) => s.status === 'running' || s.status === 'idle')
+      .map((s: Session) => s.id)
+      .join(',');
+  }, [allSessionsQuery.data]);
 
   // Cost query
   const costQuery = useQuery({
@@ -382,7 +398,10 @@ export default function SessionDetailScreen() {
             onPress={() =>
               router.push({
                 pathname: '/(tabs)/sessions/terminal',
-                params: { id: session.id },
+                params: {
+                  id: session.id,
+                  ...(runningSessionIds ? { sessionIds: runningSessionIds } : {}),
+                },
               })
             }
           >

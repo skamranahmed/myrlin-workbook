@@ -41,6 +41,8 @@ export type WorkspaceDetailParams = {
 export type TerminalParams = {
   /** Session UUID to open in the terminal */
   id: string;
+  /** Comma-separated session IDs for carousel mode (optional) */
+  sessionIds?: string;
 };
 
 /**
