@@ -719,6 +719,55 @@ class PtySessionManager {
   }
 
   /**
+   * Get paginated lines from a session's scrollback buffer.
+   * Joins all scrollback chunks into a single string, splits by newline,
+   * then returns the requested slice.
+   *
+   * @param {string} sessionId - Session to read scrollback from
+   * @param {object} options
+   * @param {number} [options.lines=100] - Number of lines to return (max 1000)
+   * @param {string|number} [options.from='end'] - 'end' for last N lines, or numeric line index
+   * @returns {{ lines: string[], total: number, from: number, hasMore: boolean }}
+   */
+  getScrollbackLines(sessionId, { lines = 100, from = 'end' } = {}) {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.scrollback.length === 0) {
+      return { lines: [], total: 0, from: 0, hasMore: false };
+    }
+
+    // Join all scrollback chunks and split into individual lines
+    const allText = session.scrollback.join('');
+    const allLines = allText.split('\n');
+    const total = allLines.length;
+
+    // Clamp lines to [1, 1000]
+    const count = Math.max(1, Math.min(1000, lines));
+
+    if (from === 'end') {
+      // Return the last N lines
+      const startIdx = Math.max(0, total - count);
+      const slice = allLines.slice(startIdx, total);
+      return {
+        lines: slice,
+        total,
+        from: startIdx,
+        hasMore: startIdx > 0,
+      };
+    }
+
+    // Numeric from: start from that line index
+    const startIdx = Math.max(0, Math.min(Number(from) || 0, total));
+    const endIdx = Math.min(startIdx + count, total);
+    const slice = allLines.slice(startIdx, endIdx);
+    return {
+      lines: slice,
+      total,
+      from: startIdx,
+      hasMore: endIdx < total,
+    };
+  }
+
+  /**
    * Get a session by ID.
    * @param {string} sessionId
    * @returns {PtySession|undefined}

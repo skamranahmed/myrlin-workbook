@@ -1231,6 +1231,60 @@ app.post('/api/sessions/:id/restart', requireAuth, (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────
+//  SCROLLBACK & LOGS PAGINATION
+// ──────────────────────────────────────────────────────────
+
+/**
+ * GET /api/sessions/:id/scrollback
+ * Returns paginated lines from the session's PTY scrollback buffer.
+ * Query params:
+ *   - lines: number of lines to return (default 100, max 1000)
+ *   - from: 'end' for last N lines (default), or numeric line index
+ * Returns: { lines: string[], total: number, from: number, hasMore: boolean }
+ */
+app.get('/api/sessions/:id/scrollback', requireAuth, (req, res) => {
+  const ptyManager = getPtyManager();
+  if (!ptyManager) {
+    return res.json({ lines: [], total: 0, from: 0, hasMore: false });
+  }
+
+  const lines = Math.max(1, Math.min(1000, parseInt(req.query.lines, 10) || 100));
+  const from = req.query.from === undefined || req.query.from === 'end'
+    ? 'end'
+    : parseInt(req.query.from, 10);
+
+  const result = ptyManager.getScrollbackLines(req.params.id, { lines, from });
+  return res.json(result);
+});
+
+/**
+ * GET /api/sessions/:id/logs
+ * Returns paginated session log entries.
+ * Query params:
+ *   - limit: max entries to return (default 50, max 100)
+ *   - offset: starting index (default 0)
+ * Returns: { logs: Array, total: number, hasMore: boolean }
+ */
+app.get('/api/sessions/:id/logs', requireAuth, (req, res) => {
+  const store = getStore();
+  const session = store.getSession(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  const logs = session.logs || [];
+  const limit = Math.max(1, Math.min(100, parseInt(req.query.limit, 10) || 50));
+  const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+  const sliced = logs.slice(offset, offset + limit);
+  return res.json({
+    logs: sliced,
+    total: logs.length,
+    hasMore: (offset + sliced.length) < logs.length,
+  });
+});
+
+// ──────────────────────────────────────────────────────────
 //  STATS
 // ──────────────────────────────────────────────────────────
 
