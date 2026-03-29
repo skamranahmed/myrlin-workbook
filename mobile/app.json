@@ -10,10 +10,26 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#1e1e2e"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "io.myrlin.workbook",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Myrlin uses your camera to scan QR codes for server pairing.",
+        "NSMicrophoneUsageDescription": "Myrlin uses your microphone for voice commands in the terminal.",
+        "NSPhotoLibraryUsageDescription": "Myrlin lets you upload images to Claude Code sessions.",
+        "NSFaceIDUsageDescription": "Myrlin uses Face ID to secure access to your sessions.",
+        "NSLocalNetworkUsageDescription": "Myrlin connects to your local Myrlin server on your network.",
+        "NSBonjourServices": ["_myrlin._tcp"]
+      },
+      "entitlements": {
+        "aps-environment": "production"
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
