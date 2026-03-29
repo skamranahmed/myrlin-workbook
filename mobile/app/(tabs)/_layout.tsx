@@ -4,13 +4,20 @@
  * Configures the 5 main app tabs (Sessions, Tasks, Costs, Docs, More)
  * with Catppuccin-themed colors from useTheme(). Each tab uses an icon
  * from @expo/vector-icons/Ionicons and themed header/tab bar styles.
+ *
+ * Also starts connection health polling and renders the ConnectionDot
+ * in the header right area (tappable to open ServerMenu).
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Pressable } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '@/hooks/useTheme';
+import { useConnectionHealth } from '@/hooks/useConnectionHealth';
+import { ConnectionDot } from '@/components/ConnectionDot';
+import { ServerMenu } from '@/components/ServerMenu';
 import { fonts } from '@/theme/fonts';
 
 /** Icon name mapping for each tab */
@@ -30,6 +37,10 @@ const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
  */
 export default function TabLayout() {
   const { theme } = useTheme();
+  const [serverMenuVisible, setServerMenuVisible] = useState(false);
+
+  // Start connection health polling at the tab level
+  useConnectionHealth();
 
   const screenOptions = useMemo(
     () => ({
@@ -53,11 +64,18 @@ export default function TabLayout() {
         fontSize: theme.typography.sizes.lg,
       },
       headerShadowVisible: false,
+      /** Connection dot in header right, tappable to open server menu */
+      headerRight: () => (
+        <Pressable onPress={() => setServerMenuVisible(true)}>
+          <ConnectionDot showLabel />
+        </Pressable>
+      ),
     }),
     [theme]
   );
 
   return (
+    <>
     <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="sessions"
@@ -105,5 +123,10 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    <ServerMenu
+      visible={serverMenuVisible}
+      onClose={() => setServerMenuVisible(false)}
+    />
+    </>
   );
 }
