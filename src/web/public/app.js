@@ -1826,6 +1826,7 @@ class CWMApp {
     this.initTerminalPaneSwipe();
     this.initNotesEditor();
     this.initAIInsights();
+    this.initPairMobile();
     await this.loadAll();
     this.connectSSE();
     this.startConflictChecks();
@@ -16111,6 +16112,356 @@ class CWMApp {
     tabs.forEach((tab, i) => {
       tab.classList.toggle('active', i === this._activeTerminalSlot);
     });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PAIR MOBILE
+     ═══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Initialize pair mobile button click, modal close, tab switching, and badge.
+   * Called during app initialization after auth is established.
+   */
+  initPairMobile() {
+    const btn = document.getElementById('pair-mobile-btn');
+    const overlay = document.getElementById('pair-mobile-overlay');
+    const closeBtn = document.getElementById('pair-mobile-close-btn');
+    if (!btn || !overlay) return;
+
+    // Open modal on button click
+    btn.addEventListener('click', () => this.showPairMobileModal());
+
+    // Close modal
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.closePairMobileModal());
+    }
+
+    // Close on backdrop click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.closePairMobileModal();
+    });
+
+    // Tab switching
+    overlay.querySelectorAll('.pair-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        overlay.querySelectorAll('.pair-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const tabName = tab.dataset.tab;
+        const qrTab = document.getElementById('pair-qr-tab');
+        const devicesTab = document.getElementById('pair-devices-tab');
+        if (qrTab) qrTab.hidden = (tabName !== 'qr');
+        if (devicesTab) devicesTab.hidden = (tabName !== 'devices');
+
+        // Refresh devices when switching to that tab
+        if (tabName === 'devices') this.loadPairedDevices();
+      });
+    });
+
+    // Escape key closes modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !overlay.hidden) {
+        this.closePairMobileModal();
+      }
+    });
+
+    // Event delegation for device action buttons
+    const devicesList = document.getElementById('pair-devices-list');
+    if (devicesList) {
+      devicesList.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const deviceId = btn.dataset.deviceId;
+        if (action && deviceId) this.handleDeviceAction(action, deviceId, btn);
+      });
+    }
+
+    // Update badge on load
+    this.updatePairBadge();
+  }
+
+  /**
+   * Show the pair mobile modal, fetch QR code and start auto-refresh timer.
+   * Loads pairing code for QR tab and devices for the devices tab.
+   */
+  async showPairMobileModal() {
+    const overlay = document.getElementById('pair-mobile-overlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+
+    // Reset to QR tab
+    overlay.querySelectorAll('.pair-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === 'qr');
+    });
+    const qrTab = document.getElementById('pair-qr-tab');
+    const devicesTab = document.getElementById('pair-devices-tab');
+    if (qrTab) qrTab.hidden = false;
+    if (devicesTab) devicesTab.hidden = true;
+
+    // Load QR code
+    await this.loadPairingCode();
+
+    // Load devices in background
+    this.loadPairedDevices();
+
+    // Auto-refresh QR every 4 minutes (token expires at 5 min)
+    this._pairRefreshTimer = setInterval(() => this.loadPairingCode(), 4 * 60 * 1000);
+
+    // Start countdown display
+    this._startPairCountdown();
+  }
+
+  /**
+   * Close the pair mobile modal and clean up timers.
+   */
+  closePairMobileModal() {
+    const overlay = document.getElementById('pair-mobile-overlay');
+    if (overlay) overlay.hidden = true;
+
+    // Clear auto-refresh timer
+    if (this._pairRefreshTimer) {
+      clearInterval(this._pairRefreshTimer);
+      this._pairRefreshTimer = null;
+    }
+
+    // Clear countdown timer
+    if (this._pairCountdownTimer) {
+      clearInterval(this._pairCountdownTimer);
+      this._pairCountdownTimer = null;
+    }
+  }
+
+  /**
+   * Fetch a pairing code from the server and render the QR code SVG.
+   * Also displays detected connection URLs below the QR code.
+   */
+  async loadPairingCode() {
+    const container = document.getElementById('pair-qr-container');
+    const urlsEl = document.getElementById('pair-urls');
+    if (!container) return;
+
+    try {
+      const res = await this.api('GET', '/api/auth/pairing-code');
+
+      // Generate QR SVG using the bundled qrcode library
+      const textColor = getComputedStyle(document.documentElement)
+        .getPropertyValue('--text').trim() || '#cdd6f4';
+
+      const svg = await QRCode.toString(res.qrPayload, {
+        type: 'svg',
+        width: 256,
+        margin: 2,
+        color: {
+          dark: textColor,
+          light: '#00000000'
+        }
+      });
+
+      container.innerHTML = svg;
+
+      // Parse URLs from qrPayload
+      let payload;
+      try {
+        payload = JSON.parse(res.qrPayload);
+      } catch (_) {
+        payload = {};
+      }
+
+      // Render detected connection URLs
+      if (urlsEl && payload.urls) {
+        const urlEntries = Object.entries(payload.urls)
+          .filter(([, v]) => v != null && v !== '');
+
+        if (urlEntries.length > 0) {
+          urlsEl.innerHTML = urlEntries.map(([label, url]) => `
+            <div class="pair-url-row">
+              <span class="pair-url-label">${this.escapeHtml(label)}</span>
+              <span class="pair-url-value" title="${this.escapeHtml(url)}">${this.escapeHtml(url)}</span>
+              <button class="pair-url-copy" data-url="${this.escapeHtml(url)}" title="Copy URL">Copy</button>
+            </div>
+          `).join('');
+
+          // Bind copy buttons
+          urlsEl.querySelectorAll('.pair-url-copy').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              try {
+                await navigator.clipboard.writeText(btn.dataset.url);
+                btn.textContent = 'Copied';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+              } catch (_) {
+                this.showToast('Failed to copy URL', 'error');
+              }
+            });
+          });
+        } else {
+          urlsEl.innerHTML = '';
+        }
+      }
+
+      // Store expiry for countdown
+      this._pairExpiresAt = res.expiresAt ? new Date(res.expiresAt) : null;
+      this._startPairCountdown();
+
+    } catch (err) {
+      container.innerHTML = `<div class="pair-qr-placeholder" style="color: var(--red);">
+        Failed to load pairing code: ${this.escapeHtml(err.message)}
+      </div>`;
+    }
+  }
+
+  /**
+   * Start or restart the countdown timer showing time until QR auto-refresh.
+   * Updates the pair-timer element every second.
+   */
+  _startPairCountdown() {
+    const timerEl = document.getElementById('pair-timer');
+    if (!timerEl) return;
+
+    // Clear previous countdown
+    if (this._pairCountdownTimer) {
+      clearInterval(this._pairCountdownTimer);
+    }
+
+    const update = () => {
+      if (!this._pairExpiresAt) {
+        timerEl.textContent = '';
+        return;
+      }
+      const remaining = Math.max(0, Math.floor((this._pairExpiresAt.getTime() - Date.now()) / 1000));
+      const mins = Math.floor(remaining / 60);
+      const secs = remaining % 60;
+      timerEl.textContent = remaining > 0
+        ? `Refreshes in ${mins}:${String(secs).padStart(2, '0')}`
+        : 'Refreshing...';
+    };
+
+    update();
+    this._pairCountdownTimer = setInterval(update, 1000);
+  }
+
+  /**
+   * Load paired devices from the server and render the device list.
+   * Each device shows name, platform, online status, push status, and action buttons.
+   */
+  async loadPairedDevices() {
+    const listEl = document.getElementById('pair-devices-list');
+    if (!listEl) return;
+
+    try {
+      const res = await this.api('GET', '/api/devices');
+      const devices = res.devices || [];
+
+      if (devices.length === 0) {
+        listEl.innerHTML = '<div class="pair-devices-empty">No paired devices</div>';
+        return;
+      }
+
+      listEl.innerHTML = devices.map(d => {
+        const platformIcon = d.platform === 'ios' ? '\uD83D\uDCF1' : '\uD83E\uDD16';
+        const onlineClass = d.isOnline ? 'online' : '';
+        const pairedTime = d.pairedAt ? this.relativeTime(d.pairedAt) : 'unknown';
+        const lastSeen = d.isOnline ? 'Online' : (d.lastSeenAt ? this.relativeTime(d.lastSeenAt) : 'never');
+        const pushStatus = d.pushToken
+          ? '<span class="push-registered">Registered</span>'
+          : '<span class="push-none">Not registered</span>';
+        const testDisabled = d.pushToken ? '' : 'disabled';
+
+        return `
+          <div class="pair-device-card" data-device-id="${this.escapeHtml(d.deviceId)}">
+            <div class="device-icon">${platformIcon}</div>
+            <div class="device-info">
+              <div class="device-name">
+                <span class="device-online-dot ${onlineClass}"></span>
+                ${this.escapeHtml(d.deviceName || 'Unknown Device')}
+              </div>
+              <div class="device-meta">
+                ${this.escapeHtml(d.platform || 'unknown')} \u00B7 Paired ${pairedTime} \u00B7 ${lastSeen}
+              </div>
+              <div class="device-push-status">
+                Push: ${pushStatus}
+              </div>
+            </div>
+            <div class="device-actions">
+              <button class="btn btn-ghost btn-sm" data-action="test-push" data-device-id="${this.escapeHtml(d.deviceId)}" ${testDisabled}>Test Push</button>
+              <button class="btn btn-ghost btn-sm btn-danger" data-action="revoke" data-device-id="${this.escapeHtml(d.deviceId)}">Revoke</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (err) {
+      listEl.innerHTML = `<div class="pair-devices-empty" style="color: var(--red);">
+        Failed to load devices: ${this.escapeHtml(err.message)}
+      </div>`;
+    }
+  }
+
+  /**
+   * Handle device action button clicks (test-push or revoke).
+   * @param {string} action - 'test-push' or 'revoke'
+   * @param {string} deviceId - The device UUID
+   * @param {HTMLElement} btn - The button that was clicked
+   */
+  async handleDeviceAction(action, deviceId, btn) {
+    if (action === 'test-push') {
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        await this.api('POST', `/api/devices/${deviceId}/test-push`);
+        this.showToast('Test push sent', 'success');
+        btn.textContent = 'Test Push';
+        btn.disabled = false;
+      } catch (err) {
+        this.showToast(`Push failed: ${err.message}`, 'error');
+        btn.textContent = 'Test Push';
+        btn.disabled = false;
+      }
+    } else if (action === 'revoke') {
+      // Find device name from the card
+      const card = btn.closest('.pair-device-card');
+      const nameEl = card ? card.querySelector('.device-name') : null;
+      const deviceName = nameEl ? nameEl.textContent.trim() : 'this device';
+
+      const confirmed = await this.showConfirmModal({
+        title: 'Revoke Device',
+        message: `Revoke <strong>${this.escapeHtml(deviceName)}</strong>? This will disconnect the device immediately.`,
+        confirmText: 'Revoke',
+        confirmClass: 'btn-danger'
+      });
+
+      if (confirmed) {
+        try {
+          await this.api('DELETE', `/api/devices/${deviceId}`);
+          this.showToast('Device revoked', 'success');
+          await this.loadPairedDevices();
+          this.updatePairBadge();
+        } catch (err) {
+          this.showToast(`Revoke failed: ${err.message}`, 'error');
+        }
+      }
+    }
+  }
+
+  /**
+   * Update the pair badge on the header button showing the count of paired devices.
+   * Hides badge if no devices are paired.
+   */
+  async updatePairBadge() {
+    const badge = document.getElementById('pair-badge');
+    if (!badge) return;
+
+    try {
+      const res = await this.api('GET', '/api/devices');
+      const count = (res.devices || []).length;
+      if (count > 0) {
+        badge.textContent = String(count);
+        badge.hidden = false;
+      } else {
+        badge.hidden = true;
+      }
+    } catch (_) {
+      // Silently ignore badge update failures (endpoint may not exist yet)
+      badge.hidden = true;
+    }
   }
 }
 
