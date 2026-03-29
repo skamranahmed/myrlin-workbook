@@ -23,6 +23,8 @@ export default function MoreLayout() {
         contentStyle: { backgroundColor: theme.colors.base },
         animation: 'slide_from_right',
       }}
-    />
+    >
+      <Stack.Screen name="resources" options={{ title: 'Resources' }} />
+    </Stack>
   );
 }
