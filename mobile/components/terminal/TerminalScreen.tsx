@@ -47,6 +47,8 @@ import type { StatusType } from '../ui';
 export interface TerminalScreenProps {
   /** Session UUID to display in the terminal */
   sessionId: string;
+  /** Whether this screen is the active page in a carousel (default true) */
+  isActive?: boolean;
 }
 
 /**
