@@ -36,6 +36,7 @@ const DEFAULT_STATE = {
   templates: {},          // { templateId: { id, name, command, workingDir, ... } }
   features: {},           // { featureId: { id, workspaceId, name, description, status, priority, sessionIds, ... } }
   worktreeTasks: {},      // { taskId: { id, workspaceId, sessionId, featureId, branch, worktreePath, repoDir, description, baseBranch, status, createdAt, completedAt } }
+  pushDevices: [],        // [{ token: string, platform: 'ios' | 'android', registeredAt: string }]
   settings: {
     autoRecover: true,
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
@@ -159,6 +160,7 @@ class Store extends EventEmitter {
         workspaceOrder: parsed.workspaceOrder || [],
         templates: parsed.templates || {},
         features: parsed.features || {},
+        pushDevices: parsed.pushDevices || [],
       };
     } catch (_) {
       return null;
@@ -1088,6 +1090,45 @@ class Store extends EventEmitter {
     Object.assign(this._state.settings, updates);
     this._debouncedSave();
     this.emit('settings:updated', this._state.settings);
+  }
+
+  // ─── Push Device Registry ─────────────────────────────────
+
+  /**
+   * Register a push device token. Deduplicates by token string.
+   * @param {{ token: string, platform: 'ios' | 'android', registeredAt: string }} device
+   */
+  addPushDevice(device) {
+    if (!Array.isArray(this._state.pushDevices)) {
+      this._state.pushDevices = [];
+    }
+    // Deduplicate by token
+    const existing = this._state.pushDevices.findIndex(d => d.token === device.token);
+    if (existing !== -1) {
+      // Update platform and timestamp if re-registering
+      this._state.pushDevices[existing] = device;
+    } else {
+      this._state.pushDevices.push(device);
+    }
+    this._debouncedSave();
+    this.emit('push:registered', device);
+  }
+
+  /**
+   * Remove a push device token from the registry.
+   * @param {string} token - The Expo push token to remove
+   */
+  removePushDevice(token) {
+    if (!Array.isArray(this._state.pushDevices)) {
+      this._state.pushDevices = [];
+      return;
+    }
+    const before = this._state.pushDevices.length;
+    this._state.pushDevices = this._state.pushDevices.filter(d => d.token !== token);
+    if (this._state.pushDevices.length !== before) {
+      this._debouncedSave();
+      this.emit('push:unregistered', { token });
+    }
   }
 
   // ─── Cleanup ─────────────────────────────────────────────
