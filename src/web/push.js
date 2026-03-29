@@ -160,6 +160,113 @@ function setupPushRoutes(app, requireAuth, getStore) {
 
     return res.json({ success: true });
   });
+
+  // ─── Push Preference Endpoints ──────────────────────────────
+
+  /**
+   * Known push preference keys for validation.
+   * All values must be boolean.
+   */
+  const VALID_PREF_KEYS = [
+    'sessionComplete', 'sessionNeedsInput', 'fileConflicts',
+    'taskReview', 'serverOnline',
+  ];
+
+  /**
+   * Extract the Bearer token string from the Authorization header.
+   * @param {import('express').Request} req - Express request
+   * @returns {string|null} Token string or null
+   */
+  function extractToken(req) {
+    const header = req.headers.authorization || '';
+    const parts = header.split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+      return parts[1];
+    }
+    return null;
+  }
+
+  /**
+   * GET /api/push/preferences
+   * Returns the calling device's push notification preferences.
+   * Device is identified by the Bearer token in the Authorization header.
+   * Returns: { preferences: Object }
+   */
+  app.get('/api/push/preferences', requireAuth, (req, res) => {
+    const store = getStore();
+    const token = extractToken(req);
+    if (!token) {
+      return res.status(400).json({ error: 'Missing authorization token' });
+    }
+
+    const device = store.findDeviceByToken(token);
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found for this token' });
+    }
+
+    return res.json({ preferences: device.pushPreferences || {} });
+  });
+
+  /**
+   * PUT /api/push/preferences
+   * Updates the calling device's push notification preferences.
+   * Performs a partial merge with existing preferences.
+   * Body: { preferences: { sessionComplete?: boolean, ... } }
+   * Returns: { preferences: Object }
+   */
+  app.put('/api/push/preferences', requireAuth, (req, res) => {
+    const store = getStore();
+    const token = extractToken(req);
+    if (!token) {
+      return res.status(400).json({ error: 'Missing authorization token' });
+    }
+
+    const device = store.findDeviceByToken(token);
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found for this token' });
+    }
+
+    // Accept preferences at top level or nested under .preferences
+    const rawPrefs = (req.body && req.body.preferences) || req.body || {};
+
+    // Validate: must be a plain object
+    if (!rawPrefs || typeof rawPrefs !== 'object' || Array.isArray(rawPrefs)) {
+      return res.status(400).json({
+        error: 'preferences must be an object with known keys and boolean values',
+      });
+    }
+
+    // Validate each key and value
+    const validated = {};
+    for (const key of Object.keys(rawPrefs)) {
+      // Skip the "preferences" key if they double-nested
+      if (key === 'preferences') continue;
+
+      if (!VALID_PREF_KEYS.includes(key)) {
+        return res.status(400).json({
+          error: `Unknown preference key: "${key}". Valid keys: ${VALID_PREF_KEYS.join(', ')}`,
+        });
+      }
+      if (typeof rawPrefs[key] !== 'boolean') {
+        return res.status(400).json({
+          error: `Preference "${key}" must be a boolean, got ${typeof rawPrefs[key]}`,
+        });
+      }
+      validated[key] = rawPrefs[key];
+    }
+
+    if (Object.keys(validated).length === 0) {
+      return res.status(400).json({
+        error: `No valid preference keys provided. Valid keys: ${VALID_PREF_KEYS.join(', ')}`,
+      });
+    }
+
+    // Merge with existing preferences
+    const merged = { ...(device.pushPreferences || {}), ...validated };
+    store.updatePairedDevice(device.deviceId, { pushPreferences: merged });
+
+    return res.json({ preferences: merged });
+  });
 }
 
 // ─── Event Listeners ─────────────────────────────────────────
