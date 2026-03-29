@@ -51,6 +51,7 @@
     "chrome-remote-interface": "^0.34.0",
     "express": "^5.2.1",
     "node-pty": "^1.1.0",
+    "qrcode": "^1.5.4",
     "ws": "^8.19.0"
   },
   "devDependencies": {
