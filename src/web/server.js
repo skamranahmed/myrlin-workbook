@@ -15,7 +15,7 @@ const { execFile, execSync } = require('child_process');
 const express = require('express');
 
 const { setupAuth, requireAuth, isValidToken, addToken, generateToken, isRateLimited, reloadTokensFromStore, setStoreGetter } = require('./auth');
-const { setupPairing } = require('./pairing');
+const { setupPairing, detectAllUrls } = require('./pairing');
 const { setupPushRoutes, setupPushListeners } = require('./push');
 const { setupDeviceRoutes } = require('./device-manager');
 const { getStore } = require('../state/store');
@@ -916,41 +916,90 @@ app.post('/api/groups/:id/add', requireAuth, (req, res) => {
 
 /**
  * GET /api/sessions
- * Query params:
+ * Supports two modes of operation for backward compatibility:
+ *
+ * Legacy mode (when `mode` param is present):
  *   mode=all          All sessions (default)
  *   mode=workspace    Sessions for a specific workspace (requires workspaceId)
  *   mode=recent       Recently used sessions (optional count)
  *   workspaceId=xxx   Required when mode=workspace
  *   count=N           Number of recent sessions to return (default 10)
+ *   Returns: { sessions }
+ *
+ * Paginated mode (when any pagination param is present without `mode`):
+ *   limit=N           Max results per page (default 50, max 100)
+ *   offset=N          Skip N results (default 0)
+ *   status=string     Filter: running, stopped, error, idle, all (default all)
+ *   sort=string       Sort by: lastActive (default), name, created
+ *   order=string      Sort direction: asc, desc (default desc)
+ *   search=string     Case-insensitive substring match on name and topic
+ *   workspaceId=xxx   Filter to sessions in a specific workspace
+ *   Returns: { sessions, pagination: { total, limit, offset, hasMore } }
  */
 app.get('/api/sessions', requireAuth, (req, res) => {
   const store = getStore();
-  const mode = req.query.mode || 'all';
 
-  let sessions;
+  // Detect whether to use legacy mode or paginated mode
+  const hasMode = req.query.mode != null;
+  const hasPaginationParams = req.query.limit || req.query.offset ||
+    req.query.status || req.query.sort || req.query.order ||
+    req.query.search || (req.query.workspaceId && !hasMode);
 
-  switch (mode) {
-    case 'workspace': {
-      const { workspaceId } = req.query;
-      if (!workspaceId) {
-        return res.status(400).json({ error: 'workspaceId query parameter is required when mode=workspace.' });
+  // Legacy mode: preserve existing behavior when mode param is present
+  if (hasMode && !hasPaginationParams) {
+    const mode = req.query.mode;
+    let sessions;
+
+    switch (mode) {
+      case 'workspace': {
+        const { workspaceId } = req.query;
+        if (!workspaceId) {
+          return res.status(400).json({ error: 'workspaceId query parameter is required when mode=workspace.' });
+        }
+        sessions = store.getWorkspaceSessions(workspaceId);
+        break;
       }
-      sessions = store.getWorkspaceSessions(workspaceId);
-      break;
+
+      case 'recent': {
+        const count = parseInt(req.query.count, 10) || 10;
+        sessions = store.getRecentSessions(count);
+        break;
+      }
+
+      case 'all':
+      default:
+        sessions = store.getAllSessionsList();
+        break;
     }
 
-    case 'recent': {
-      const count = parseInt(req.query.count, 10) || 10;
-      sessions = store.getRecentSessions(count);
-      break;
-    }
-
-    case 'all':
-    default:
-      sessions = store.getAllSessionsList();
-      break;
+    return res.json({ sessions });
   }
 
+  // Paginated mode: use getPaginatedSessions when any pagination param is present
+  if (hasPaginationParams) {
+    const result = store.getPaginatedSessions({
+      limit: req.query.limit,
+      offset: req.query.offset,
+      status: req.query.status,
+      sort: req.query.sort,
+      order: req.query.order,
+      search: req.query.search,
+      workspaceId: req.query.workspaceId,
+    });
+
+    return res.json({
+      sessions: result.sessions,
+      pagination: {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        hasMore: result.hasMore,
+      },
+    });
+  }
+
+  // Default (no params at all): return all sessions for backward compatibility
+  const sessions = store.getAllSessionsList();
   return res.json({ sessions });
 });
 

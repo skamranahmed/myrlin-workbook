@@ -372,6 +372,84 @@ class Store extends EventEmitter {
     );
   }
 
+  /**
+   * Get sessions with pagination, filtering, sorting, and search.
+   * Returns a subset of sessions plus pagination metadata.
+   *
+   * @param {Object} options - Query options
+   * @param {number} [options.limit=50] - Max sessions to return (clamped 1-100)
+   * @param {number} [options.offset=0] - Number of sessions to skip (min 0)
+   * @param {string} [options.status='all'] - Filter by status: running, stopped, error, idle, or all
+   * @param {string} [options.sort='lastActive'] - Sort field: lastActive, name, or created
+   * @param {string} [options.order='desc'] - Sort direction: asc or desc
+   * @param {string} [options.search] - Case-insensitive substring match on name and topic
+   * @param {string} [options.workspaceId] - Filter to sessions in a specific workspace
+   * @returns {{ sessions: Array, total: number, limit: number, offset: number, hasMore: boolean }}
+   */
+  getPaginatedSessions(options = {}) {
+    const limit = Math.min(100, Math.max(1, parseInt(options.limit, 10) || 50));
+    const offset = Math.max(0, parseInt(options.offset, 10) || 0);
+    const status = options.status || 'all';
+    const sort = options.sort || 'lastActive';
+    const order = options.order || 'desc';
+    const search = options.search ? options.search.toLowerCase() : null;
+    const workspaceId = options.workspaceId || null;
+
+    // Start with all sessions
+    let filtered = Object.values(this._state.sessions);
+
+    // Filter by workspaceId
+    if (workspaceId) {
+      filtered = filtered.filter(s => s.workspaceId === workspaceId);
+    }
+
+    // Filter by status
+    if (status !== 'all') {
+      filtered = filtered.filter(s => s.status === status);
+    }
+
+    // Filter by search (case-insensitive substring on name and topic)
+    if (search) {
+      filtered = filtered.filter(s => {
+        const name = (s.name || '').toLowerCase();
+        const topic = (s.topic || '').toLowerCase();
+        return name.includes(search) || topic.includes(search);
+      });
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      let cmp = 0;
+      switch (sort) {
+        case 'name':
+          cmp = (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+          break;
+        case 'created':
+          cmp = new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+          break;
+        case 'lastActive':
+        default:
+          cmp = new Date(a.lastActive || a.createdAt || 0) - new Date(b.lastActive || b.createdAt || 0);
+          break;
+      }
+      return order === 'asc' ? cmp : -cmp;
+    });
+
+    // Calculate total before slicing
+    const total = filtered.length;
+
+    // Slice for pagination
+    const sessions = filtered.slice(offset, offset + limit);
+
+    return {
+      sessions,
+      total,
+      limit,
+      offset,
+      hasMore: (offset + sessions.length) < total,
+    };
+  }
+
   // ─── Workspace CRUD ──────────────────────────────────────
 
   createWorkspace({ name, description = '', color = 'cyan' }) {
