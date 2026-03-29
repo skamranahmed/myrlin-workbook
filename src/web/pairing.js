@@ -12,6 +12,7 @@
  */
 
 const crypto = require('crypto');
+const os = require('os');
 const path = require('path');
 
 // ─── Configuration ─────────────────────────────────────────
@@ -34,6 +35,63 @@ setInterval(() => {
     }
   }
 }, 2 * 60 * 1000).unref();
+
+// ─── URL Detection Helpers ─────────────────────────────────
+
+/**
+ * Detect the first non-internal LAN IPv4 address and return an HTTP URL.
+ * Skips loopback (127.x) and Tailscale CGNAT (100.x) addresses.
+ * @param {number} port - The server port
+ * @returns {string|null} URL like http://192.168.1.5:3456, or null if none found
+ */
+function detectLanIP(port) {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        // Skip Tailscale CGNAT range (100.64.0.0/10 per RFC 6598)
+        if (iface.address.startsWith('100.')) continue;
+        return `http://${iface.address}:${port}`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect a Tailscale IPv4 address (100.x.x.x CGNAT range) and return an HTTP URL.
+ * @param {number} port - The server port
+ * @returns {string|null} URL like http://100.64.22.118:3456, or null if not on Tailscale
+ */
+function detectTailscaleIP(port) {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal && iface.address.startsWith('100.')) {
+        return `http://${iface.address}:${port}`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect all available connection URLs for the server.
+ * Returns an object with local, LAN, Tailscale, tunnel, and custom URLs.
+ * @param {number} port - The server port
+ * @param {Object} store - Store instance (or object with state.settings)
+ * @returns {{ local: string, lan: string|null, tailscale: string|null, tunnel: string|null, custom: string|null }}
+ */
+function detectAllUrls(port, store) {
+  const settings = (store && store.state && store.state.settings) || {};
+  return {
+    local: `http://localhost:${port}`,
+    lan: detectLanIP(port),
+    tailscale: detectTailscaleIP(port),
+    tunnel: settings.tunnelUrl || null,
+    custom: settings.externalUrl || null,
+  };
+}
 
 // ─── Route Setup ───────────────────────────────────────────
 
@@ -82,10 +140,17 @@ function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited
     });
 
     const expiresAt = new Date(Date.now() + PAIRING_TTL_MS).toISOString();
-    const serverUrl = req.query.url || (req.protocol + '://' + req.get('host'));
+    const port = req.socket.localPort || 3456;
+    const store = getStore ? getStore() : { state: { settings: {} } };
+    const urls = detectAllUrls(port, store);
+
+    // Primary URL preference: custom > tunnel > lan > local
+    const primaryUrl = req.query.url || urls.custom || urls.tunnel || urls.lan || urls.local;
 
     const qrPayload = JSON.stringify({
-      url: serverUrl,
+      url: primaryUrl,
+      urls,
+      primaryUrl,
       pairingToken,
       serverName: serverInfo.name,
       version: serverInfo.version,
@@ -203,6 +268,7 @@ function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited
         terminal: true,
         search: true,
         costTracking: true,
+        aiSearch: !!process.env.ANTHROPIC_API_KEY,
       },
     });
   });
@@ -212,6 +278,7 @@ function setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited
 
 module.exports = {
   setupPairing,
+  detectAllUrls,
   _pairingTokens: pairingTokens,
   _PAIRING_TTL_MS: PAIRING_TTL_MS,
 };
