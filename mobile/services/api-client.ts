@@ -36,6 +36,8 @@ import {
   APIError,
 } from '../types/api';
 
+import { enqueueAction } from '../utils/offline';
+
 /**
  * Typed HTTP client for communicating with a Myrlin Workbook server.
  *
@@ -96,11 +98,27 @@ export class MyrlinAPIClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(url, {
-      ...options,
-      method,
-      headers,
-    });
+    /** Mutation methods eligible for offline queueing */
+    const isMutation = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        method,
+        headers,
+      });
+    } catch (err) {
+      // Network-level failure (no connectivity, DNS failure, abort).
+      // Queue mutation requests for later replay; rethrow for GETs
+      // since TanStack Query serves those from cache.
+      if (isMutation) {
+        const body = options.body ? JSON.parse(options.body as string) : undefined;
+        enqueueAction({ method, url, body });
+        return { queued: true } as T;
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const body = await response.text();

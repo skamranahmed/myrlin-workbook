@@ -10,7 +10,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -18,6 +18,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useConnectionHealth } from '@/hooks/useConnectionHealth';
 import { ConnectionDot } from '@/components/ConnectionDot';
 import { ServerMenu } from '@/components/ServerMenu';
+import { OfflineBanner } from '@/components/OfflineBanner';
 import { fonts } from '@/theme/fonts';
 
 /** Icon name mapping for each tab */
@@ -75,7 +76,8 @@ export default function TabLayout() {
   );
 
   return (
-    <>
+    <View style={{ flex: 1 }}>
+    <OfflineBanner />
     <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="sessions"
@@ -127,6 +129,6 @@ export default function TabLayout() {
       visible={serverMenuVisible}
       onClose={() => setServerMenuVisible(false)}
     />
-    </>
+    </View>
   );
 }
