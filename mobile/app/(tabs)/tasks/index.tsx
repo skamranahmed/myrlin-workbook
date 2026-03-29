@@ -6,8 +6,8 @@
  * while loading and EmptyState when no tasks exist.
  */
 
-import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
@@ -33,9 +33,14 @@ const SEGMENTS = ['Board', 'List'];
  */
 export default function TasksScreen() {
   const { theme } = useTheme();
-  const { data, isLoading } = useTasks();
+  const { data, isLoading, isRefetching, refetch } = useTasks();
   const [viewIndex, setViewIndex] = useState(0);
   const [createVisible, setCreateVisible] = useState(false);
+
+  /** Pull-to-refresh handler for the tasks screen */
+  const handleRefresh = useCallback(() => {
+    refetch();
+  }, [refetch]);
 
   const tasks = data?.tasks ?? [];
 
@@ -53,36 +58,50 @@ export default function TasksScreen() {
         />
       </View>
 
-      {/* Loading state */}
-      {isLoading && (
-        <View style={styles.skeletonContainer}>
-          <Skeleton width="100%" height={120} />
-          <Skeleton width="100%" height={120} />
-          <Skeleton width="100%" height={80} />
-        </View>
-      )}
+      {/* Scrollable content with pull-to-refresh */}
+      <ScrollView
+        style={styles.scrollContent}
+        contentContainerStyle={styles.scrollContentContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={handleRefresh}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+          />
+        }
+      >
+        {/* Loading state */}
+        {isLoading && (
+          <View style={styles.skeletonContainer}>
+            <Skeleton width="100%" height={120} />
+            <Skeleton width="100%" height={120} />
+            <Skeleton width="100%" height={80} />
+          </View>
+        )}
 
-      {/* Empty state */}
-      {!isLoading && tasks.length === 0 && (
-        <EmptyState
-          title="No tasks yet"
-          description="Create a worktree task to start managing branches from mobile."
-          action={{
-            label: 'Create Task',
-            onPress: () => setCreateVisible(true),
-          }}
-        />
-      )}
+        {/* Empty state */}
+        {!isLoading && tasks.length === 0 && (
+          <EmptyState
+            title="No tasks yet"
+            description="Create a worktree task to start managing branches from mobile."
+            action={{
+              label: 'Create Task',
+              onPress: () => setCreateVisible(true),
+            }}
+          />
+        )}
 
-      {/* Board view */}
-      {!isLoading && tasks.length > 0 && viewIndex === 0 && (
-        <TaskBoard tasks={tasks} />
-      )}
+        {/* Board view */}
+        {!isLoading && tasks.length > 0 && viewIndex === 0 && (
+          <TaskBoard tasks={tasks} />
+        )}
 
-      {/* List view */}
-      {!isLoading && tasks.length > 0 && viewIndex === 1 && (
-        <TaskList tasks={tasks} />
-      )}
+        {/* List view */}
+        {!isLoading && tasks.length > 0 && viewIndex === 1 && (
+          <TaskList tasks={tasks} />
+        )}
+      </ScrollView>
 
       <CreateTaskSheet
         visible={createVisible}
@@ -100,6 +119,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 4,
+  },
+  scrollContent: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
   },
   skeletonContainer: {
     padding: 16,

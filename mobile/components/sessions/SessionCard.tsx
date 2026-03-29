@@ -16,6 +16,7 @@ import { View, Text, Pressable, StyleSheet, type ViewStyle } from 'react-native'
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticImpact } from '@/utils/haptics';
 import { StatusDot, Badge, Chip } from '@/components/ui';
 import { ActivityIndicator } from './ActivityIndicator';
 import type { Session } from '@/types/api';
@@ -88,8 +89,14 @@ const SessionCard = memo<SessionCardProps>(function SessionCard({
   const { theme } = useTheme();
   const { colors, spacing, radius, typography } = theme;
 
-  const handlePress = useCallback(() => onPress(session.id), [session.id, onPress]);
-  const handleLongPress = useCallback(() => onLongPress(session.id), [session.id, onLongPress]);
+  const handlePress = useCallback(() => {
+    hapticImpact('light');
+    onPress(session.id);
+  }, [session.id, onPress]);
+  const handleLongPress = useCallback(() => {
+    hapticImpact('medium');
+    onLongPress(session.id);
+  }, [session.id, onLongPress]);
 
   // Determine if session needs input (idle status is the proxy)
   const needsInput = session.status === 'idle';

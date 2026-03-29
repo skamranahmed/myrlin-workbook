@@ -16,6 +16,7 @@ import {
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticSelection } from '@/utils/haptics';
 
 export interface SegmentedControlProps {
   /** Segment labels */
@@ -72,7 +73,10 @@ export function SegmentedControl({
         return (
           <Pressable
             key={label}
-            onPress={() => onSelect(index)}
+            onPress={() => {
+              hapticSelection();
+              onSelect(index);
+            }}
             style={segmentStyle}
           >
             <Text style={textStyle}>{label}</Text>

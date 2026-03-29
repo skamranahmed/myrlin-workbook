@@ -10,6 +10,7 @@ import { Switch, Text, View, type ViewStyle, type TextStyle } from 'react-native
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticSelection } from '@/utils/haptics';
 
 export interface ToggleProps {
   /** Current toggle state */
@@ -75,7 +76,10 @@ export function Toggle({ value, onValueChange, label, description }: ToggleProps
       </View>
       <Switch
         value={value}
-        onValueChange={onValueChange}
+        onValueChange={(val: boolean) => {
+          hapticSelection();
+          onValueChange(val);
+        }}
         trackColor={{
           false: colors.surface1,
           true: colors.accent,

@@ -29,6 +29,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 
 import { useTheme } from '../../hooks/useTheme';
+import { hapticImpact } from '../../utils/haptics';
 import type { ToWebView } from '../../types/terminal';
 
 /** Props for the TerminalToolbar component */
@@ -165,7 +166,10 @@ export function TerminalToolbar({
         {buttons.map((button) => (
           <Pressable
             key={button.label}
-            onPress={button.onPress}
+            onPress={() => {
+              hapticImpact('light');
+              button.onPress();
+            }}
             style={({ pressed }) => [
               styles.button,
               {

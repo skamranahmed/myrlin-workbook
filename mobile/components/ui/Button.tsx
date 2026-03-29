@@ -18,6 +18,7 @@ import {
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticImpact } from '@/utils/haptics';
 import type { MyrlinTheme } from '@/theme/types';
 
 /** Button visual variants */
@@ -131,7 +132,10 @@ export function Button({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        hapticImpact(variant === 'danger' ? 'medium' : 'light');
+        onPress?.();
+      }}
       disabled={disabled || loading}
       style={({ pressed }) => [
         containerStyle,

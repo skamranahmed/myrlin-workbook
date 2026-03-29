@@ -11,6 +11,7 @@ import { Pressable, Text, View, type ViewStyle, type TextStyle } from 'react-nat
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticImpact } from '@/utils/haptics';
 
 /** Single action item in the sheet */
 export interface ActionSheetAction {
@@ -121,6 +122,7 @@ export function ActionSheet({ visible, onClose, actions }: ActionSheetProps) {
                 <Pressable
                   key={action.label}
                   onPress={() => {
+                    hapticImpact('light');
                     action.onPress();
                     onClose();
                   }}

@@ -11,6 +11,7 @@ import { Pressable, Text, type ViewStyle, type TextStyle } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
 import { fonts } from '@/theme/fonts';
+import { hapticSelection } from '@/utils/haptics';
 
 export interface ChipProps {
   /** Chip label text */
@@ -56,7 +57,10 @@ export function Chip({ label, selected = false, onPress, color }: ChipProps) {
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        hapticSelection();
+        onPress?.();
+      }}
       style={({ pressed }) => [containerStyle, { opacity: pressed ? 0.85 : 1 }]}
     >
       <Text style={textStyle}>{label}</Text>
