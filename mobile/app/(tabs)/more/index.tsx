@@ -28,6 +28,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useTheme } from '@/hooks/useTheme';
 import { useAPIClient } from '@/hooks/useAPIClient';
+import { useServerStore } from '@/stores/server-store';
 import { fonts } from '@/theme/fonts';
 import { Badge } from '@/components/ui';
 
@@ -122,6 +123,7 @@ export default function MoreScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const client = useAPIClient();
+  const serverCount = useServerStore((s) => s.servers.length);
 
   // Fetch conflict count for badge
   const conflictsQuery = useQuery({
@@ -179,8 +181,25 @@ export default function MoreScreen() {
           },
         ],
       },
+      {
+        title: 'Settings',
+        items: [
+          {
+            icon: 'server-outline',
+            label: 'Servers',
+            route: '/more/servers',
+            badge: serverCount > 0 ? String(serverCount) : undefined,
+            badgeVariant: 'info' as const,
+          },
+          {
+            icon: 'settings-outline',
+            label: 'Settings',
+            route: '/more/settings',
+          },
+        ],
+      },
     ],
-    [conflictCount]
+    [conflictCount, serverCount]
   );
 
   return (

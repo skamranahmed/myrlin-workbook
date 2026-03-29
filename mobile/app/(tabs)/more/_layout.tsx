@@ -25,6 +25,8 @@ export default function MoreLayout() {
       }}
     >
       <Stack.Screen name="resources" options={{ title: 'Resources' }} />
+      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+      <Stack.Screen name="servers" options={{ title: 'Servers' }} />
     </Stack>
   );
 }
