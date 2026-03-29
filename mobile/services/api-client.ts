@@ -32,6 +32,7 @@ import {
   type TaskChanges,
   type CostPeriod,
   type CostDashboardResponse,
+  type PushRegisterInput,
   APIError,
 } from '../types/api';
 
@@ -813,6 +814,32 @@ export class MyrlinAPIClient {
    */
   async getTaskChanges(id: string): Promise<TaskChanges> {
     return this._fetch(`/api/worktree-tasks/${id}/changes`);
+  }
+
+  // ─── Push Notifications ─────────────────────────────────
+
+  /**
+   * Register a device push token with the server for notifications.
+   * @param data - Push token and platform
+   * @returns Success indicator
+   */
+  async registerPush(data: PushRegisterInput): Promise<{ success: boolean }> {
+    return this._fetch('/api/push/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Unregister a device push token from the server.
+   * @param deviceToken - The Expo push token to remove
+   * @returns Success indicator
+   */
+  async unregisterPush(deviceToken: string): Promise<{ success: boolean }> {
+    return this._fetch('/api/push/unregister', {
+      method: 'POST',
+      body: JSON.stringify({ deviceToken }),
+    });
   }
 }
 

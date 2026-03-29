@@ -36,6 +36,8 @@ interface ServerStoreState {
   connectionStatus: ConnectionStatus;
   /** Whether the store has completed hydration from SecureStore */
   _hasHydrated: boolean;
+  /** Current Expo push token for this device (transient, not persisted) */
+  pushToken: string | null;
 }
 
 /** Store actions */
@@ -48,6 +50,8 @@ interface ServerStoreActions {
   removeServer: (id: string) => void;
   /** Switch the active server to a different one by ID */
   switchServer: (id: string) => void;
+  /** Rename a server by ID */
+  renameServer: (id: string, name: string) => void;
   /** Update the connection status of the active server */
   setConnectionStatus: (status: ConnectionStatus) => void;
   /** Update the Bearer token for a specific server */
@@ -56,6 +60,8 @@ interface ServerStoreActions {
   logout: (serverId: string) => void;
   /** Set the hydration completion flag */
   setHasHydrated: (val: boolean) => void;
+  /** Store the current device push token (or clear it with null) */
+  setPushToken: (token: string | null) => void;
 }
 
 /**
@@ -78,6 +84,7 @@ export const useServerStore = create<ServerStoreState & ServerStoreActions>()(
       activeServerId: null,
       connectionStatus: 'disconnected' as ConnectionStatus,
       _hasHydrated: false,
+      pushToken: null,
 
       // ─── Derived ───────────────────────────────────
 
@@ -149,6 +156,19 @@ export const useServerStore = create<ServerStoreState & ServerStoreActions>()(
       },
 
       /**
+       * Rename a paired server by ID.
+       * @param id - Server ID to rename
+       * @param name - New display name
+       */
+      renameServer: (id, name) => {
+        set((state) => ({
+          servers: state.servers.map((s) =>
+            s.id === id ? { ...s, name } : s
+          ),
+        }));
+      },
+
+      /**
        * Update the connection status of the active server.
        * @param status - New connection status
        */
@@ -194,6 +214,16 @@ export const useServerStore = create<ServerStoreState & ServerStoreActions>()(
        */
       setHasHydrated: (val) => {
         set({ _hasHydrated: val });
+      },
+
+      /**
+       * Store or clear the current device Expo push token.
+       * Used by the push hook to track the registered token for
+       * unregistration when switching servers.
+       * @param token - Expo push token string, or null to clear
+       */
+      setPushToken: (token) => {
+        set({ pushToken: token });
       },
     }),
     {

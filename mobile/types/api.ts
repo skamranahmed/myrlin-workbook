@@ -640,6 +640,26 @@ export interface CostDashboardResponse {
   }>;
 }
 
+// ─── Push Notifications ───────────────────────────────────
+
+/** Input for registering a device push token with the server */
+export interface PushRegisterInput {
+  /** Expo push token string */
+  deviceToken: string;
+  /** Device platform */
+  platform: 'ios' | 'android';
+}
+
+/** Push notification data payload sent from the server */
+export interface PushNotificationData {
+  /** Type of event that triggered the notification */
+  type: 'session' | 'task' | 'conflict';
+  /** Session ID (present for session events) */
+  sessionId?: string;
+  /** Task ID (present for task events) */
+  taskId?: string;
+}
+
 // ─── Errors ────────────────────────────────────────────────
 
 /**

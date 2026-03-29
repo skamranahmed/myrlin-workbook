@@ -22,6 +22,7 @@
     "expo-image-picker": "^55.0.15-canary-20260328-bdc6273",
     "expo-linking": "55.0.10-canary-20260328-bdc6273",
     "expo-local-authentication": "^55.0.10-canary-20260328-bdc6273",
+    "expo-notifications": "^55.0.15-canary-20260328-bdc6273",
     "expo-router": "55.0.9-canary-20260328-bdc6273",
     "expo-secure-store": "^55.0.10-canary-20260328-bdc6273",
     "expo-splash-screen": "55.0.14-canary-20260328-bdc6273",
