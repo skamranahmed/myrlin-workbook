@@ -389,6 +389,54 @@ function setupAuth(app) {
 
     return res.json({ authenticated });
   });
+
+  /**
+   * POST /api/auth/refresh
+   * Exchanges a valid device Bearer token for a new one.
+   * Only works for device tokens (found in pairedDevices), not browser session tokens.
+   * The old token is invalidated immediately; the new token has a 90-day expiry.
+   *
+   * Requires: Authorization: Bearer <current-device-token>
+   * Returns: { token: string, expiresAt: string, deviceId: string }
+   */
+  app.post('/api/auth/refresh', requireAuth, (req, res) => {
+    // Rate limit refresh attempts
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    if (isRateLimited(clientIp)) {
+      return res.status(429).json({
+        error: 'Too many requests. Try again in 1 minute.',
+      });
+    }
+
+    // Only device tokens can be refreshed, not browser session tokens
+    if (!_getStore) {
+      return res.status(500).json({ error: 'Store not available' });
+    }
+    const store = _getStore();
+    const device = store.findDeviceByToken(req.authToken);
+    if (!device) {
+      return res.status(403).json({
+        error: 'Token refresh is only available for paired device tokens.',
+      });
+    }
+
+    // Generate new token and swap in activeTokens
+    const newToken = generateToken();
+    activeTokens.delete(req.authToken);
+    activeTokens.add(newToken);
+
+    // Calculate new expiry: 90 days from now
+    const newExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Persist the new token in the store
+    store.refreshDeviceToken(device.deviceId, newToken, newExpiresAt);
+
+    return res.json({
+      token: newToken,
+      expiresAt: newExpiresAt,
+      deviceId: device.deviceId,
+    });
+  });
 }
 
 /**

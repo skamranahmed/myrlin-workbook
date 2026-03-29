@@ -1291,6 +1291,25 @@ class Store extends EventEmitter {
   }
 
   /**
+   * Refresh a paired device's token and expiration.
+   * Replaces the old token with a new one and updates expiresAt.
+   * @param {string} deviceId - Device to refresh
+   * @param {string} newToken - Replacement Bearer token
+   * @param {string} newExpiresAt - New ISO expiration timestamp
+   * @returns {Object|null} Updated device or null if not found
+   */
+  refreshDeviceToken(deviceId, newToken, newExpiresAt) {
+    if (!Array.isArray(this._state.pairedDevices)) return null;
+    const device = this._state.pairedDevices.find(d => d.deviceId === deviceId);
+    if (!device) return null;
+    device.token = newToken;
+    device.expiresAt = newExpiresAt;
+    this._debouncedSave();
+    this.emit('device:refreshed', device);
+    return device;
+  }
+
+  /**
    * Remove all expired paired devices (expiresAt in the past).
    * Returns the count of removed devices.
    * @returns {number}
