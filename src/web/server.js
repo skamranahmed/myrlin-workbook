@@ -307,6 +307,48 @@ setupDeviceRoutes(app, {
   getSSEClients: () => sseClients,
 });
 
+// ─── Public Server Info (no auth required) ─────────────────
+// Public endpoint for mobile connection testing (no auth)
+
+/**
+ * GET /api/server-info
+ * Returns server identity, capabilities, detected URLs, and basic stats.
+ * No authentication required so mobile clients can test reachability
+ * before completing the pairing flow.
+ */
+app.get('/api/server-info', (req, res) => {
+  const pkg = (() => {
+    try { return require(path.join(__dirname, '..', '..', 'package.json')); }
+    catch (_) { return { name: 'myrlin-workbook', version: '0.0.0' }; }
+  })();
+  const port = req.socket.localPort || 3456;
+  const store = getStore();
+  const urls = detectAllUrls(port, store);
+  const sessions = Object.values(store.state.sessions || {});
+  const runningCount = sessions.filter(s => s.status === 'running').length;
+
+  return res.json({
+    name: pkg.name || 'myrlin-workbook',
+    version: pkg.version || '0.0.0',
+    platform: process.platform,
+    uptime: process.uptime(),
+    capabilities: {
+      push: true,
+      aiSearch: !!process.env.ANTHROPIC_API_KEY,
+      costTracking: true,
+      terminal: true,
+      search: true,
+      tunnel: !!(store.state.settings && store.state.settings.tunnelUrl),
+    },
+    urls,
+    stats: {
+      workspaceCount: Object.keys(store.state.workspaces || {}).length,
+      sessionCount: sessions.length,
+      runningCount,
+    },
+  });
+});
+
 // ─── Protected API Routes ──────────────────────────────────
 // All routes below require a valid Bearer token.
 
