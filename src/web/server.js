@@ -4886,14 +4886,43 @@ app.post('/api/pty/:sessionId/upload-image',
 //  SSE - Server-Sent Events for live updates
 // ──────────────────────────────────────────────────────────
 
-// Track connected SSE clients: clientId -> { res, token }
+// Track connected SSE clients: clientId -> { res, token, deviceId, connectedAt, heartbeatInterval }
 const sseClients = new Map();
 let _sseClientId = 0;
+
+/**
+ * Global event types that should always be sent to all connected clients,
+ * regardless of any workspace-level filtering (prepared for Plan 11-02).
+ */
+const GLOBAL_EVENT_TYPES = new Set([
+  'settings:updated',
+  'group:created',
+  'group:updated',
+  'group:deleted',
+  'workspaces:reordered',
+]);
+
+/**
+ * Dead connection sweep. Runs every 60 seconds to remove SSE clients whose
+ * writable stream ended without triggering the close/error events (common
+ * when mobile devices lose signal or switch networks).
+ */
+const _deadClientSweep = setInterval(() => {
+  for (const [clientId, client] of sseClients) {
+    if (client.res.writableEnded) {
+      clearInterval(client.heartbeatInterval);
+      sseClients.delete(clientId);
+    }
+  }
+}, 60000);
+// Allow the process to exit cleanly without waiting for the sweep timer
+if (_deadClientSweep.unref) _deadClientSweep.unref();
 
 /**
  * GET /api/events
  * Server-Sent Events endpoint. Streams store events to the browser.
  * Protected by auth (token passed as query param or header).
+ * Accepts optional deviceId query param for device-specific tracking.
  */
 app.get('/api/events', (req, res) => {
   // SSE (EventSource) can't set custom headers, so accept token as query param
@@ -4907,6 +4936,9 @@ app.get('/api/events', (req, res) => {
     });
   }
 
+  // Optional deviceId for mobile device tracking
+  const deviceId = req.query.deviceId || null;
+
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -4916,17 +4948,40 @@ app.get('/api/events', (req, res) => {
   // Send initial connection confirmation
   res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
 
-  // Add client to tracking map with auth token for device online detection
+  // Add client to tracking map with auth token, deviceId, and connection time
   const clientId = ++_sseClientId;
-  sseClients.set(clientId, { res, token });
+  const clientRecord = { res, token, deviceId, connectedAt: Date.now(), heartbeatInterval: null };
+  sseClients.set(clientId, clientRecord);
 
-  // Clean up on disconnect
+  // Per-client heartbeat: sends an SSE comment every 30 seconds to keep the
+  // connection alive through proxies and NAT (mobile/cellular). Uses a comment
+  // (`: heartbeat`) instead of a data event so EventSource.onmessage does not fire.
+  const heartbeatInterval = setInterval(() => {
+    if (clientRecord.res.writableEnded) {
+      clearInterval(heartbeatInterval);
+      sseClients.delete(clientId);
+      return;
+    }
+    try {
+      clientRecord.res.write(': heartbeat\n\n');
+    } catch (_) {
+      clearInterval(heartbeatInterval);
+      sseClients.delete(clientId);
+    }
+  }, 30000);
+  // Allow process to exit without waiting for per-client heartbeat timers
+  if (heartbeatInterval.unref) heartbeatInterval.unref();
+  clientRecord.heartbeatInterval = heartbeatInterval;
+
+  // Clean up on disconnect: clear heartbeat before removing client
   req.on('close', () => {
+    clearInterval(sseClients.get(clientId)?.heartbeatInterval);
     sseClients.delete(clientId);
   });
 
   // Also handle request errors (e.g. aborted connections) to prevent stale client references
   req.on('error', () => {
+    clearInterval(sseClients.get(clientId)?.heartbeatInterval);
     sseClients.delete(clientId);
   });
 });
