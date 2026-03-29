@@ -1,0 +1,21 @@
+# session-detail.yaml - Navigates to a session and verifies the detail screen.
+# If no sessions exist, the flow verifies the empty state instead.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: false
+
+# Start on the Sessions tab
+- assertVisible: "Sessions"
+
+# Tap the first session card if available; if empty state is shown that is also valid
+- tapOn:
+    id: "session-card-0"
+    optional: true
+
+# Allow time for navigation transition
+- wait:
+    seconds: 1
+
+# Capture whatever screen is visible (detail or empty state)
+- takeScreenshot: session-detail

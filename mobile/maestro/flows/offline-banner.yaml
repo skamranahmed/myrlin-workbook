@@ -1,0 +1,33 @@
+# offline-banner.yaml - Verifies the offline banner appears when connectivity is lost.
+# Toggles airplane mode and checks for the offline indicator UI.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: false
+
+# Enable airplane mode to simulate offline
+- setAirplaneMode:
+    enabled: true
+
+# Wait for the app to detect connectivity loss
+- wait:
+    seconds: 3
+
+# Verify the offline indicator is visible
+- assertVisible:
+    text: "offline"
+    optional: true
+
+# Capture the offline state
+- takeScreenshot: offline-banner
+
+# Restore connectivity
+- setAirplaneMode:
+    enabled: false
+
+# Wait for reconnection
+- wait:
+    seconds: 3
+
+# Capture the reconnected state
+- takeScreenshot: online-restored

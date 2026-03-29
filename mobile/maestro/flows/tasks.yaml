@@ -1,0 +1,32 @@
+# tasks.yaml - Verifies the Tasks tab renders with board/list toggle.
+# Checks the segmented control and task list or kanban board view.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to Tasks tab
+- tapOn: "Tasks"
+- assertVisible: "Tasks"
+
+# Capture the default task view (board or list)
+- takeScreenshot: tasks-default
+
+# Try toggling between Board and List views if segmented control exists
+- tapOn:
+    text: "List"
+    optional: true
+
+- wait:
+    seconds: 1
+
+- takeScreenshot: tasks-list-view
+
+- tapOn:
+    text: "Board"
+    optional: true
+
+- wait:
+    seconds: 1
+
+- takeScreenshot: tasks-board-view

@@ -1,0 +1,28 @@
+# resources.yaml - Verifies the Resources screen renders with system metrics.
+# Shows CPU, memory, and per-session resource usage.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Resources
+- tapOn: "Resources"
+
+- wait:
+    seconds: 1
+
+# Verify resources screen loaded
+- assertVisible:
+    text: "Resources"
+
+# Scroll to see all resource data
+- scroll:
+    direction: "down"
+    duration: 500
+
+# Capture resources screen
+- takeScreenshot: resources-screen

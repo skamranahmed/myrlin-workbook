@@ -1,0 +1,23 @@
+# conflicts.yaml - Verifies the Conflicts screen renders within the More tab.
+# Shows file conflict detection results or empty state.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Conflicts
+- tapOn: "Conflicts"
+
+- wait:
+    seconds: 1
+
+# Verify conflicts screen loaded
+- assertVisible:
+    text: "Conflicts"
+
+# Capture conflicts screen
+- takeScreenshot: conflicts-screen

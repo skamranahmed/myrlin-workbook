@@ -1,0 +1,23 @@
+# templates.yaml - Verifies the Templates screen renders within the More tab.
+# Shows session templates list or empty state.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Templates
+- tapOn: "Templates"
+
+- wait:
+    seconds: 1
+
+# Verify templates screen loaded
+- assertVisible:
+    text: "Templates"
+
+# Capture templates screen
+- takeScreenshot: templates-screen

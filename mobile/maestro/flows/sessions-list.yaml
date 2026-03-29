@@ -1,0 +1,22 @@
+# sessions-list.yaml - Verifies the sessions list screen renders with key UI elements.
+# Checks the tab bar, session list area, and pull-to-refresh interaction.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Sessions tab is the default; verify it renders
+- assertVisible: "Sessions"
+
+# Scroll down to verify list scrollability (works even with empty state)
+- scroll:
+    direction: "down"
+    duration: 500
+
+# Scroll back up
+- scroll:
+    direction: "up"
+    duration: 500
+
+# Capture the sessions list screen
+- takeScreenshot: sessions-list

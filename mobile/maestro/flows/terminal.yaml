@@ -1,0 +1,28 @@
+# terminal.yaml - Verifies the terminal screen renders its WebView container.
+# Requires a session to be available; captures the terminal UI.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: false
+
+# Navigate to Sessions tab
+- assertVisible: "Sessions"
+
+# Attempt to open the first session
+- tapOn:
+    id: "session-card-0"
+    optional: true
+
+- wait:
+    seconds: 1
+
+# Look for a terminal launch button or terminal area
+- tapOn:
+    text: "Terminal"
+    optional: true
+
+- wait:
+    seconds: 2
+
+# Capture the terminal screen (or whatever is visible)
+- takeScreenshot: terminal-screen

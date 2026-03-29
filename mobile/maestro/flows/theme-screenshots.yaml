@@ -1,0 +1,67 @@
+# theme-screenshots.yaml - Captures screenshots of all 4 Catppuccin theme flavors.
+# Navigates to Settings, switches each theme, then captures the Sessions screen
+# for visual regression comparison across Mocha, Macchiato, Frappe, and Latte.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to Settings via More tab
+- tapOn: "More"
+- tapOn: "Settings"
+- wait:
+    seconds: 1
+
+# Theme 1: Mocha (default, already active)
+- tapOn: "Sessions"
+- wait:
+    seconds: 1
+- takeScreenshot: theme-mocha-sessions
+
+# Theme 2: Macchiato
+- tapOn: "More"
+- tapOn: "Settings"
+- wait:
+    seconds: 1
+- tapOn:
+    text: "Macchiato"
+    optional: true
+- tapOn: "Sessions"
+- wait:
+    seconds: 1
+- takeScreenshot: theme-macchiato-sessions
+
+# Theme 3: Frappe
+- tapOn: "More"
+- tapOn: "Settings"
+- wait:
+    seconds: 1
+- tapOn:
+    text: "Frapp"
+    optional: true
+- tapOn: "Sessions"
+- wait:
+    seconds: 1
+- takeScreenshot: theme-frappe-sessions
+
+# Theme 4: Latte
+- tapOn: "More"
+- tapOn: "Settings"
+- wait:
+    seconds: 1
+- tapOn:
+    text: "Latte"
+    optional: true
+- tapOn: "Sessions"
+- wait:
+    seconds: 1
+- takeScreenshot: theme-latte-sessions
+
+# Reset to Mocha
+- tapOn: "More"
+- tapOn: "Settings"
+- wait:
+    seconds: 1
+- tapOn:
+    text: "Mocha"
+    optional: true

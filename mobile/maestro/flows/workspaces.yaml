@@ -1,0 +1,23 @@
+# workspaces.yaml - Verifies the Workspaces screen renders within the More tab.
+# Checks for workspace list or empty state.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Workspaces
+- tapOn: "Workspaces"
+
+- wait:
+    seconds: 1
+
+# Verify workspace screen loaded
+- assertVisible:
+    text: "Workspaces"
+
+# Capture workspaces screen
+- takeScreenshot: workspaces-screen

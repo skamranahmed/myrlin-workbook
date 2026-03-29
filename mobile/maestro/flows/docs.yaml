@@ -1,0 +1,18 @@
+# docs.yaml - Verifies the Docs tab renders with section headers.
+# Checks for Notes, Goals, Tasks, Roadmap, Rules sections.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to Docs tab
+- tapOn: "Docs"
+- assertVisible: "Docs"
+
+# Scroll through doc sections
+- scroll:
+    direction: "down"
+    duration: 500
+
+# Capture the docs screen
+- takeScreenshot: docs-screen

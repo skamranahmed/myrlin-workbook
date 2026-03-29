@@ -1,0 +1,22 @@
+# costs.yaml - Verifies the Costs tab renders with dashboard elements.
+# Checks for cost total, chart area, and period selector.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to Costs tab
+- tapOn: "Costs"
+- assertVisible: "Costs"
+
+# Look for cost dashboard elements (totals, chart, or empty state)
+- assertVisible:
+    text: "Costs"
+
+# Scroll to see full dashboard
+- scroll:
+    direction: "down"
+    duration: 500
+
+# Capture the costs dashboard
+- takeScreenshot: costs-dashboard

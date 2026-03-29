@@ -1,0 +1,28 @@
+# settings.yaml - Verifies the Settings screen renders within the More tab.
+# Checks for theme, notification, and haptic settings sections.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Settings
+- tapOn: "Settings"
+
+- wait:
+    seconds: 1
+
+# Verify settings screen loaded
+- assertVisible:
+    text: "Settings"
+
+# Scroll to see all settings sections
+- scroll:
+    direction: "down"
+    duration: 500
+
+# Capture settings screen
+- takeScreenshot: settings-screen

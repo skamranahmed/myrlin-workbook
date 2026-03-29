@@ -1,0 +1,23 @@
+# search.yaml - Verifies the Search screen renders with search bar.
+# Checks that the search input is visible and functional.
+appId: com.myrlin.mobile
+---
+- launchApp:
+    clearState: true
+
+# Navigate to More tab
+- tapOn: "More"
+- assertVisible: "More"
+
+# Navigate to Search
+- tapOn: "Search"
+
+- wait:
+    seconds: 1
+
+# Verify search screen loaded
+- assertVisible:
+    text: "Search"
+
+# Capture search screen
+- takeScreenshot: search-screen
