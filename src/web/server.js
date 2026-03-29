@@ -5045,6 +5045,7 @@ const GLOBAL_EVENT_TYPES = new Set([
   'group:updated',
   'group:deleted',
   'workspaces:reordered',
+  'workspace:created',
 ]);
 
 /**
@@ -5095,7 +5096,17 @@ app.get('/api/events', (req, res) => {
 
   // Add client to tracking map with auth token, deviceId, and connection time
   const clientId = ++_sseClientId;
-  const clientRecord = { res, token, deviceId, connectedAt: Date.now(), heartbeatInterval: null };
+  const clientRecord = { res, token, deviceId, connectedAt: Date.now(), heartbeatInterval: null, subscriptions: null };
+
+  // Load workspace subscriptions for device clients so broadcastSSE can filter.
+  // A null value means "no filtering" (receive all). An empty array also means
+  // "receive all" per WSUB-04 (only a non-empty array enables filtering).
+  if (deviceId) {
+    const device = getStore().findDevice(deviceId);
+    const subs = device?.workspaceSubscriptions;
+    clientRecord.subscriptions = (Array.isArray(subs) && subs.length > 0) ? subs : null;
+  }
+
   sseClients.set(clientId, clientRecord);
 
   // Per-client heartbeat: sends an SSE comment every 30 seconds to keep the
@@ -5132,7 +5143,14 @@ app.get('/api/events', (req, res) => {
 });
 
 /**
- * Broadcast an SSE event to all connected clients.
+ * Broadcast an SSE event to all connected clients, with workspace subscription filtering.
+ *
+ * Filtering rules:
+ *   - GLOBAL_EVENT_TYPES always reach all clients (settings, groups, workspace:created, reorder)
+ *   - Events without a workspaceId are sent to all clients (safe default, e.g. template events)
+ *   - Clients with null or empty subscriptions receive all events (desktop browser default)
+ *   - Clients with a non-empty subscriptions array only receive events whose workspaceId is in the list
+ *
  * @param {string} eventType - The event name (e.g. 'workspace:created')
  * @param {object} data - The event payload
  */
@@ -5141,16 +5159,29 @@ function broadcastSSE(eventType, data) {
   // Send as unnamed event so EventSource.onmessage fires (named events require addEventListener per type)
   const message = `data: ${payload}\n\n`;
 
+  // Extract workspaceId from event data (various shapes across event types)
+  const workspaceId = data?.workspaceId || data?.workspace?.id || data?.id || null;
+  const isGlobal = GLOBAL_EVENT_TYPES.has(eventType);
+
   for (const [clientId, client] of sseClients) {
     // Skip and remove clients whose writable stream has already ended
     if (client.res.writableEnded) {
+      clearInterval(client.heartbeatInterval);
       sseClients.delete(clientId);
       continue;
     }
+
+    // Subscription filtering: only applies to non-global, workspace-scoped events
+    // when the client has an active subscription list with entries
+    if (!isGlobal && workspaceId && client.subscriptions && client.subscriptions.length > 0) {
+      if (!client.subscriptions.includes(workspaceId)) continue;
+    }
+
     try {
       client.res.write(message);
     } catch (_) {
-      // Client may have disconnected; remove it
+      // Client may have disconnected; clean up heartbeat and remove
+      clearInterval(client.heartbeatInterval);
       sseClients.delete(clientId);
     }
   }
