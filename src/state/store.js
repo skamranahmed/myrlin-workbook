@@ -37,6 +37,7 @@ const DEFAULT_STATE = {
   features: {},           // { featureId: { id, workspaceId, name, description, status, priority, sessionIds, ... } }
   worktreeTasks: {},      // { taskId: { id, workspaceId, sessionId, featureId, branch, worktreePath, repoDir, description, baseBranch, status, createdAt, completedAt } }
   pushDevices: [],        // [{ token: string, platform: 'ios' | 'android', registeredAt: string }]
+  pairedDevices: [],      // [{ deviceId, token, deviceName, platform, appVersion, pairedAt, lastSeenAt, expiresAt, pushToken, pushPreferences }]
   settings: {
     autoRecover: true,
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
@@ -161,6 +162,7 @@ class Store extends EventEmitter {
         templates: parsed.templates || {},
         features: parsed.features || {},
         pushDevices: parsed.pushDevices || [],
+        pairedDevices: parsed.pairedDevices || [],
       };
     } catch (_) {
       return null;
@@ -1129,6 +1131,106 @@ class Store extends EventEmitter {
       this._debouncedSave();
       this.emit('push:unregistered', { token });
     }
+  }
+
+  // ─── Paired Device Registry ──────────────────────────────
+
+  /**
+   * Add a paired device record to state. Deduplicates by deviceId.
+   * @param {Object} device - Device record with deviceId, token, deviceName, platform, etc.
+   */
+  addPairedDevice(device) {
+    if (!Array.isArray(this._state.pairedDevices)) {
+      this._state.pairedDevices = [];
+    }
+    const existing = this._state.pairedDevices.findIndex(d => d.deviceId === device.deviceId);
+    if (existing !== -1) {
+      this._state.pairedDevices[existing] = device;
+    } else {
+      this._state.pairedDevices.push(device);
+    }
+    this._debouncedSave();
+    this.emit('device:paired', device);
+  }
+
+  /**
+   * Remove a paired device by deviceId. Returns the removed device or null.
+   * @param {string} deviceId
+   * @returns {Object|null}
+   */
+  removePairedDevice(deviceId) {
+    if (!Array.isArray(this._state.pairedDevices)) return null;
+    const idx = this._state.pairedDevices.findIndex(d => d.deviceId === deviceId);
+    if (idx === -1) return null;
+    const removed = this._state.pairedDevices.splice(idx, 1)[0];
+    this._debouncedSave();
+    this.emit('device:revoked', removed);
+    return removed;
+  }
+
+  /**
+   * Find a paired device by its Bearer token.
+   * @param {string} token
+   * @returns {Object|null}
+   */
+  findDeviceByToken(token) {
+    if (!Array.isArray(this._state.pairedDevices)) return null;
+    return this._state.pairedDevices.find(d => d.token === token) || null;
+  }
+
+  /**
+   * Find a paired device by deviceId.
+   * @param {string} deviceId
+   * @returns {Object|null}
+   */
+  findDevice(deviceId) {
+    if (!Array.isArray(this._state.pairedDevices)) return null;
+    return this._state.pairedDevices.find(d => d.deviceId === deviceId) || null;
+  }
+
+  /**
+   * Get all paired devices.
+   * @returns {Array}
+   */
+  getPairedDevices() {
+    return this._state.pairedDevices || [];
+  }
+
+  /**
+   * Update a paired device's fields (e.g. lastSeenAt, pushToken, pushPreferences).
+   * @param {string} deviceId
+   * @param {Object} updates - Fields to merge
+   * @returns {Object|null} Updated device or null if not found
+   */
+  updatePairedDevice(deviceId, updates) {
+    if (!Array.isArray(this._state.pairedDevices)) return null;
+    const device = this._state.pairedDevices.find(d => d.deviceId === deviceId);
+    if (!device) return null;
+    Object.assign(device, updates);
+    this._debouncedSave();
+    this.emit('device:updated', device);
+    return device;
+  }
+
+  /**
+   * Remove all expired paired devices (expiresAt in the past).
+   * Returns the count of removed devices.
+   * @returns {number}
+   */
+  cleanExpiredDevices() {
+    if (!Array.isArray(this._state.pairedDevices)) return 0;
+    const now = new Date().toISOString();
+    const before = this._state.pairedDevices.length;
+    this._state.pairedDevices = this._state.pairedDevices.filter(d => {
+      if (!d.expiresAt) return true;
+      return d.expiresAt > now;
+    });
+    const removed = before - this._state.pairedDevices.length;
+    if (removed > 0) {
+      this._debouncedSave();
+      this.emit('devices:cleaned', { removed });
+    }
+    return removed;
   }
 
   // ─── Cleanup ─────────────────────────────────────────────
