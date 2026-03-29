@@ -40,23 +40,24 @@ const loginAttempts = new Map(); // IP -> { count, resetAt }
 /**
  * Check if a login attempt from this IP should be rate-limited.
  * @param {string} ip - Client IP address
- * @returns {boolean} true if rate limited (should reject)
+ * @returns {{ limited: boolean, retryAfter: number }} limited flag and seconds until window resets
  */
 function isRateLimited(ip) {
   const now = Date.now();
   const entry = loginAttempts.get(ip);
 
   if (!entry || now > entry.resetAt) {
-    // Window expired or new IP - start fresh
+    // Window expired or new IP, start fresh
     loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW_MS });
-    return false;
+    return { limited: false, retryAfter: 0 };
   }
 
   entry.count++;
+  const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
   if (entry.count > LOGIN_RATE_LIMIT) {
-    return true;
+    return { limited: true, retryAfter };
   }
-  return false;
+  return { limited: false, retryAfter: 0 };
 }
 
 // Clean up stale rate limit entries every 5 minutes
@@ -234,8 +235,10 @@ function requireAuth(req, res, next) {
 
   if (!token || !activeTokens.has(token)) {
     return res.status(401).json({
-      error: 'Unauthorized',
+      error: 'UNAUTHORIZED',
+      code: 401,
       message: 'Valid Bearer token required. POST /api/auth/login to authenticate.',
+      retryable: false,
     });
   }
 
@@ -267,10 +270,14 @@ function setupAuth(app) {
   app.post('/api/auth/login', (req, res) => {
     // Rate limiting
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-    if (isRateLimited(clientIp)) {
+    const rateCheck = isRateLimited(clientIp);
+    if (rateCheck.limited) {
+      res.setHeader('Retry-After', String(rateCheck.retryAfter));
       return res.status(429).json({
-        success: false,
-        error: 'Too many login attempts. Try again in 1 minute.',
+        error: 'RATE_LIMITED',
+        code: 429,
+        message: `Too many login attempts. Try again in ${rateCheck.retryAfter} seconds.`,
+        retryable: true,
       });
     }
 
@@ -278,8 +285,10 @@ function setupAuth(app) {
 
     if (!password || typeof password !== 'string') {
       return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid password field in request body.',
+        error: 'BAD_REQUEST',
+        code: 400,
+        message: 'Missing or invalid password field in request body.',
+        retryable: false,
       });
     }
 
@@ -292,8 +301,10 @@ function setupAuth(app) {
 
     if (!isValid) {
       return res.status(403).json({
-        success: false,
-        error: 'Invalid password.',
+        error: 'INVALID_PASSWORD',
+        code: 403,
+        message: 'Invalid password.',
+        retryable: false,
       });
     }
 
@@ -313,10 +324,14 @@ function setupAuth(app) {
   app.post('/api/auth/token-login', (req, res) => {
     // Rate limiting (same as login)
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-    if (isRateLimited(clientIp)) {
+    const rateCheck = isRateLimited(clientIp);
+    if (rateCheck.limited) {
+      res.setHeader('Retry-After', String(rateCheck.retryAfter));
       return res.status(429).json({
-        success: false,
-        error: 'Too many login attempts. Try again in 1 minute.',
+        error: 'RATE_LIMITED',
+        code: 429,
+        message: `Too many login attempts. Try again in ${rateCheck.retryAfter} seconds.`,
+        retryable: true,
       });
     }
 
@@ -324,16 +339,20 @@ function setupAuth(app) {
 
     if (!startupToken || typeof startupToken !== 'string') {
       return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid token field in request body.',
+        error: 'BAD_REQUEST',
+        code: 400,
+        message: 'Missing or invalid token field in request body.',
+        retryable: false,
       });
     }
 
     const entry = startupTokens.get(startupToken);
     if (!entry) {
       return res.status(403).json({
-        success: false,
-        error: 'Invalid or expired startup token.',
+        error: 'INVALID_TOKEN',
+        code: 403,
+        message: 'Invalid or expired startup token.',
+        retryable: false,
       });
     }
 
@@ -341,16 +360,20 @@ function setupAuth(app) {
     if (Date.now() - entry.createdAt > STARTUP_TOKEN_TTL_MS) {
       startupTokens.delete(startupToken);
       return res.status(403).json({
-        success: false,
-        error: 'Startup token has expired.',
+        error: 'TOKEN_EXPIRED',
+        code: 403,
+        message: 'Startup token has expired.',
+        retryable: false,
       });
     }
 
     // Check single-use
     if (entry.used) {
       return res.status(403).json({
-        success: false,
-        error: 'Startup token has already been used.',
+        error: 'TOKEN_USED',
+        code: 403,
+        message: 'Startup token has already been used.',
+        retryable: false,
       });
     }
 
@@ -402,21 +425,34 @@ function setupAuth(app) {
   app.post('/api/auth/refresh', requireAuth, (req, res) => {
     // Rate limit refresh attempts
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-    if (isRateLimited(clientIp)) {
+    const rateCheck = isRateLimited(clientIp);
+    if (rateCheck.limited) {
+      res.setHeader('Retry-After', String(rateCheck.retryAfter));
       return res.status(429).json({
-        error: 'Too many requests. Try again in 1 minute.',
+        error: 'RATE_LIMITED',
+        code: 429,
+        message: `Too many requests. Try again in ${rateCheck.retryAfter} seconds.`,
+        retryable: true,
       });
     }
 
     // Only device tokens can be refreshed, not browser session tokens
     if (!_getStore) {
-      return res.status(500).json({ error: 'Store not available' });
+      return res.status(500).json({
+        error: 'SERVER_ERROR',
+        code: 500,
+        message: 'Store not available.',
+        retryable: true,
+      });
     }
     const store = _getStore();
     const device = store.findDeviceByToken(req.authToken);
     if (!device) {
       return res.status(403).json({
-        error: 'Token refresh is only available for paired device tokens.',
+        error: 'DEVICE_ONLY',
+        code: 403,
+        message: 'Token refresh is only available for paired device tokens.',
+        retryable: false,
       });
     }
 

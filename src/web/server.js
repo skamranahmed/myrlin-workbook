@@ -175,6 +175,30 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// API Version header on every response (ERRR-03)
+app.use((req, res, next) => {
+  res.setHeader('X-API-Version', '1');
+  next();
+});
+
+/**
+ * Send a structured error response with machine-readable code.
+ * Format: { error: string, code: number, message: string, retryable: boolean }
+ * @param {import('express').Response} res - Express response
+ * @param {number} statusCode - HTTP status code
+ * @param {string} errorCode - Machine-readable error code (e.g. 'INVALID_TOKEN')
+ * @param {string} message - Human-readable message
+ * @param {boolean} [retryable=false] - Whether the client can retry this request
+ */
+function structuredError(res, statusCode, errorCode, message, retryable = false) {
+  return res.status(statusCode).json({
+    error: errorCode,
+    code: statusCode,
+    message,
+    retryable,
+  });
+}
+
 // CORS headers - restrict to localhost and local network origins
 // Mobile clients with valid Bearer tokens are allowed from any origin
 app.use((req, res, next) => {
@@ -7567,4 +7591,5 @@ module.exports = {
   app,
   startServer,
   getPtyManager,
+  structuredError,
 };
