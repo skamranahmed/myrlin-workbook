@@ -573,6 +573,132 @@ export class MyrlinAPIClient {
     );
   }
 
+  // ─── Workspace Docs ─────────────────────────────────────
+
+  /**
+   * Fetch all docs for a workspace (notes, goals, tasks, roadmap, rules).
+   * @param workspaceId - Workspace ID
+   * @returns All doc sections
+   */
+  async getWorkspaceDocs(
+    workspaceId: string
+  ): Promise<{ docs: WorkspaceDocs }> {
+    return this._fetch(`/api/workspaces/${workspaceId}/docs`);
+  }
+
+  /**
+   * Add an item to a specific doc section.
+   * @param workspaceId - Workspace ID
+   * @param section - Target section (notes, goals, tasks, roadmap, rules)
+   * @param item - Item data (text, plus done/status for relevant sections)
+   * @returns Updated docs
+   */
+  async addDocItem(
+    workspaceId: string,
+    section: DocSection,
+    item: Record<string, unknown>
+  ): Promise<{ docs: WorkspaceDocs }> {
+    return this._fetch(`/api/workspaces/${workspaceId}/docs/${section}`, {
+      method: 'POST',
+      body: JSON.stringify(item),
+    });
+  }
+
+  /**
+   * Update an item at a specific index in a doc section.
+   * @param workspaceId - Workspace ID
+   * @param section - Target section
+   * @param index - Item index within the section
+   * @param item - Updated item data
+   * @returns Updated docs
+   */
+  async updateDocItem(
+    workspaceId: string,
+    section: DocSection,
+    index: number,
+    item: Record<string, unknown>
+  ): Promise<{ docs: WorkspaceDocs }> {
+    return this._fetch(
+      `/api/workspaces/${workspaceId}/docs/${section}/${index}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(item),
+      }
+    );
+  }
+
+  /**
+   * Delete an item at a specific index in a doc section.
+   * @param workspaceId - Workspace ID
+   * @param section - Target section
+   * @param index - Item index to delete
+   * @returns Updated docs
+   */
+  async deleteDocItem(
+    workspaceId: string,
+    section: DocSection,
+    index: number
+  ): Promise<{ docs: WorkspaceDocs }> {
+    return this._fetch(
+      `/api/workspaces/${workspaceId}/docs/${section}/${index}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  // ─── Features ───────────────────────────────────────────
+
+  /**
+   * Fetch all features for a workspace.
+   * @param workspaceId - Workspace ID
+   * @returns Features list
+   */
+  async getFeatures(
+    workspaceId: string
+  ): Promise<{ features: Feature[] }> {
+    return this._fetch(`/api/workspaces/${workspaceId}/features`);
+  }
+
+  /**
+   * Create a new feature in a workspace.
+   * @param workspaceId - Workspace ID
+   * @param data - Feature creation fields
+   * @returns The created feature
+   */
+  async createFeature(
+    workspaceId: string,
+    data: { name: string; description?: string; status?: string; priority?: string }
+  ): Promise<{ feature: Feature }> {
+    return this._fetch(`/api/workspaces/${workspaceId}/features`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an existing feature.
+   * @param id - Feature ID
+   * @param data - Partial feature fields to update
+   * @returns The updated feature
+   */
+  async updateFeature(
+    id: string,
+    data: Partial<Feature>
+  ): Promise<{ feature: Feature }> {
+    return this._fetch(`/api/features/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a feature.
+   * @param id - Feature ID
+   * @returns Success indicator
+   */
+  async deleteFeature(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/features/${id}`, { method: 'DELETE' });
+  }
+
   // ─── Worktree Tasks ────────────────────────────────────────
 
   /**
