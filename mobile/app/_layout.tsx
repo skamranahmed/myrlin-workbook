@@ -10,7 +10,7 @@
  * 6. Render the top-level Stack navigator with (tabs) as the initial route
  */
 
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -25,6 +25,9 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useServerStore } from '@/stores/server-store';
 import { fontAssets } from '@/theme/fonts';
 import { BiometricGate } from '@/components/BiometricGate';
+import { usePushNotifications } from '@/hooks/usePush';
+import { useToastStore } from '@/hooks/useToast';
+import { Toast } from '@/components/ui/Toast';
 
 /**
  * Singleton QueryClient for TanStack Query.
@@ -102,6 +105,28 @@ function RootLayoutNav() {
   const isLocked = useAuthStore((s) => s.isLocked);
   const activeServer = useServerStore((s) => s.getActiveServer());
 
+  // Global toast state
+  const toastVisible = useToastStore((s) => s.visible);
+  const toastMessage = useToastStore((s) => s.message);
+  const toastVariant = useToastStore((s) => s.variant);
+  const hideToast = useToastStore((s) => s.hideToast);
+  const globalShowToast = useToastStore((s) => s.showToast);
+
+  /**
+   * Callback for foreground push notifications.
+   * Displays the notification body as an in-app toast so the user
+   * sees it without leaving their current screen.
+   */
+  const handleForegroundNotification = useCallback(
+    (_title: string, body: string) => {
+      globalShowToast(body, 'info');
+    },
+    [globalShowToast]
+  );
+
+  // Initialize push notifications (once, at root level)
+  usePushNotifications(handleForegroundNotification);
+
   // If no server is paired, redirect to onboarding
   if (!activeServer) {
     return (
@@ -116,6 +141,12 @@ function RootLayoutNav() {
           >
             <Stack.Screen name="(auth)" />
           </Stack>
+          <Toast
+            visible={toastVisible}
+            message={toastMessage}
+            variant={toastVariant}
+            onDismiss={hideToast}
+          />
         </ThemeProvider>
       </QueryClientProvider>
     );
@@ -135,6 +166,12 @@ function RootLayoutNav() {
           <Stack.Screen name="(auth)" />
         </Stack>
         {biometricEnabled && isLocked && <BiometricGate />}
+        <Toast
+          visible={toastVisible}
+          message={toastMessage}
+          variant={toastVariant}
+          onDismiss={hideToast}
+        />
       </ThemeProvider>
     </QueryClientProvider>
   );
