@@ -376,6 +376,20 @@ export default function SessionDetailScreen() {
           </View>
         </View>
 
+        {/* Open Terminal button (visible for running or idle sessions) */}
+        {(session.status === 'running' || session.status === 'idle') ? (
+          <Button
+            onPress={() =>
+              router.push({
+                pathname: '/(tabs)/sessions/terminal',
+                params: { id: session.id },
+              })
+            }
+          >
+            Open Terminal
+          </Button>
+        ) : null}
+
         {/* Metadata section */}
         <SectionHeader title="Details" />
         <View style={[styles.metadataCard, { backgroundColor: colors.surface0, borderRadius: radius.lg }]}>

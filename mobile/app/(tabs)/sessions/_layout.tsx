@@ -1,9 +1,9 @@
 /**
  * sessions/_layout.tsx - Stack navigator for session screens.
  *
- * Wraps the session list (index) and session detail ([id]) in a
- * Stack navigator so the detail screen pushes on top of the list.
- * Header is hidden since each screen manages its own header.
+ * Wraps the session list (index), session detail ([id]), and terminal
+ * in a Stack navigator. The terminal screen hides both header and tab bar
+ * for a full-screen experience.
  */
 
 import { Stack } from 'expo-router';
@@ -12,6 +12,9 @@ import { useTheme } from '@/hooks/useTheme';
 
 /**
  * SessionsLayout - Stack navigator with themed screen options.
+ *
+ * The terminal screen gets explicit options to hide the header
+ * and use a slide-from-right animation for consistency.
  */
 export default function SessionsLayout() {
   const { theme } = useTheme();
@@ -23,6 +26,8 @@ export default function SessionsLayout() {
         contentStyle: { backgroundColor: theme.colors.base },
         animation: 'slide_from_right',
       }}
-    />
+    >
+      <Stack.Screen name="terminal" options={{ headerShown: false, animation: 'slide_from_right' }} />
+    </Stack>
   );
 }

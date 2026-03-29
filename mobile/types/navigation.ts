@@ -37,6 +37,12 @@ export type WorkspaceDetailParams = {
   workspaceId: string;
 };
 
+/** Parameters for the terminal route */
+export type TerminalParams = {
+  /** Session UUID to open in the terminal */
+  id: string;
+};
+
 /**
  * Combined route parameter map for the entire app.
  * Used with expo-router's typed routes for compile-time navigation safety.
@@ -44,6 +50,7 @@ export type WorkspaceDetailParams = {
 export type AppRouteParams = {
   '(tabs)': undefined;
   '(tabs)/sessions/index': undefined;
+  '(tabs)/sessions/terminal': TerminalParams;
   '(tabs)/tasks/index': undefined;
   '(tabs)/costs/index': undefined;
   '(tabs)/docs/index': undefined;
