@@ -8,6 +8,10 @@
  * 4. Gate on server store hydration to prevent flash-to-onboarding
  * 5. Redirect to onboarding if no server is paired
  * 6. Render the top-level Stack navigator with (tabs) as the initial route
+ * 7. Deep linking: app.json "scheme": "myrlin" enables myrlin:// URLs.
+ *    Expo Router auto-generates linking config from the file structure, so
+ *    myrlin://session/:id, myrlin://tasks, myrlin://costs, etc. resolve
+ *    to the matching file-based routes without manual path mapping.
  */
 
 import { useCallback, useEffect } from 'react';
