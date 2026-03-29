@@ -16,6 +16,7 @@ const express = require('express');
 
 const { setupAuth, requireAuth, isValidToken, addToken, generateToken, isRateLimited } = require('./auth');
 const { setupPairing } = require('./pairing');
+const { setupPushRoutes, setupPushListeners } = require('./push');
 const { getStore } = require('../state/store');
 const { launchSession, stopSession, restartSession } = require('../core/session-manager');
 const { backupFrontend, restoreFrontend, getBackupStatus } = require('./backup');
@@ -274,6 +275,10 @@ setupAuth(app);
 
 // ─── Pairing Routes (mobile device authentication) ─────────
 setupPairing(app, { requireAuth, addToken, generateToken, isRateLimited });
+
+// ─── Push Notification Routes (mobile device push tokens) ───
+setupPushRoutes(app, requireAuth, getStore);
+setupPushListeners(getStore());
 
 // ─── Protected API Routes ──────────────────────────────────
 // All routes below require a valid Bearer token.
