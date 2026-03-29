@@ -1,52 +1,93 @@
 /**
- * tasks/index.tsx - Tasks kanban screen (placeholder).
+ * tasks/index.tsx - Tasks kanban screen with board/list toggle.
  *
- * Displays a centered label with themed styling. Will be replaced
- * with the kanban board in Phase 5.
+ * Renders a SegmentedControl to switch between Board and List views.
+ * Both views share the same useTasks() data. Shows Skeleton columns
+ * while loading and EmptyState when no tasks exist.
  */
 
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
-import { fonts } from '@/theme/fonts';
+import {
+  EmptyState,
+  SegmentedControl,
+  Skeleton,
+} from '@/components/ui';
+import { useTasks } from '@/hooks/useTasks';
+import { TaskBoard } from '@/components/tasks/TaskBoard';
+import { TaskList } from '@/components/tasks/TaskList';
+import { CreateTaskSheet } from '@/components/tasks/CreateTaskSheet';
+
+/** Segment options for the view toggle */
+const SEGMENTS = ['Board', 'List'];
 
 /**
- * TasksScreen - Placeholder for the tasks kanban tab.
+ * TasksScreen - Main tasks tab with kanban board and list views.
+ *
+ * SegmentedControl toggles between Board (horizontal kanban) and
+ * List (vertical grouped) views. Both use the same task data from
+ * the useTasks hook.
  */
 export default function TasksScreen() {
   const { theme } = useTheme();
+  const { data, isLoading } = useTasks();
+  const [viewIndex, setViewIndex] = useState(0);
+  const [createVisible, setCreateVisible] = useState(false);
+
+  const tasks = data?.tasks ?? [];
 
   return (
     <SafeAreaView
       edges={['bottom']}
       style={[styles.container, { backgroundColor: theme.colors.base }]}
     >
-      <View style={styles.center}>
-        <Text
-          style={[
-            styles.label,
-            {
-              color: theme.colors.textPrimary,
-              fontFamily: fonts.sans.semibold,
-            },
-          ]}
-        >
-          Tasks
-        </Text>
-        <Text
-          style={[
-            styles.sublabel,
-            {
-              color: theme.colors.textSecondary,
-              fontFamily: fonts.sans.regular,
-            },
-          ]}
-        >
-          Kanban board for workspace tasks
-        </Text>
+      {/* View toggle */}
+      <View style={styles.controlBar}>
+        <SegmentedControl
+          segments={SEGMENTS}
+          selectedIndex={viewIndex}
+          onSelect={setViewIndex}
+        />
       </View>
+
+      {/* Loading state */}
+      {isLoading && (
+        <View style={styles.skeletonContainer}>
+          <Skeleton width="100%" height={120} />
+          <Skeleton width="100%" height={120} />
+          <Skeleton width="100%" height={80} />
+        </View>
+      )}
+
+      {/* Empty state */}
+      {!isLoading && tasks.length === 0 && (
+        <EmptyState
+          title="No tasks yet"
+          description="Create a worktree task to start managing branches from mobile."
+          action={{
+            label: 'Create Task',
+            onPress: () => setCreateVisible(true),
+          }}
+        />
+      )}
+
+      {/* Board view */}
+      {!isLoading && tasks.length > 0 && viewIndex === 0 && (
+        <TaskBoard tasks={tasks} />
+      )}
+
+      {/* List view */}
+      {!isLoading && tasks.length > 0 && viewIndex === 1 && (
+        <TaskList tasks={tasks} />
+      )}
+
+      <CreateTaskSheet
+        visible={createVisible}
+        onClose={() => setCreateVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -55,18 +96,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+  controlBar: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
-  label: {
-    fontSize: 22,
-    marginBottom: 8,
-  },
-  sublabel: {
-    fontSize: 15,
-    textAlign: 'center',
+  skeletonContainer: {
+    padding: 16,
+    gap: 12,
   },
 });
