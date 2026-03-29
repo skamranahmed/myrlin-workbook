@@ -23,6 +23,7 @@ const VALID_PUSH_PREF_KEYS = [
 ];
 
 const MAX_DEVICE_NAME_LENGTH = 100;
+const MAX_WORKSPACE_SUBSCRIPTIONS = 50;
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -83,6 +84,22 @@ function validatePushPreferences(prefs) {
     result[key] = prefs[key];
   }
   return result;
+}
+
+/**
+ * Validate an array of workspace IDs for subscription.
+ * Must be an array of non-empty strings with at most MAX_WORKSPACE_SUBSCRIPTIONS entries.
+ * An empty array is valid (means "receive all events").
+ * @param {*} ids - Raw input
+ * @returns {string[]|null} Validated array or null if invalid
+ */
+function validateWorkspaceIds(ids) {
+  if (!Array.isArray(ids)) return null;
+  if (ids.length > MAX_WORKSPACE_SUBSCRIPTIONS) return null;
+  for (const id of ids) {
+    if (typeof id !== 'string' || id.length === 0) return null;
+  }
+  return ids;
 }
 
 /**
@@ -261,6 +278,62 @@ function setupDeviceRoutes(app, { requireAuth, getStore, removeToken, sendPush, 
     store.removePairedDevice(req.params.deviceId);
 
     return res.json({ success: true });
+  });
+
+  /**
+   * GET /api/devices/:deviceId/subscriptions
+   * Returns the workspace subscription list for a device.
+   * An empty array means the device receives all events (default).
+   * Returns: { subscriptions: string[] }
+   */
+  app.get('/api/devices/:deviceId/subscriptions', requireAuth, (req, res) => {
+    const store = getStore();
+    const device = store.findDevice(req.params.deviceId);
+
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    return res.json({ subscriptions: device.workspaceSubscriptions || [] });
+  });
+
+  /**
+   * POST /api/devices/:deviceId/subscriptions
+   * Sets the workspace subscription list for a device.
+   * Body: { workspaceIds: string[] }
+   * An empty array means "receive all events" (default behavior preserved).
+   * Also updates any active SSE client for this device so filtering
+   * takes effect immediately without requiring reconnection.
+   * Returns: { subscriptions: string[] }
+   */
+  app.post('/api/devices/:deviceId/subscriptions', requireAuth, (req, res) => {
+    const store = getStore();
+    const device = store.findDevice(req.params.deviceId);
+
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    const body = req.body || {};
+    const validated = validateWorkspaceIds(body.workspaceIds);
+    if (validated === null) {
+      return res.status(400).json({
+        error: `workspaceIds must be an array of non-empty strings, max ${MAX_WORKSPACE_SUBSCRIPTIONS} entries`,
+      });
+    }
+
+    // Persist subscriptions on the device record
+    store.updatePairedDevice(req.params.deviceId, { workspaceSubscriptions: validated });
+
+    // Update any active SSE clients for this device so filtering applies immediately
+    const sseClients = getSSEClients();
+    for (const [, client] of sseClients) {
+      if (client.deviceId === req.params.deviceId) {
+        client.subscriptions = validated.length > 0 ? validated : null;
+      }
+    }
+
+    return res.json({ subscriptions: validated });
   });
 
   /**
