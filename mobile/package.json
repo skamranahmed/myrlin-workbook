@@ -19,6 +19,7 @@
     "expo-constants": "55.0.10-canary-20260328-bdc6273",
     "expo-device": "^55.0.11-canary-20260328-bdc6273",
     "expo-font": "55.0.5-canary-20260328-bdc6273",
+    "expo-image-picker": "^55.0.15-canary-20260328-bdc6273",
     "expo-linking": "55.0.10-canary-20260328-bdc6273",
     "expo-local-authentication": "^55.0.10-canary-20260328-bdc6273",
     "expo-router": "55.0.9-canary-20260328-bdc6273",
