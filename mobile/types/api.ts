@@ -306,6 +306,340 @@ export interface Subagent {
   status: string;
 }
 
+// ─── Resources ───────────────────────────────────────────
+
+/**
+ * System-level hardware metrics (CPU, memory, uptime).
+ * Returned as part of the ResourceMetrics response.
+ */
+export interface SystemInfo {
+  /** Number of logical CPU cores */
+  cpuCount: number;
+  /** Current CPU usage percentage (0-100) */
+  cpuUsage: number;
+  /** Total system memory in megabytes */
+  totalMemoryMB: number;
+  /** Free (available) memory in megabytes */
+  freeMemoryMB: number;
+  /** Used memory in megabytes */
+  usedMemoryMB: number;
+  /** System uptime in seconds */
+  uptimeSeconds: number;
+}
+
+/**
+ * Per-session resource consumption metrics for a running Claude session.
+ * Includes process ID, CPU, memory, and any bound network ports.
+ */
+export interface ClaudeSessionResource {
+  /** Session unique identifier */
+  sessionId: string;
+  /** Human-readable session name */
+  sessionName: string;
+  /** Workspace this session belongs to, if any */
+  workspaceName: string | null;
+  /** Filesystem working directory, if set */
+  workingDir: string | null;
+  /** OS process ID */
+  pid: number;
+  /** Memory consumption in megabytes */
+  memoryMB: number;
+  /** CPU usage percentage for this process */
+  cpuPercent: number;
+  /** Network ports bound by this session */
+  ports: number[];
+  /** Current process status string */
+  status: string;
+}
+
+/**
+ * Aggregated resource metrics from GET /api/resources.
+ * Contains system-level stats and per-Claude-session breakdown.
+ */
+export interface ResourceMetrics {
+  /** System hardware metrics */
+  system: SystemInfo;
+  /** Per-session resource consumption */
+  claudeSessions: ClaudeSessionResource[];
+  /** Sum of memory across all Claude sessions */
+  totalClaudeMemoryMB: number;
+  /** Sum of CPU across all Claude sessions */
+  totalClaudeCpuPercent: number;
+}
+
+// ─── Workspace Docs ──────────────────────────────────────────
+
+/** A note item in the workspace docs notes section */
+export interface DocNoteItem {
+  /** Note text content */
+  text: string;
+}
+
+/** A goal item with completion tracking */
+export interface DocGoalItem {
+  /** Goal text content */
+  text: string;
+  /** Whether the goal is completed */
+  done: boolean;
+}
+
+/** A task item with completion tracking */
+export interface DocTaskItem {
+  /** Task text content */
+  text: string;
+  /** Whether the task is completed */
+  done: boolean;
+}
+
+/** A roadmap item with status tracking */
+export interface DocRoadmapItem {
+  /** Roadmap item text content */
+  text: string;
+  /** Current status of the roadmap item */
+  status: 'planned' | 'active' | 'done';
+}
+
+/** A rule item in the workspace docs rules section */
+export interface DocRuleItem {
+  /** Rule text content */
+  text: string;
+}
+
+/** Valid doc section names */
+export type DocSection = 'notes' | 'goals' | 'tasks' | 'roadmap' | 'rules';
+
+/** Complete workspace documentation with all 5 sections */
+export interface WorkspaceDocs {
+  /** Free-form notes */
+  notes: DocNoteItem[];
+  /** Trackable goals with completion state */
+  goals: DocGoalItem[];
+  /** Trackable tasks with completion state */
+  tasks: DocTaskItem[];
+  /** Roadmap items with planned/active/done status */
+  roadmap: DocRoadmapItem[];
+  /** Workspace rules and conventions */
+  rules: DocRuleItem[];
+}
+
+// ─── Features ────────────────────────────────────────────────
+
+/** A feature on the workspace kanban board */
+export interface Feature {
+  /** Unique identifier */
+  id: string;
+  /** Parent workspace ID */
+  workspaceId: string;
+  /** Feature name */
+  name: string;
+  /** Optional description of the feature */
+  description?: string;
+  /** Current board column */
+  status: 'backlog' | 'active' | 'done';
+  /** Optional priority level */
+  priority?: 'low' | 'medium' | 'high';
+  /** IDs of sessions linked to this feature */
+  sessionIds: string[];
+  /** ISO timestamp of creation */
+  createdAt: string;
+}
+
+// ─── Worktree Tasks ──────────────────────────────────────────
+
+/**
+ * Status of a worktree task in the kanban pipeline.
+ */
+export type TaskStatus = 'backlog' | 'planning' | 'running' | 'review' | 'done';
+
+/**
+ * A worktree-based development task managed by the server.
+ * Tracks branch, session, status, and enriched git metadata.
+ */
+export interface WorktreeTask {
+  /** Unique identifier */
+  id: string;
+  /** Owning workspace ID */
+  workspaceId: string;
+  /** Associated Claude session ID (null if not started) */
+  sessionId: string | null;
+  /** Git branch name for the worktree */
+  branch: string;
+  /** Filesystem path to the worktree (null if not created) */
+  worktreePath: string | null;
+  /** Root repo directory */
+  repoDir: string;
+  /** Human-readable task description */
+  description: string;
+  /** Branch to merge into */
+  baseBranch: string;
+  /** Optional feature grouping ID */
+  featureId: string | null;
+  /** AI model assigned to this task */
+  model: string | null;
+  /** User-applied tags */
+  tags: string[];
+  /** Current kanban status */
+  status: TaskStatus;
+  /** List of blocker descriptions */
+  blockers: string[];
+  /** ISO timestamp of creation */
+  createdAt: string;
+  /** ISO timestamp of last update */
+  updatedAt: string;
+  /** Number of commits ahead of base branch */
+  branchAhead: number;
+  /** Number of files changed in the worktree */
+  changedFiles: number;
+}
+
+/**
+ * Input data for creating a new worktree task via POST /api/worktree-tasks.
+ */
+export interface CreateTaskInput {
+  /** Target workspace ID */
+  workspaceId: string;
+  /** Root repo directory on the server */
+  repoDir: string;
+  /** Git branch name */
+  branch: string;
+  /** Task description */
+  description: string;
+  /** Base branch to diverge from (default "main") */
+  baseBranch?: string;
+  /** Optional feature grouping ID */
+  featureId?: string;
+  /** AI model to assign */
+  model?: string;
+  /** Tags for categorization */
+  tags?: string[];
+  /** Whether to start immediately vs backlog */
+  startNow?: boolean;
+  /** Initial prompt for the session */
+  prompt?: string;
+  /** CLI flags to pass to the session */
+  flags?: string[];
+}
+
+/**
+ * Pull request metadata associated with a worktree task.
+ */
+export interface TaskPR {
+  /** GitHub PR URL */
+  url: string;
+  /** PR number */
+  number: number;
+  /** PR title */
+  title: string;
+  /** PR state (open, closed, merged) */
+  state?: string;
+  /** Whether the PR has been merged */
+  merged?: boolean;
+}
+
+/**
+ * Changed files and stats for a worktree task branch.
+ */
+export interface TaskChanges {
+  /** List of changed file paths */
+  files: string[];
+  /** Aggregate line change statistics */
+  stats: { additions: number; deletions: number; total: number };
+}
+
+// ─── Cost Dashboard ──────────────────────────────────────────
+
+/**
+ * Time period filter for cost dashboard queries.
+ * Maps to the period query param on GET /api/cost/dashboard.
+ */
+export type CostPeriod = 'day' | 'week' | 'month' | 'all';
+
+/**
+ * Full response shape from GET /api/cost/dashboard?period={period}.
+ * Contains summary metrics, timeline data, and breakdowns by model,
+ * workspace, and individual sessions.
+ */
+export interface CostDashboardResponse {
+  /** Aggregate cost metrics for the selected period */
+  summary: {
+    /** Total cost in USD across all time */
+    totalCost: number;
+    /** Total tokens by category */
+    totalTokens: {
+      input: number;
+      output: number;
+      cacheWrite: number;
+      cacheRead: number;
+    };
+    /** Cost within the selected time period */
+    periodCost: number;
+    /** Human-readable period label (e.g. "Last 7 days") */
+    periodLabel: string;
+    /** Total message count in the period */
+    messageCount: number;
+    /** Average cost per message in USD */
+    avgCostPerMessage: number;
+    /** Estimated savings from cache reads in USD */
+    cacheSavings: number;
+  };
+  /** Daily cost timeline for charting */
+  timeline: Array<{
+    /** Date string in YYYY-MM-DD format */
+    date: string;
+    /** Cost for this day in USD */
+    cost: number;
+    /** Total tokens used this day */
+    tokens: number;
+    /** Number of messages this day */
+    messages: number;
+  }>;
+  /** Cost breakdown by model */
+  byModel: Array<{
+    /** Model identifier string */
+    model: string;
+    /** Total cost for this model in USD */
+    cost: number;
+    /** Total tokens used by this model */
+    tokens: number;
+    /** Percentage of total cost (0-100) */
+    pct: number;
+  }>;
+  /** Cost breakdown by workspace */
+  byWorkspace: Array<{
+    /** Workspace ID */
+    id: string;
+    /** Workspace display name */
+    name: string;
+    /** Total cost for this workspace in USD */
+    cost: number;
+    /** Number of sessions in this workspace */
+    sessionCount: number;
+    /** Percentage of total cost (0-100) */
+    pct: number;
+  }>;
+  /** Top sessions ranked by cost */
+  sessions: Array<{
+    /** Session ID */
+    id: string;
+    /** Session display name */
+    name: string;
+    /** Workspace ID the session belongs to */
+    workspaceId: string;
+    /** Workspace display name */
+    workspaceName: string;
+    /** Total cost in USD */
+    cost: number;
+    /** Number of messages */
+    messageCount: number;
+    /** Model used by this session */
+    model: string;
+    /** ISO timestamp of last activity (null if never active) */
+    lastActive: string | null;
+    /** ISO timestamp of first message (null if no messages) */
+    firstMessage: string | null;
+  }>;
+}
+
 // ─── Errors ────────────────────────────────────────────────
 
 /**

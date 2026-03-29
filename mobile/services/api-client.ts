@@ -22,6 +22,16 @@ import {
   type CreateSessionInput,
   type SearchResult,
   type Subagent,
+  type ResourceMetrics,
+  type WorkspaceDocs,
+  type DocSection,
+  type Feature,
+  type WorktreeTask,
+  type CreateTaskInput,
+  type TaskPR,
+  type TaskChanges,
+  type CostPeriod,
+  type CostDashboardResponse,
   APIError,
 } from '../types/api';
 
@@ -260,6 +270,15 @@ export class MyrlinAPIClient {
    */
   async getSessionCost(id: string): Promise<SessionCost> {
     return this._fetch(`/api/sessions/${id}/cost`);
+  }
+
+  /**
+   * Fetch the cost dashboard with aggregated metrics, timeline, and breakdowns.
+   * @param period - Time period filter (day, week, month, all)
+   * @returns Full cost dashboard response with summary, timeline, and breakdowns
+   */
+  async getCostDashboard(period: CostPeriod): Promise<CostDashboardResponse> {
+    return this._fetch(`/api/cost/dashboard?period=${period}`);
   }
 
   /**
@@ -509,6 +528,28 @@ export class MyrlinAPIClient {
     return this._fetch('/api/conflicts');
   }
 
+  // ─── Resources ──────────────────────────────────────────
+
+  /**
+   * Fetch system and per-session resource metrics.
+   * @returns System CPU/memory stats and Claude session resource usage
+   */
+  async getResources(): Promise<ResourceMetrics> {
+    return this._fetch<ResourceMetrics>('/api/resources');
+  }
+
+  /**
+   * Kill a process by PID on the server.
+   * @param pid - OS process ID to terminate
+   * @returns Success status and descriptive message
+   */
+  async killProcess(pid: number): Promise<{ success: boolean; message: string }> {
+    return this._fetch('/api/resources/kill-process', {
+      method: 'POST',
+      body: JSON.stringify({ pid }),
+    });
+  }
+
   // ─── Discovery ──────────────────────────────────────────
 
   /**
@@ -530,6 +571,122 @@ export class MyrlinAPIClient {
     return this._fetch(
       `/api/browse?path=${encodeURIComponent(dirPath)}`
     );
+  }
+
+  // ─── Worktree Tasks ────────────────────────────────────────
+
+  /**
+   * Fetch all worktree tasks, optionally filtered by workspace.
+   * @param workspaceId - Optional workspace filter
+   * @returns List of worktree tasks
+   */
+  async getTasks(workspaceId?: string): Promise<{ tasks: WorktreeTask[] }> {
+    const query = workspaceId
+      ? `?workspaceId=${encodeURIComponent(workspaceId)}`
+      : '';
+    return this._fetch(`/api/worktree-tasks${query}`);
+  }
+
+  /**
+   * Create a new worktree task.
+   * @param data - Task creation parameters
+   * @returns The newly created task
+   */
+  async createTask(data: CreateTaskInput): Promise<{ task: WorktreeTask }> {
+    return this._fetch('/api/worktree-tasks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update an existing worktree task.
+   * @param id - Task ID to update
+   * @param data - Partial task fields to update
+   * @returns The updated task
+   */
+  async updateTask(
+    id: string,
+    data: Partial<WorktreeTask>
+  ): Promise<{ task: WorktreeTask }> {
+    return this._fetch(`/api/worktree-tasks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a worktree task.
+   * @param id - Task ID to delete
+   * @returns Success indicator
+   */
+  async deleteTask(id: string): Promise<{ success: boolean }> {
+    return this._fetch(`/api/worktree-tasks/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Merge a worktree task branch into its base branch.
+   * @param id - Task ID to merge
+   * @returns Success status and descriptive message
+   */
+  async mergeTask(id: string): Promise<{ success: boolean; message: string }> {
+    return this._fetch(`/api/worktree-tasks/${id}/merge`, { method: 'POST' });
+  }
+
+  /**
+   * Reject a worktree task and clean up its branch.
+   * @param id - Task ID to reject
+   * @returns Success status and descriptive message
+   */
+  async rejectTask(id: string): Promise<{ success: boolean; message: string }> {
+    return this._fetch(`/api/worktree-tasks/${id}/reject`, { method: 'POST' });
+  }
+
+  /**
+   * Push a worktree task branch to the remote.
+   * @param id - Task ID to push
+   * @returns Success status and descriptive message
+   */
+  async pushTask(id: string): Promise<{ success: boolean; message: string }> {
+    return this._fetch(`/api/worktree-tasks/${id}/push`, { method: 'POST' });
+  }
+
+  /**
+   * Create a GitHub PR for a worktree task.
+   * @param id - Task ID
+   * @returns The created PR metadata
+   */
+  async createTaskPR(id: string): Promise<{ pr: TaskPR }> {
+    return this._fetch(`/api/worktree-tasks/${id}/pr`, { method: 'POST' });
+  }
+
+  /**
+   * Get the PR status for a worktree task.
+   * @param id - Task ID
+   * @returns PR metadata or null if no PR exists
+   */
+  async getTaskPR(id: string): Promise<{ pr: TaskPR | null }> {
+    return this._fetch(`/api/worktree-tasks/${id}/pr`);
+  }
+
+  /**
+   * Generate a PR title and body using AI for a worktree task.
+   * @param id - Task ID
+   * @returns Generated PR title and body text
+   */
+  async generatePRDescription(id: string): Promise<{ title: string; body: string }> {
+    return this._fetch(`/api/worktree-tasks/${id}/pr/generate-description`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Get the changed files and stats for a worktree task branch.
+   * @param id - Task ID
+   * @returns Changed file list and line statistics
+   */
+  async getTaskChanges(id: string): Promise<TaskChanges> {
+    return this._fetch(`/api/worktree-tasks/${id}/changes`);
   }
 }
 
