@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.35] - 2026-05-09
+
+### Fixed
+
+- **Mobile sidebar and tab strip not scrollable** - The drag-drop-touch polyfill was loaded with `?autoload`, which uses default config (no press-hold mode). Default behavior treats any touch movement on a draggable element as a drag-start. Since sidebar workspace items, session items, kanban cards, and pane tabs are all `draggable="true"`, finger swipes on those areas were intercepted as drag attempts instead of passing through to native scroll. Replaced `?autoload` with explicit `enableDragDropTouch()` call using `isPressHoldMode: true` and a 350ms press-hold delay. Drag now requires a deliberate long-press; ordinary swipes scroll.
+
 ## [0.9.34] - 2026-05-06
 
 ### Added

@@ -1742,8 +1742,20 @@
       document.addEventListener('touchcancel', stop, { passive: true });
     })();
   </script>
-  <!-- Polyfills HTML5 drag-and-drop on touch devices (translates touch -> drag events) -->
-  <script type="module" src="vendor/drag-drop-touch.esm.min.js?autoload"></script>
+  <!-- Polyfills HTML5 drag-and-drop on touch devices (translates touch -> drag events).
+       isPressHoldMode requires a 350ms hold before drag arms, so normal swipe
+       gestures on the sidebar and tab strip pass through to native scroll
+       instead of being intercepted as drag-starts on draggable items inside. -->
+  <script type="module">
+    import { enableDragDropTouch } from './vendor/drag-drop-touch.esm.min.js';
+    enableDragDropTouch(document, document, {
+      forceListen: true,
+      isPressHoldMode: true,
+      pressHoldDelayMS: 350,
+      pressHoldMargin: 25,
+      pressHoldThresholdPixels: 0,
+    });
+  </script>
   <script src="vendor/qrcode.min.js"></script>
   <script src="vendor/xterm/xterm.min.js"></script>
   <script src="vendor/xterm-addon-fit/xterm-addon-fit.min.js"></script>
