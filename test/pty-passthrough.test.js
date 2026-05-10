@@ -157,21 +157,28 @@ console.log('\n  Plan 14-04 PTY pass-through tests');
 console.log('  ' + '-'.repeat(42));
 
 // ──────────────────────────────────────────────────────────────────────
-// Test 1: Descriptor flow
+// Test 1: Descriptor flow — provider.spawnCommand descriptor flows to pty.spawn
 // ──────────────────────────────────────────────────────────────────────
+// To exercise the provider path (NOT the bypass branch), call with the
+// default command 'claude' and override the claude provider's spawnCommand
+// to return a known descriptor. This proves the provider's descriptor
+// (cmd/args/env) propagates through the shell-wrap and reaches pty.spawn.
 check('Test 1 (PTY-03): provider.spawnCommand descriptor flows to pty.spawn', () => {
-  const { ptyMgr, fakeProvider, store } = buildFixture({
-    fakeProviderEnabled: true,
-    fakeProviderOverrides: {
-      spawnCommand: () => ({
-        cmd: 'fake-cli',
-        args: ['--foo', '--bar'],
-        cwd: os.tmpdir(),
-        env: { FOO: 'bar' },
-      }),
-    },
-  });
-  const sessionId = makeSessionWithProvider(store, 'faketest', { command: 'faketest' });
+  const { ptyMgr, store } = buildFixture({ includeClaude: true });
+  const registry = require('../src/providers');
+  const claude = registry.getProvider('claude');
+  let spawnCommandCalled = false;
+  claude.spawnCommand = (init) => {
+    spawnCommandCalled = true;
+    return {
+      cmd: 'claude', // gsd:provider-literal-allowed (test-local override)
+      args: ['--foo', '--bar'],
+      cwd: os.tmpdir(),
+      env: { FOO: 'bar' },
+    };
+  };
+
+  const sessionId = makeSessionWithProvider(store, 'claude', { command: 'claude' });
 
   let captured = null;
   const spy = (shell, shellArgs, spawnOpts) => {
@@ -180,29 +187,22 @@ check('Test 1 (PTY-03): provider.spawnCommand descriptor flows to pty.spawn', ()
   };
 
   ptyMgr.spawnSession(sessionId, {
-    command: 'faketest', // non-claude command, but provider id still lookups
+    // Use the default command ('claude') so the provider path fires
     _ptySpawnForTesting: spy,
+    _cwdFromJsonlForTesting: () => null,
   });
 
+  assert.ok(spawnCommandCalled, 'provider.spawnCommand must have been invoked on the claude path');
   assert.ok(captured, 'pty.spawn spy must have been invoked');
-  // Shell wrap: the joined fullCommand should contain fake-cli + flags.
-  const shellArgsJoined = captured.shellArgs.join(' ');
-  assert.ok(shellArgsJoined.includes('fake-cli'), 'shellArgs must include descriptor.cmd, got: ' + shellArgsJoined);
-  assert.ok(shellArgsJoined.includes('--foo'), 'shellArgs must include descriptor.args[0]');
-  assert.ok(shellArgsJoined.includes('--bar'), 'shellArgs must include descriptor.args[1]');
+  // Shell wrap: the joined fullCommand should contain claude + descriptor flags.
+  const fullCommand = captured.shellArgs[captured.shellArgs.length - 1];
+  assert.ok(fullCommand.includes('--foo'), 'fullCommand must include descriptor.args[0], got: ' + fullCommand);
+  assert.ok(fullCommand.includes('--bar'), 'fullCommand must include descriptor.args[1]');
   // env merge: descriptor.env.FOO should land on the spawn env
-  assert.strictEqual(captured.spawnOpts.env.FOO, 'bar', 'descriptor.env.FOO=bar must propagate');
-
-  // Suppress the result for the "command" branch test below: in this scenario
-  // the caller passed command:'faketest' which is non-claude, so the bypass
-  // branch fires and the inline descriptor wins. The spawnCommand override
-  // is therefore NOT called here. That is fine: this test asserts the
-  // pass-through plumbing for whichever branch fires; Test 6 below verifies
-  // the bypass explicitly. To assert provider.spawnCommand DOES fire on the
-  // claude path, see Test 5.
-  // Note: fakeProvider exists so the registry lookup paths can find it later;
-  // its spawnCommand may or may not have been invoked depending on the branch.
-  void fakeProvider;
+  assert.strictEqual(captured.spawnOpts.env.FOO, 'bar', 'descriptor.env.FOO=bar must propagate to spawn env');
+  // resolvedCwd should be the os.tmpdir() returned by the descriptor
+  assert.strictEqual(captured.spawnOpts.cwd, os.tmpdir(),
+    'descriptor.cwd must propagate to spawn opts, got: ' + captured.spawnOpts.cwd);
 });
 
 // ──────────────────────────────────────────────────────────────────────
@@ -256,18 +256,12 @@ check('Test 2 (PTY-03): descriptor.env undefined values DELETE the key from spaw
 // ──────────────────────────────────────────────────────────────────────
 // Test 3: non-Claude provider invalid cwd falls back to homedir (NOT JSONL)
 // ──────────────────────────────────────────────────────────────────────
+// Use the bypass branch (command:'faketest') so the inline descriptor is
+// built. Pass cwd:'/invalid/path' explicitly so resolvedCwd starts invalid
+// and the cwd-fallback branch fires. The branch should hit the homedir
+// fallback (because useProvider===false), NOT the cwdFromJsonl path.
 check('Test 3 (PTY-03): non-Claude provider invalid cwd falls back to homedir', () => {
-  const { ptyMgr, store } = buildFixture({
-    fakeProviderEnabled: true,
-    fakeProviderOverrides: {
-      spawnCommand: () => ({
-        cmd: 'fake-cli',
-        args: [],
-        cwd: '/this/path/does/not/exist/anywhere',
-        env: {},
-      }),
-    },
-  });
+  const { ptyMgr, store } = buildFixture({ fakeProviderEnabled: true });
   const sessionId = makeSessionWithProvider(store, 'faketest', { command: 'faketest' });
 
   let captured = null;
@@ -279,7 +273,8 @@ check('Test 3 (PTY-03): non-Claude provider invalid cwd falls back to homedir', 
   const cwdFromJsonlSpy = () => { cwdFromJsonlInvoked = true; return '/should/not/use/this'; };
 
   ptyMgr.spawnSession(sessionId, {
-    command: 'faketest',
+    command: 'faketest', // non-claude, triggers bypass branch
+    cwd: '/this/path/does/not/exist/anywhere/at/all',
     _ptySpawnForTesting: spy,
     _cwdFromJsonlForTesting: cwdFromJsonlSpy,
   });

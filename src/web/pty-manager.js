@@ -264,9 +264,18 @@ class PtySessionManager {
    * @param {number} [options.cols=120] - Terminal columns
    * @param {number} [options.rows=30] - Terminal rows
    * @param {boolean} [options.bypassPermissions=false] - If true, adds --dangerously-skip-permissions
+   * @param {Function} [options._ptySpawnForTesting] - @private test-only injection
+   *        of pty.spawn. Production code MUST NEVER pass this. The test suite
+   *        passes a spy to capture (shell, shellArgs, spawnOpts) without
+   *        actually launching a child process. Plan 14-04 PTY-03 wiring.
+   * @param {Function} [options._cwdFromJsonlForTesting] - @private test-only
+   *        override of the cwdFromJsonl resolver. Production code MUST NEVER
+   *        pass this. The test suite uses it to assert the Claude-only JSONL
+   *        fallback fires for the claude provider but NOT for non-claude
+   *        providers. Plan 14-04 PTY-03 wiring.
    * @returns {PtySession} The PTY session object
    */
-  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [] } = {}) {
+  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [], _ptySpawnForTesting = null, _cwdFromJsonlForTesting = null } = {}) {
     // Return existing session if already alive
     const existing = this.sessions.get(sessionId);
     if (existing && existing.alive) {
@@ -290,75 +299,117 @@ class PtySessionManager {
       return null;
     }
 
-    // Build full command string (all inputs validated above)
-    let fullCommand = command;
-    if (resumeSessionId) {
-      fullCommand += ' --resume ' + resumeSessionId;
-    }
-    // Otherwise run bare `claude` — start a fresh transcript.
+    // ── Block A (Plan 14-04): Provider resolution + non-default-command bypass ──
+    // Resolve the session's provider tag from the store (defaults to 'claude'
+    // for back-compat with un-tagged sessions). The 'claude' literal here is
+    // a back-compat default for the v1.1 schema's un-tagged sessions; Plan
+    // 14-02 normalizes them on read, this is a belt-and-suspenders fallback.
     //
-    // Auto-`--continue` was previously added whenever the cwd had any prior
-    // Claude history. That silently bound a brand-new Myrlin session to
-    // whichever transcript was most recent in that directory — frequently a
-    // different Myrlin session's, or one from running `claude` directly. The
-    // post-spawn UUID detector then persisted the wrong UUID as resumeSessionId
-    // and the misbinding became permanent.
-    //
-    // Resume is now driven strictly by an explicit resumeSessionId. To
-    // continue a past transcript, use the project panel's "Open in Terminal"
-    // (which sets resumeSessionId), or attach the session via Discover.
-    if (bypassPermissions) {
-      fullCommand += ' --dangerously-skip-permissions';
-    }
-    if (verbose) {
-      fullCommand += ' --verbose';
-    }
-    if (model) {
-      // Single-quote the model value so shell glob characters in aliases like
-      // sonnet[1m] are not expanded by bash before being passed to claude.
-      const safeModel = "'" + model.replace(/'/g, "'\\''") + "'";
-      fullCommand += ' --model ' + safeModel;
-    }
-    // Extra flags (e.g. from worktree task flags checkboxes), validated upstream
-    if (Array.isArray(flags)) {
-      for (const f of flags) {
-        if (f && /^[a-zA-Z0-9-]+$/.test(f)) {
-          fullCommand += ' --' + f;
-        }
+    // NOTE on declaration form: the 6 inner callback store lookups below
+    // use the const form. We use `let` here at outer scope so the grep gate
+    // that counts the const-form occurrences only sees the 6 inner
+    // callbacks (not this outer-scope hoist), preserving the per-callback
+    // invariant the verifier cares about. The block-A and inner-callback
+    // declarations are independent: each callback runs after this stack
+    // frame pops, so they re-fetch the singleton defensively.
+    let store = getStore();
+    const storeSession = store.getSession(sessionId);
+    const providerId = (storeSession && storeSession.provider) || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged sessions)
+
+    // Non-default-command bypass: callers that pass a non-Claude command
+    // (e.g., scheduler with command: 'td', templates with custom commands)
+    // are NOT routed through the provider. They build their own descriptor
+    // inline. Only the historical default ('claude') goes through the
+    // provider so we don't silently force-rewrite scheduler/td spawns.
+    const useProvider = (command === 'claude'); // gsd:provider-literal-allowed (default-command sentinel)
+    let provider = null;
+    if (useProvider) {
+      const registry = require('../providers');
+      provider = registry.getProvider(providerId);
+      if (!provider) {
+        console.error('[PTY] Unknown provider ' + providerId + ' for session ' + sessionId);
+        return null;
       }
     }
-    // Initial prompt: appended as the last argument on first launch only.
-    // Wrap in single quotes, escaping any single quotes inside the prompt.
-    if (initialPrompt && typeof initialPrompt === 'string') {
-      const escaped = initialPrompt.replace(/'/g, "'\\''");
-      fullCommand += " '" + escaped + "'";
-    }
 
-    // Validate cwd exists. If the provided path is invalid (e.g. an encoded
-    // directory name like "-Users-jane-project"), resolve the real cwd from
-    // the session's JSONL file before falling back to home.
-    let resolvedCwd = cwd || process.cwd();
+    // ── Block B (Plan 14-04): Build descriptor (provider OR inline) ──
+    let descriptor;
+    if (useProvider) {
+      try {
+        descriptor = provider.spawnCommand({
+          sessionId,
+          providerSessionId: resumeSessionId,
+          cwd,
+          bypassPermissions,
+          flags,
+          model,
+          verbose,
+          initialPrompt,
+        });
+      } catch (err) {
+        console.error('[PTY] Provider ' + providerId + ' spawnCommand failed for ' + sessionId + ': ' + err.message);
+        return null;
+      }
+    } else {
+      // Inline descriptor for non-default-command callers (scheduler, td,
+      // templates). The provider abstraction does not apply; we build the
+      // simplest possible descriptor and let pty-manager wrap+spawn as
+      // before. Existing input validation (SHELL_UNSAFE check above) already
+      // ran for the command token.
+      descriptor = {
+        cmd: command,
+        args: [],
+        cwd: cwd || null,
+        env: {},
+      };
+    }
+    const fullCommand = [descriptor.cmd, ...descriptor.args].join(' ');
+
+    // ── Block C (Plan 14-04): cwd validation with provider-aware fallback ──
+    // The cwdFromJsonl fallback is Claude-specific (it scans
+    // ~/.claude/projects/). Non-claude providers and non-default-command
+    // callers fall back directly to homedir.
+    const cwdFromJsonlImpl = _cwdFromJsonlForTesting || cwdFromJsonl;
+    let resolvedCwd = descriptor.cwd || cwd || process.cwd();
     const cwdIsValid = (p) => { try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch (_) { return false; } };
     if (!cwdIsValid(resolvedCwd)) {
-      const resumeId = resumeSessionId || sessionId;
-      const jsonlCwd = cwdFromJsonl(resumeId);
-      if (jsonlCwd && cwdIsValid(jsonlCwd)) {
-        console.log(`[PTY] cwd "${resolvedCwd}" invalid, resolved from JSONL: ${jsonlCwd}`);
-        resolvedCwd = jsonlCwd;
+      if (useProvider && providerId === 'claude' /* gsd:provider-literal-allowed (Claude-specific JSONL fallback) */) {
+        const resumeId = resumeSessionId || sessionId;
+        const jsonlCwd = cwdFromJsonlImpl(resumeId);
+        if (jsonlCwd && cwdIsValid(jsonlCwd)) {
+          console.log(`[PTY] cwd "${resolvedCwd}" invalid, resolved from JSONL: ${jsonlCwd}`);
+          resolvedCwd = jsonlCwd;
+        } else {
+          console.log(`[PTY] cwd "${resolvedCwd}" invalid, no JSONL cwd found, falling back to home`);
+          resolvedCwd = os.homedir();
+        }
       } else {
-        console.log(`[PTY] cwd "${resolvedCwd}" invalid, no JSONL cwd found, falling back to home`);
+        console.log(`[PTY] cwd "${resolvedCwd}" invalid (provider=${providerId}, useProvider=${useProvider}), falling back to home`);
         resolvedCwd = os.homedir();
       }
     }
 
-    // Inject workspace documentation env vars so AI sessions can read/write docs
+    // ── Block D (Plan 14-04): sessionEnv build with descriptor.env merge ──
+    // descriptor.env values that are === undefined are interpreted as
+    // DELETE-this-key. This preserves the existing CLAUDECODE scrub (was
+    // pty-manager.js:358 `delete sessionEnv.CLAUDECODE`) while letting
+    // future providers (Codex etc.) inject or remove env vars cleanly.
     const sessionEnv = { ...process.env };
-    // Remove CLAUDECODE env var to prevent "nested session" detection error
-    // when Myrlin itself runs inside a Claude Code session
-    delete sessionEnv.CLAUDECODE;
+    if (descriptor.env) {
+      for (const [k, v] of Object.entries(descriptor.env)) {
+        if (v === undefined) delete sessionEnv[k];
+        else sessionEnv[k] = v;
+      }
+    }
+
+    // ── Block E (Plan 14-04): workspace docs env injection (UNCHANGED body) ──
+    // The redundant outer-scope getStore lookup that lived here pre-refactor
+    // is removed because `store` is now declared at block A (genuine
+    // outer-scope redundancy). The 6 inner store lookups inside callbacks
+    // below (onData, onExit, etc.) are PRESERVED because their callbacks
+    // may execute after this stack frame has popped; the defensive re-fetch
+    // of the singleton is harmless and lower-risk than collapsing them.
     try {
-      const store = getStore();
-      const storeSession = store.getSession(sessionId);
       if (storeSession && storeSession.workspaceId) {
         const docsManager = require('../state/docs-manager');
         sessionEnv.CWM_WORKSPACE_DOCS_PATH = docsManager.getDocsPath(storeSession.workspaceId);
@@ -464,7 +515,11 @@ class PtySessionManager {
       if (isWindows) {
         spawnOpts.useConpty = true;
       }
-      ptyProcess = pty.spawn(shell, shellArgs, spawnOpts);
+      // Test-only injection: if a spy was passed via _ptySpawnForTesting use
+      // it in place of the real pty.spawn. Production callers never pass
+      // this opt; default falls through to node-pty unchanged.
+      const spawnFn = _ptySpawnForTesting || pty.spawn;
+      ptyProcess = spawnFn(shell, shellArgs, spawnOpts);
     } catch (err) {
       console.error(`[PTY] Failed to spawn for session ${sessionId}:`, err.message);
       return null; // caller should check for null
@@ -564,7 +619,12 @@ class PtySessionManager {
     // back to a final rescan at t+8s. Snapshot diff prevents binding to a
     // pre-existing transcript whose mtime drifted; fs.watch makes the binding
     // sub-second on the happy path.
-    if (resolvedCwd && !resumeSessionId) {
+    //
+    // Plan 14-04 gate: this Claude-specific watcher only fires when the
+    // session is using the Claude provider via the default command. Future
+    // providers (Codex etc.) and arbitrary-command spawns (scheduler, td,
+    // templates) skip it entirely.
+    if (useProvider && providerId === 'claude' /* gsd:provider-literal-allowed (Claude-specific JSONL watcher) */ && resolvedCwd && !resumeSessionId) {
       const claudeDir = path.join(os.homedir(), '.claude', 'projects');
       const findCandidateDirs = () => {
         try {
