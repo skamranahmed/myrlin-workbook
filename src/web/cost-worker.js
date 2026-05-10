@@ -3,20 +3,31 @@
  * Runs JSONL parsing off the main event loop to prevent terminal I/O freezes.
  * Receives { jsonlPath, pricing, defaultPricing } messages,
  * returns the calculated cost breakdown.
+ *
+ * Plan 14-03 (COST-04) wires this module as `claudeProvider.costAdapter`,
+ * which means the file must be safe to `require()` from the main thread.
+ * The parentPort.on() listener registration is now guarded behind
+ * `if (parentPort)` so that requiring the file outside a worker context
+ * (e.g. from the provider object, from tests, or from documentation
+ * tooling) is a no-op rather than a crash. Worker-thread behavior is
+ * unchanged: when run as a Worker, parentPort is non-null and the
+ * listener is registered exactly as before.
  */
 const { parentPort } = require('worker_threads');
 const fs = require('fs');
 
-parentPort.on('message', (msg) => {
-  const { id, jsonlPath, pricing, defaultPricing } = msg;
+if (parentPort) {
+  parentPort.on('message', (msg) => {
+    const { id, jsonlPath, pricing, defaultPricing } = msg;
 
-  try {
-    const result = calculateSessionCost(jsonlPath, pricing, defaultPricing);
-    parentPort.postMessage({ id, result });
-  } catch (err) {
-    parentPort.postMessage({ id, error: err.message });
-  }
-});
+    try {
+      const result = calculateSessionCost(jsonlPath, pricing, defaultPricing);
+      parentPort.postMessage({ id, result });
+    } catch (err) {
+      parentPort.postMessage({ id, error: err.message });
+    }
+  });
+}
 
 /**
  * Parse a JSONL file and calculate token usage and estimated cost.

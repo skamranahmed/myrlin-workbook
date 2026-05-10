@@ -25,6 +25,12 @@
 
 'use strict';
 
+// Plan 14-03 (ABST-03): the Claude provider object. Required eagerly so
+// initRegistry can self-register it without the caller having to know
+// about provider files. The require chain is small and side-effect-free
+// at module load (the provider object is built from pure functions).
+const claudeProvider = require('./claude'); // gsd:provider-literal-allowed
+
 // ---------------------------------------------------------------------------
 // Type definitions (JSDoc, mirrored verbatim in docs/PROVIDER-INTERFACE.md)
 // ---------------------------------------------------------------------------
@@ -245,6 +251,14 @@ async function initRegistry(store) {
     return; // idempotent: same store ref, no-op
   }
   _storeRef = store;
+
+  // Plan 14-03 (ABST-03): self-register the Claude provider exactly once.
+  // Tests that pre-register a fake claude with the same id are honored
+  // (the `has` guard prevents overwrite); production code paths get the
+  // real provider without needing to know about provider files.
+  if (!_providers.has(claudeProvider.id)) {
+    register(claudeProvider);
+  }
 
   const cfg = (store && store.state && store.state.settings && store.state.settings.providers) || {};
   for (const [id, on] of Object.entries(cfg)) {

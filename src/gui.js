@@ -30,6 +30,48 @@ const { generateStartupToken } = require('./web/auth');
 
 const store = getStore();
 
+// Module-scoped reference to the HTTP server. Assigned inside
+// bootGuiAfterRegistry() so the signal handlers below can close it on
+// shutdown without depending on closure scope. Plan 14-03: needed
+// because the bootstrap is now wrapped in a .then() callback.
+let server = null;
+
+// ─── Provider Registry Init (Plan 14-03 / ABST-03) ───────
+// Initialize the provider registry once after store.init() and BEFORE
+// the server starts. The registry self-registers the Claude provider,
+// reads `state.settings.providers` to determine the enabled set, and
+// awaits each enabled provider's init() hook. We use a .then() callback
+// rather than wrapping the entire bootstrap in an async IIFE so the
+// surrounding synchronous shape (function declarations, signal handlers
+// at file scope) is preserved. The TUI entry src/index.js is NOT touched
+// in Phase 14; Phase 18 will revisit when sidebar tabs land and the TUI
+// has more than one provider to display.
+const providerRegistry = require('./providers');
+providerRegistry.initRegistry(store).then(() => {
+  bootGuiAfterRegistry();
+}).catch((err) => {
+  // Failing to init providers is fatal because Claude must always be
+  // enabled (force-on at registry init). Logging via stderr keeps the
+  // message visible even when stdout is piped.
+  // eslint-disable-next-line no-console
+  console.error('[Boot] Provider registry init failed: ' + (err && err.message ? err.message : String(err)));
+  process.exit(1);
+});
+
+/**
+ * Run the rest of the GUI bootstrap once the provider registry has
+ * initialized. Contains the demo seeding, server start, RSS logger, and
+ * browser-open side effects. The function is declared so that hoisting
+ * keeps it callable from inside the .then() callback above without
+ * indenting the bulk of the file. Process-level signal and error
+ * handlers are installed at file scope (below) and intentionally
+ * outside this function: they are install-once and do not depend on
+ * registry init.
+ *
+ * @returns {void}
+ */
+function bootGuiAfterRegistry() {
+
 // ─── Demo Data Seeding ─────────────────────────────────────
 
 if (process.argv.includes('--demo')) {
@@ -99,7 +141,7 @@ if (process.argv.includes('--demo')) {
 
 const port = parseInt(process.env.PORT, 10) || 3456;
 const host = process.env.CWM_HOST || '127.0.0.1';
-const server = startServer(port, host);
+server = startServer(port, host);
 
 const startupToken = generateStartupToken();
 const authUrl = `http://${host}:${port}?token=${encodeURIComponent(startupToken)}`;
@@ -201,13 +243,15 @@ const _rssLogger = setInterval(() => {
 }, 60000);
 _rssLogger.unref();
 
+} // end function bootGuiAfterRegistry
+
 // ─── Graceful Shutdown ─────────────────────────────────────
 
 process.on('SIGINT', () => {
   const ptyManager = getPtyManager();
   if (ptyManager) ptyManager.destroyAll();
   store.save();
-  server.close();
+  if (server) server.close();
   process.exit(0);
 });
 
@@ -215,7 +259,7 @@ process.on('SIGTERM', () => {
   const ptyManager = getPtyManager();
   if (ptyManager) ptyManager.destroyAll();
   store.save();
-  server.close();
+  if (server) server.close();
   process.exit(0);
 });
 
