@@ -1,0 +1,1027 @@
+{
+  "version": 1,
+  "workspaces": {
+    "39cf9645-b565-4ae8-82f2-73415853aa41": {
+      "id": "39cf9645-b565-4ae8-82f2-73415853aa41",
+      "name": "Workspace-7fcf25",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "b4318077-5af9-4e61-99e5-722755d57c8b",
+        "13e31e61-dec1-4d2c-8ae2-75ae62b469f6",
+        "1a367117-81e1-4c5b-af29-5793732f7084"
+      ],
+      "createdAt": "2026-03-21T20:51:15.106Z",
+      "lastActive": "2026-03-26T17:50:55.340Z",
+      "autoSummary": true
+    },
+    "9d91cc55-3ce9-49f1-9b8e-3b026c63523a": {
+      "id": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "name": "Workspace-daf057",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "fcca60ac-b276-4804-9401-862fd5565388",
+        "76a7afe4-05e1-4310-8a85-d6cf57daadf5",
+        "112a7abb-c494-4fdd-ac59-8daaa483103d",
+        "6b10c24d-995d-4376-9a34-e01d03ce9ed7",
+        "35b67966-13e8-42a5-881c-c017ffc52abe",
+        "02f71345-8e6c-4335-85f7-17ac2a98b222",
+        "b5604363-feaf-48c3-a57f-7c50fea720b1",
+        "4341ee0f-a0f0-45e3-b002-fced040cced7",
+        "e3ec4845-29e9-47ba-aeea-fd286e2f8e6e",
+        "24dddcea-6184-4d9e-be5c-94d17da74020"
+      ],
+      "createdAt": "2026-03-21T20:51:15.215Z",
+      "lastActive": "2026-04-10T05:12:17.048Z",
+      "autoSummary": true
+    },
+    "8a8c184e-4edc-4894-bddb-7b3f924da1ed": {
+      "id": "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+      "name": "Workspace-26b911",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "ae56683d-6629-4163-810e-7ada6cd4355c",
+        "078757db-5e29-4b3a-85fc-071580b70f00",
+        "6629ef6f-def9-4e83-8bad-9219aa8e8006",
+        "3109e543-fe96-4615-a935-234be9317089"
+      ],
+      "createdAt": "2026-03-21T20:51:15.327Z",
+      "lastActive": "2026-04-23T04:30:16.866Z",
+      "autoSummary": true
+    },
+    "62be2778-41fd-46a1-b636-3fce364bba74": {
+      "id": "62be2778-41fd-46a1-b636-3fce364bba74",
+      "name": "Workspace-21154b",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "727a1782-aaa5-454f-9ab8-f3f12c2e1941",
+        "de68b475-c65e-4b20-9743-bf903c71c206"
+      ],
+      "createdAt": "2026-03-21T20:51:15.432Z",
+      "lastActive": "2026-03-21T21:50:09.014Z",
+      "autoSummary": true
+    },
+    "bedc140e-60f3-47ce-a84a-52ac6953bd46": {
+      "id": "bedc140e-60f3-47ce-a84a-52ac6953bd46",
+      "name": "Workspace-e3e690",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "ba27066e-c9ac-4992-b630-4c70094742a2"
+      ],
+      "createdAt": "2026-03-21T20:51:15.549Z",
+      "lastActive": "2026-03-21T21:50:09.019Z",
+      "autoSummary": true
+    },
+    "05d80aec-8102-4e3e-ac92-24527093698d": {
+      "id": "05d80aec-8102-4e3e-ac92-24527093698d",
+      "name": "Workspace-fc1e5a",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "e9764b80-d202-4eca-a955-232091e5f59b",
+        "f3bbb0b8-68e6-4741-b0c2-306f520a5e9d",
+        "2dbc6025-282d-4844-8fbf-e4e733b43d84"
+      ],
+      "createdAt": "2026-03-21T20:51:15.662Z",
+      "lastActive": "2026-04-27T21:41:00.486Z",
+      "autoSummary": true
+    },
+    "db745b03-5804-46a1-9e3f-7934c4182aeb": {
+      "id": "db745b03-5804-46a1-9e3f-7934c4182aeb",
+      "name": "Workspace-f1d32c",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "df10caf3-4209-4b2e-95e3-188dec8c00e8",
+        "4e5f52b1-7a24-4abb-ab3a-c511306ec53d",
+        "ad32e1b5-bf9d-4f8e-b23a-27e05610b3cd"
+      ],
+      "createdAt": "2026-03-21T20:51:15.773Z",
+      "lastActive": "2026-04-07T01:05:04.455Z",
+      "autoSummary": true
+    },
+    "8b521cf3-0968-4b2e-a4f4-b8382937fb43": {
+      "id": "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+      "name": "Workspace-4264ff",
+      "description": "",
+      "color": "cyan",
+      "sessions": [
+        "f9b83e4a-4209-4571-b9fe-a6cb5799d9aa",
+        "899d5768-76be-4d90-8316-2712a9fc11af",
+        "9396aef1-18f6-48ba-abc7-c01d8f05abf1",
+        "9965f990-3730-4659-a26d-6c9378201527"
+      ],
+      "createdAt": "2026-03-21T20:51:15.881Z",
+      "lastActive": "2026-03-21T21:50:09.082Z",
+      "autoSummary": true
+    },
+    "6d9140a5-3040-47a9-be5e-e9047524672a": {
+      "id": "6d9140a5-3040-47a9-be5e-e9047524672a",
+      "name": "Workspace-e92766",
+      "description": "",
+      "color": "mauve",
+      "sessions": [
+        "3d37352c-fd59-440b-9562-36e36a38e66a"
+      ],
+      "createdAt": "2026-03-26T04:00:05.103Z",
+      "lastActive": "2026-03-26T05:11:45.084Z",
+      "autoSummary": true
+    },
+    "70a61d6a-b496-4e2a-a844-c820510ae364": {
+      "id": "70a61d6a-b496-4e2a-a844-c820510ae364",
+      "name": "Workspace-67bc48",
+      "description": "",
+      "color": "yellow",
+      "sessions": [
+        "3f22cebb-449b-4c07-97b4-5f07c35a4a03",
+        "e84b3bd8-c988-4eb4-9985-59ffa6696347",
+        "225f85d5-2634-49ff-93ac-1fdcfacdab65",
+        "f4d75657-70f7-4028-aca1-09a495358bc4"
+      ],
+      "createdAt": "2026-04-06T22:35:10.348Z",
+      "lastActive": "2026-04-23T14:35:22.964Z",
+      "autoSummary": true
+    },
+    "363cf040-73c5-441c-9945-bacbd448c3e5": {
+      "id": "363cf040-73c5-441c-9945-bacbd448c3e5",
+      "name": "Workspace-7fcf25",
+      "description": "",
+      "color": "mauve",
+      "icon": null,
+      "sessions": [
+        "7f31bc8a-7b45-4531-ba00-ce1f995e8970",
+        "aceea276-0922-4ee3-850a-802901739dfc",
+        "88a349fb-bddb-46ab-838f-264716d22ca9",
+        "10465bf3-06f7-41ab-8dcd-7f3f82208893"
+      ],
+      "createdAt": "2026-04-23T00:24:20.614Z",
+      "lastActive": "2026-04-23T00:37:32.683Z",
+      "autoSummary": true
+    }
+  },
+  "sessions": {
+    "b4318077-5af9-4e61-99e5-722755d57c8b": {
+      "id": "b4318077-5af9-4e61-99e5-722755d57c8b",
+      "name": "Session-0a6291",
+      "workspaceId": "39cf9645-b565-4ae8-82f2-73415853aa41",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "01ec027f-d5ba-42db-ae3e-1337d204da7b",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.938Z",
+      "lastActive": "2026-04-02T16:44:55.587Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.591Z",
+          "message": "",
+          "text": ""
+        }
+      ]
+    },
+    "13e31e61-dec1-4d2c-8ae2-75ae62b469f6": {
+      "id": "13e31e61-dec1-4d2c-8ae2-75ae62b469f6",
+      "name": "Session-f4b10b",
+      "workspaceId": "39cf9645-b565-4ae8-82f2-73415853aa41",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "fbc77065-760d-4834-876c-57aef851f51b",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.944Z",
+      "lastActive": "2026-04-02T16:44:55.604Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.607Z",
+          "message": "",
+          "text": ""
+        }
+      ]
+    },
+    "fcca60ac-b276-4804-9401-862fd5565388": {
+      "id": "fcca60ac-b276-4804-9401-862fd5565388",
+      "name": "Session-25d687",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/e3a931",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "bc78b27b-1792-4885-b940-c988355e3a39",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.950Z",
+      "lastActive": "2026-04-02T16:44:55.600Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.604Z",
+          "message": "",
+          "text": ""
+        }
+      ]
+    },
+    "76a7afe4-05e1-4310-8a85-d6cf57daadf5": {
+      "id": "76a7afe4-05e1-4310-8a85-d6cf57daadf5",
+      "name": "Session-3aa104",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "2d1047c7-42ea-4bf8-a17e-1e4d3e448582",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.955Z",
+      "lastActive": "2026-03-31T15:46:30.165Z",
+      "logs": []
+    },
+    "112a7abb-c494-4fdd-ac59-8daaa483103d": {
+      "id": "112a7abb-c494-4fdd-ac59-8daaa483103d",
+      "name": "Session-5ad817",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "c0d5a3a3-9963-49c6-9de3-185b47034260",
+      "status": "running",
+      "pid": 19620,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.975Z",
+      "lastActive": "2026-05-01T22:14:30.775Z",
+      "logs": [],
+      "bypassPermissions": true
+    },
+    "ae56683d-6629-4163-810e-7ada6cd4355c": {
+      "id": "ae56683d-6629-4163-810e-7ada6cd4355c",
+      "name": "Session-0639c6",
+      "workspaceId": "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+      "workingDir": "/anon/e3a931",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "4271e03d-7295-40e4-bb35-0fd887c39461",
+      "status": "running",
+      "pid": 19772,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.981Z",
+      "lastActive": "2026-05-10T17:29:55.734Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.580Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "078757db-5e29-4b3a-85fc-071580b70f00": {
+      "id": "078757db-5e29-4b3a-85fc-071580b70f00",
+      "name": "Session-9a4fcf",
+      "workspaceId": "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+      "workingDir": "/anon/e3a931",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "4ece62ba-44db-49a2-8af5-4c44f85a1514",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.987Z",
+      "lastActive": "2026-03-21T21:50:08.987Z",
+      "logs": []
+    },
+    "727a1782-aaa5-454f-9ab8-f3f12c2e1941": {
+      "id": "727a1782-aaa5-454f-9ab8-f3f12c2e1941",
+      "name": "Session-5ad817",
+      "workspaceId": "62be2778-41fd-46a1-b636-3fce364bba74",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "c0d5a3a3-9963-49c6-9de3-185b47034260",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:08.998Z",
+      "lastActive": "2026-03-21T21:50:08.998Z",
+      "logs": []
+    },
+    "de68b475-c65e-4b20-9743-bf903c71c206": {
+      "id": "de68b475-c65e-4b20-9743-bf903c71c206",
+      "name": "Session-532e42",
+      "workspaceId": "62be2778-41fd-46a1-b636-3fce364bba74",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "9af8b4ef-b5d4-4a69-a004-62755e612e39",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.014Z",
+      "lastActive": "2026-03-21T21:50:09.014Z",
+      "logs": []
+    },
+    "ba27066e-c9ac-4992-b630-4c70094742a2": {
+      "id": "ba27066e-c9ac-4992-b630-4c70094742a2",
+      "name": "Session-7ed9ff",
+      "workspaceId": "bedc140e-60f3-47ce-a84a-52ac6953bd46",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "0fc5483a-6108-4305-902c-db6c810d8fc6",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.019Z",
+      "lastActive": "2026-03-22T10:59:48.577Z",
+      "logs": []
+    },
+    "e9764b80-d202-4eca-a955-232091e5f59b": {
+      "id": "e9764b80-d202-4eca-a955-232091e5f59b",
+      "name": "Session-025016",
+      "workspaceId": "05d80aec-8102-4e3e-ac92-24527093698d",
+      "workingDir": "/anon/665673",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "36b04d1d-4260-4630-aa1c-283f822dba0e",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.029Z",
+      "lastActive": "2026-03-21T21:50:09.029Z",
+      "logs": []
+    },
+    "f3bbb0b8-68e6-4741-b0c2-306f520a5e9d": {
+      "id": "f3bbb0b8-68e6-4741-b0c2-306f520a5e9d",
+      "name": "Session-fb8c55",
+      "workspaceId": "05d80aec-8102-4e3e-ac92-24527093698d",
+      "workingDir": "/anon/665673",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "4d9d0d40-df32-4fb3-bd45-b755ca5618fc",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.041Z",
+      "lastActive": "2026-03-21T21:50:09.041Z",
+      "logs": []
+    },
+    "df10caf3-4209-4b2e-95e3-188dec8c00e8": {
+      "id": "df10caf3-4209-4b2e-95e3-188dec8c00e8",
+      "name": "Session-6abcba",
+      "workspaceId": "db745b03-5804-46a1-9e3f-7934c4182aeb",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "0fc5483a-6108-4305-902c-db6c810d8fc6",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.050Z",
+      "lastActive": "2026-03-22T10:59:48.574Z",
+      "logs": []
+    },
+    "4e5f52b1-7a24-4abb-ab3a-c511306ec53d": {
+      "id": "4e5f52b1-7a24-4abb-ab3a-c511306ec53d",
+      "name": "Session-93101a",
+      "workspaceId": "db745b03-5804-46a1-9e3f-7934c4182aeb",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "c0df573d-78ce-40a7-9033-eb392e87395c",
+      "status": "running",
+      "pid": 89196,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.054Z",
+      "lastActive": "2026-05-10T17:29:55.753Z",
+      "logs": [],
+      "bypassPermissions": false
+    },
+    "f9b83e4a-4209-4571-b9fe-a6cb5799d9aa": {
+      "id": "f9b83e4a-4209-4571-b9fe-a6cb5799d9aa",
+      "name": "Session-263338",
+      "workspaceId": "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+      "workingDir": "/anon/6fd6f3",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "e964d01e-031d-460a-8988-e9bff6efb949",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.059Z",
+      "lastActive": "2026-03-22T10:59:48.564Z",
+      "logs": []
+    },
+    "899d5768-76be-4d90-8316-2712a9fc11af": {
+      "id": "899d5768-76be-4d90-8316-2712a9fc11af",
+      "name": "Session-f0fd4c",
+      "workspaceId": "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+      "workingDir": "/anon/6fd6f3",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "20553635-833e-4a24-af3b-8cbee03c2d65",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.064Z",
+      "lastActive": "2026-03-21T21:50:09.064Z",
+      "logs": []
+    },
+    "9396aef1-18f6-48ba-abc7-c01d8f05abf1": {
+      "id": "9396aef1-18f6-48ba-abc7-c01d8f05abf1",
+      "name": "Session-4d9a79",
+      "workspaceId": "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+      "workingDir": "/anon/6fd6f3",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "e964d01e-031d-460a-8988-e9bff6efb949",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.073Z",
+      "lastActive": "2026-03-21T21:50:09.073Z",
+      "logs": []
+    },
+    "9965f990-3730-4659-a26d-6c9378201527": {
+      "id": "9965f990-3730-4659-a26d-6c9378201527",
+      "name": "Session-18ffb7",
+      "workspaceId": "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+      "workingDir": "/anon/6fd6f3",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "00964339-f945-4ba0-aa7f-e1bcb47be118",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-21T21:50:09.082Z",
+      "lastActive": "2026-03-21T21:50:09.082Z",
+      "logs": []
+    },
+    "6b10c24d-995d-4376-9a34-e01d03ce9ed7": {
+      "id": "6b10c24d-995d-4376-9a34-e01d03ce9ed7",
+      "name": "Session-f7a778",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "0fc5483a-6108-4305-902c-db6c810d8fc6",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-22T17:16:44.705Z",
+      "lastActive": "2026-04-02T16:44:55.591Z",
+      "logs": [
+        {
+          "time": "2026-03-22T17:17:02.361Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-02T16:44:55.595Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "35b67966-13e8-42a5-881c-c017ffc52abe": {
+      "id": "35b67966-13e8-42a5-881c-c017ffc52abe",
+      "name": "Session-32cfd0",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "8fc9a943-707e-415e-935c-150193e66064",
+      "status": "running",
+      "pid": 68716,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-23T05:28:30.132Z",
+      "lastActive": "2026-05-08T18:14:21.746Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.571Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "02f71345-8e6c-4335-85f7-17ac2a98b222": {
+      "id": "02f71345-8e6c-4335-85f7-17ac2a98b222",
+      "name": "Session-25d687",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "1866d1dd-bd5a-4d32-96ed-bf48b05daa9a",
+      "status": "running",
+      "pid": 3768,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-23T15:13:33.708Z",
+      "lastActive": "2026-05-01T22:21:50.179Z",
+      "logs": [
+        {
+          "time": "2026-04-02T16:44:55.584Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "3d37352c-fd59-440b-9562-36e36a38e66a": {
+      "id": "3d37352c-fd59-440b-9562-36e36a38e66a",
+      "name": "Session-09ca85",
+      "workspaceId": "6d9140a5-3040-47a9-be5e-e9047524672a",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "143d213e-255b-441d-976b-afcbffca818f",
+      "status": "running",
+      "pid": 41824,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-26T05:11:45.084Z",
+      "lastActive": "2026-04-04T19:00:11.839Z",
+      "logs": [
+        {
+          "time": "2026-03-26T14:34:21.258Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-02T16:44:55.575Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "1a367117-81e1-4c5b-af29-5793732f7084": {
+      "id": "1a367117-81e1-4c5b-af29-5793732f7084",
+      "name": "Session-47df68",
+      "workspaceId": "39cf9645-b565-4ae8-82f2-73415853aa41",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "70fa2b76-24b5-4fd7-9aa2-50c29e3fae36",
+      "status": "running",
+      "pid": 27068,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-26T17:50:55.340Z",
+      "lastActive": "2026-05-08T18:14:21.481Z",
+      "logs": [
+        {
+          "time": "2026-03-26T17:51:07.313Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-02T16:44:55.587Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "6629ef6f-def9-4e83-8bad-9219aa8e8006": {
+      "id": "6629ef6f-def9-4e83-8bad-9219aa8e8006",
+      "name": "Session-a0caa5",
+      "workspaceId": "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+      "workingDir": "/anon/e3a931",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "81dfdbca-0012-4362-ae13-823dbc154f38",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-28T21:39:02.298Z",
+      "lastActive": "2026-05-09T22:34:45.305Z",
+      "logs": [
+        {
+          "time": "2026-03-28T21:39:10.958Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-02T16:44:55.567Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "b5604363-feaf-48c3-a57f-7c50fea720b1": {
+      "id": "b5604363-feaf-48c3-a57f-7c50fea720b1",
+      "name": "Session-d58e04",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "98727b0c-dcac-444e-aed1-5e36e9fc75f4",
+      "status": "running",
+      "pid": 5340,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-03-31T16:19:53.932Z",
+      "lastActive": "2026-05-01T22:21:53.708Z",
+      "logs": [
+        {
+          "time": "2026-03-31T19:55:37.617Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-03-31T19:55:37.621Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-03-31T19:55:37.638Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-02T16:44:55.561Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": true
+    },
+    "3f22cebb-449b-4c07-97b4-5f07c35a4a03": {
+      "id": "3f22cebb-449b-4c07-97b4-5f07c35a4a03",
+      "name": "Session-f05bf7",
+      "workspaceId": "70a61d6a-b496-4e2a-a844-c820510ae364",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "7ed714bc-ed98-4413-979f-a91caebb5931",
+      "status": "running",
+      "pid": 64540,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-06T22:35:14.826Z",
+      "lastActive": "2026-05-10T17:29:55.814Z",
+      "logs": [],
+      "bypassPermissions": true
+    },
+    "e84b3bd8-c988-4eb4-9985-59ffa6696347": {
+      "id": "e84b3bd8-c988-4eb4-9985-59ffa6696347",
+      "name": "Session-e50c53",
+      "workspaceId": "70a61d6a-b496-4e2a-a844-c820510ae364",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "985b6d52-9b84-4540-ac4d-e2a077e920e1",
+      "status": "running",
+      "pid": 57116,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-06T22:35:17.020Z",
+      "lastActive": "2026-05-10T17:31:42.923Z",
+      "logs": [],
+      "bypassPermissions": true
+    },
+    "ad32e1b5-bf9d-4f8e-b23a-27e05610b3cd": {
+      "id": "ad32e1b5-bf9d-4f8e-b23a-27e05610b3cd",
+      "name": "Session-1240a1",
+      "workspaceId": "db745b03-5804-46a1-9e3f-7934c4182aeb",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "0527e600-4488-4140-865d-2fd7a9597a96",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-07T01:05:04.455Z",
+      "lastActive": "2026-04-07T01:05:04.455Z",
+      "logs": []
+    },
+    "4341ee0f-a0f0-45e3-b002-fced040cced7": {
+      "id": "4341ee0f-a0f0-45e3-b002-fced040cced7",
+      "name": "Session-9cd2d5",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "c0d5a3a3-9963-49c6-9de3-185b47034260",
+      "status": "running",
+      "pid": 27188,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-09T19:54:15.798Z",
+      "lastActive": "2026-04-10T17:47:47.334Z",
+      "logs": []
+    },
+    "e3ec4845-29e9-47ba-aeea-fd286e2f8e6e": {
+      "id": "e3ec4845-29e9-47ba-aeea-fd286e2f8e6e",
+      "name": "Session-66f656",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "f7b08642-9264-4bb3-8341-e7720b5e976c",
+      "status": "running",
+      "pid": 10608,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-10T04:50:30.038Z",
+      "lastActive": "2026-04-13T19:35:30.257Z",
+      "logs": []
+    },
+    "24dddcea-6184-4d9e-be5c-94d17da74020": {
+      "id": "24dddcea-6184-4d9e-be5c-94d17da74020",
+      "name": "Session-217136",
+      "workspaceId": "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+      "workingDir": "/anon/9b91a5",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "f7b08642-9264-4bb3-8341-e7720b5e976c",
+      "status": "running",
+      "pid": 34872,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-10T05:12:17.048Z",
+      "lastActive": "2026-05-01T22:21:57.179Z",
+      "logs": [
+        {
+          "time": "2026-04-16T17:52:20.967Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-16T17:52:20.972Z",
+          "message": "",
+          "text": ""
+        },
+        {
+          "time": "2026-04-16T17:52:20.989Z",
+          "message": "",
+          "text": ""
+        }
+      ],
+      "bypassPermissions": false
+    },
+    "225f85d5-2634-49ff-93ac-1fdcfacdab65": {
+      "id": "225f85d5-2634-49ff-93ac-1fdcfacdab65",
+      "name": "Session-6562cc",
+      "workspaceId": "70a61d6a-b496-4e2a-a844-c820510ae364",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "21a7c348-59c6-4411-bff2-41f5154b4583",
+      "status": "running",
+      "pid": 24740,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-14T04:01:22.124Z",
+      "lastActive": "2026-04-27T05:16:11.435Z",
+      "logs": [],
+      "bypassPermissions": true
+    },
+    "7f31bc8a-7b45-4531-ba00-ce1f995e8970": {
+      "id": "7f31bc8a-7b45-4531-ba00-ce1f995e8970",
+      "name": "Session-7c698e",
+      "workspaceId": "363cf040-73c5-441c-9945-bacbd448c3e5",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "70fa2b76-24b5-4fd7-9aa2-50c29e3fae36",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T00:24:31.615Z",
+      "lastActive": "2026-04-23T00:24:31.615Z",
+      "logs": []
+    },
+    "aceea276-0922-4ee3-850a-802901739dfc": {
+      "id": "aceea276-0922-4ee3-850a-802901739dfc",
+      "name": "Session-157baa",
+      "workspaceId": "363cf040-73c5-441c-9945-bacbd448c3e5",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "01ec027f-d5ba-42db-ae3e-1337d204da7b",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T00:24:36.047Z",
+      "lastActive": "2026-04-23T00:24:36.047Z",
+      "logs": []
+    },
+    "88a349fb-bddb-46ab-838f-264716d22ca9": {
+      "id": "88a349fb-bddb-46ab-838f-264716d22ca9",
+      "name": "Session-f4b10b",
+      "workspaceId": "363cf040-73c5-441c-9945-bacbd448c3e5",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "fbc77065-760d-4834-876c-57aef851f51b",
+      "status": "stopped",
+      "pid": null,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T00:24:38.262Z",
+      "lastActive": "2026-04-23T00:24:38.262Z",
+      "logs": []
+    },
+    "10465bf3-06f7-41ab-8dcd-7f3f82208893": {
+      "id": "10465bf3-06f7-41ab-8dcd-7f3f82208893",
+      "name": "Session-6618a5",
+      "workspaceId": "363cf040-73c5-441c-9945-bacbd448c3e5",
+      "workingDir": "/anon/5352b1",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "960c24b4-00f1-4de2-96a3-0a8bd34a2076",
+      "status": "running",
+      "pid": 9292,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T00:37:32.683Z",
+      "lastActive": "2026-05-08T18:14:21.472Z",
+      "logs": [],
+      "bypassPermissions": true
+    },
+    "3109e543-fe96-4615-a935-234be9317089": {
+      "id": "3109e543-fe96-4615-a935-234be9317089",
+      "name": "Session-a0caa5",
+      "workspaceId": "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+      "workingDir": "/anon/e3a931",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "4ece62ba-44db-49a2-8af5-4c44f85a1514",
+      "status": "running",
+      "pid": 12804,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T04:30:16.866Z",
+      "lastActive": "2026-05-10T17:29:55.734Z",
+      "logs": []
+    },
+    "f4d75657-70f7-4028-aca1-09a495358bc4": {
+      "id": "f4d75657-70f7-4028-aca1-09a495358bc4",
+      "name": "Session-0e1d77",
+      "workspaceId": "70a61d6a-b496-4e2a-a844-c820510ae364",
+      "workingDir": "/anon/feda8b",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "a5206592-03c1-4313-a80f-2bdb94643836",
+      "status": "running",
+      "pid": 40792,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-23T14:35:22.964Z",
+      "lastActive": "2026-04-30T01:44:14.272Z",
+      "logs": []
+    },
+    "2dbc6025-282d-4844-8fbf-e4e733b43d84": {
+      "id": "2dbc6025-282d-4844-8fbf-e4e733b43d84",
+      "name": "Session-59a38e",
+      "workspaceId": "05d80aec-8102-4e3e-ac92-24527093698d",
+      "workingDir": "/anon/665673",
+      "topic": "",
+      "command": "claude",
+      "resumeSessionId": "7342d843-3b62-42ec-b46a-ac09f1c00c84",
+      "status": "running",
+      "pid": 36316,
+      "tags": [],
+      "initialPrompt": null,
+      "flags": [],
+      "createdAt": "2026-04-27T21:41:00.486Z",
+      "lastActive": "2026-05-07T05:12:39.384Z",
+      "logs": [],
+      "bypassPermissions": true
+    }
+  },
+  "activeWorkspace": "70a61d6a-b496-4e2a-a844-c820510ae364",
+  "recentSessions": [
+    "6b10c24d-995d-4376-9a34-e01d03ce9ed7",
+    "3d37352c-fd59-440b-9562-36e36a38e66a",
+    "1a367117-81e1-4c5b-af29-5793732f7084",
+    "6629ef6f-def9-4e83-8bad-9219aa8e8006",
+    "b5604363-feaf-48c3-a57f-7c50fea720b1",
+    "24dddcea-6184-4d9e-be5c-94d17da74020"
+  ],
+  "workspaceGroups": {
+    "5398e1ca-97a5-4d83-9d03-6ce262bc7b26": {
+      "id": "5398e1ca-97a5-4d83-9d03-6ce262bc7b26",
+      "name": "MYRL",
+      "color": "blue",
+      "workspaceIds": [
+        "9d91cc55-3ce9-49f1-9b8e-3b026c63523a",
+        "8a8c184e-4edc-4894-bddb-7b3f924da1ed",
+        "62be2778-41fd-46a1-b636-3fce364bba74",
+        "db745b03-5804-46a1-9e3f-7934c4182aeb"
+      ],
+      "order": 0
+    },
+    "7757d297-a5fa-47a7-8058-55b691b905fb": {
+      "id": "7757d297-a5fa-47a7-8058-55b691b905fb",
+      "name": "Personal",
+      "color": "green",
+      "workspaceIds": [
+        "39cf9645-b565-4ae8-82f2-73415853aa41",
+        "bedc140e-60f3-47ce-a84a-52ac6953bd46",
+        "05d80aec-8102-4e3e-ac92-24527093698d",
+        "8b521cf3-0968-4b2e-a4f4-b8382937fb43",
+        "70a61d6a-b496-4e2a-a844-c820510ae364"
+      ],
+      "order": 1
+    },
+    "57ff9f05-60f7-4f92-90fb-2729378d7bea": {
+      "id": "57ff9f05-60f7-4f92-90fb-2729378d7bea",
+      "name": "Work",
+      "color": "mauve",
+      "workspaceIds": [
+        "363cf040-73c5-441c-9945-bacbd448c3e5"
+      ],
+      "order": 2
+    }
+  },
+  "workspaceOrder": [
+    "5398e1ca-97a5-4d83-9d03-6ce262bc7b26",
+    "7757d297-a5fa-47a7-8058-55b691b905fb",
+    "57ff9f05-60f7-4f92-90fb-2729378d7bea"
+  ],
+  "templates": {},
+  "features": {},
+  "worktreeTasks": {},
+  "pushDevices": [],
+  "pairedDevices": [],
+  "settings": {
+    "autoRecover": false,
+    "notificationLevel": "all",
+    "theme": "light",
+    "confirmBeforeClose": true,
+    "tdBinary": "",
+    "enableTd": true
+  }
+}

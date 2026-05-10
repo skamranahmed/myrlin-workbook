@@ -120,7 +120,7 @@ suite('Store - Initialization');
 test('creates a new store with default state', () => {
   const store = freshStore();
   assertNotNull(store.state);
-  assertEqual(store.state.version, 1);
+  assertEqual(store.state.version, 2);
   assertEqual(Object.keys(store.workspaces).length, 0);
   assertEqual(Object.keys(store.sessions).length, 0);
   assert(store.settings.autoRecover === true);
@@ -811,6 +811,7 @@ const standaloneTests = [
   'scheduler-api.test.js',
   'instance-colors.test.js',
   'providers-registry.test.js', // Plan 14-01: Provider registry contract (ABST-01/02/05/06/07, COST-01)
+  'migration.test.js', // Plan 14-02: State schema v1 -> v2 migration (MIG-01..MIG-06)
 ];
 
 let standaloneFailed = 0;

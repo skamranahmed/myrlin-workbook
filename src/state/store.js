@@ -26,7 +26,7 @@ const MAX_TIMESTAMPED_BACKUPS = 10; // Keep last N timestamped backups
 const MAX_RECENT = 10;
 
 const DEFAULT_STATE = {
-  version: 1,
+  version: 2,
   workspaces: {},
   sessions: {},
   activeWorkspace: null,
@@ -45,8 +45,63 @@ const DEFAULT_STATE = {
     confirmBeforeClose: true,
     tdBinary: '',              // Absolute path to td binary (empty = use $TD_BINARY env or 'td')
     enableTd: true,            // Show td issue tracking integration
+    providers: { claude: true, codex: false }, // gsd:provider-literal-allowed - bootstrap default providers map for v1.2 multi-provider support
   },
 };
+
+/**
+ * Pure idempotent migration from state schema v1 to v2.
+ *
+ * v2 adds:
+ *   - state.version === 2 (was 1)
+ *   - state.settings.providers = { claude: true, codex: false } (default if missing)
+ *   - every session entry gets a `provider` field (defaults to 'claude' if missing)
+ *
+ * Idempotency: passing a state already at v2 returns it unchanged (same reference).
+ * Defense in depth: this is the explicit migration; _tryLoadFile also normalizes
+ * sessions on read so unexpected pre-v2 entries get tagged on the way in too.
+ *
+ * Throws if the input is not a usable object, or if state.sessions is the wrong
+ * shape (e.g. a string). Throws are propagated by Store.init() to refuse-to-start.
+ *
+ * @param {object} state - The pre-migration state object.
+ * @returns {object} A new v2 state object (or `state` unchanged if already v2).
+ */
+function migrateStateV1toV2(state) {
+  if (state === null || state === undefined || typeof state !== 'object' || Array.isArray(state)) {
+    throw new Error('migrateStateV1toV2: input is not an object');
+  }
+  // Already migrated, return same reference for cheap idempotency
+  if (state.version === 2) return state;
+  // Allow null/undefined version (very-old state) AND version === 1; reject anything else
+  if (state.version !== undefined && state.version !== null && state.version !== 1) {
+    throw new Error('migrateStateV1toV2: unsupported version ' + state.version);
+  }
+  // Validate sessions shape BEFORE iterating (catches the corrupt fixture case)
+  if (state.sessions !== undefined && state.sessions !== null
+      && (typeof state.sessions !== 'object' || Array.isArray(state.sessions))) {
+    throw new Error('migrateStateV1toV2: state.sessions is not an object');
+  }
+
+  // Tag every session with provider: 'claude' (input wins on conflict via spread order)
+  const sessions = {};
+  for (const [sid, s] of Object.entries(state.sessions || {})) {
+    sessions[sid] = { provider: 'claude', ...s }; // gsd:provider-literal-allowed - default-tag legacy sessions
+  }
+
+  // Build providers default; preserve any user-set fields (input wins on conflict)
+  const existingProviders = (state.settings && state.settings.providers) || {};
+  const settings = {
+    ...(state.settings || {}),
+    providers: {
+      claude: true, // gsd:provider-literal-allowed - bootstrap default
+      codex: false, // gsd:provider-literal-allowed - bootstrap default
+      ...existingProviders,
+    },
+  };
+
+  return { ...state, version: 2, sessions, settings };
+}
 
 class Store extends EventEmitter {
   constructor() {
@@ -58,7 +113,15 @@ class Store extends EventEmitter {
   }
 
   /**
-   * Initialize the store - load from disk or create default
+   * Initialize the store - load from disk or create default.
+   *
+   * Migration ordering:
+   *   1. migrateFromLegacy moves project-local state into ~/.myrlin/ (filesystem).
+   *   2. _load() reads the file (with read-side normalization in _tryLoadFile).
+   *   3. migrateStateV1toV2 explicitly bumps schema; if it throws, refuse to start.
+   *   4. _migrateBackupFiles walks BACKUP_FILE + BACKUP_DIR UNCONDITIONALLY so a
+   *      partial-launch (live=v2, backup=v1) heals on the next boot. Per-file
+   *      idempotency guard inside makes this cheap when nothing needs doing.
    */
   init() {
     if (!fs.existsSync(STATE_DIR)) {
@@ -70,8 +133,80 @@ class Store extends EventEmitter {
     // Create a timestamped backup BEFORE loading (preserves last known good state)
     this.createTimestampedBackup();
     this._state = this._load();
+    // ── State migration v1 -> v2 ────────────────────────────────
+    // Explicit schema migration. Failure here is FATAL: the live state file
+    // is the source of truth; if we cannot interpret it, we refuse to start
+    // rather than risk silently overwriting it with default state.
+    try {
+      const before = this._state;
+      this._state = migrateStateV1toV2(this._state);
+      if (this._state !== before) {
+        // Persist the migrated shape immediately via the existing atomic-save path.
+        this._dirty = true;
+        this.save();
+      }
+    } catch (err) {
+      const msg = '[Store] FATAL: state migration failed for ' + STATE_FILE + ': ' + err.message + '\n'
+        + 'The server cannot start. Inspect the file for corruption or restore from a backup in ' + BACKUP_DIR + '.';
+      console.error(msg);
+      throw new Error(msg);
+    }
+    // Backups are migrated UNCONDITIONALLY on every init() with a per-file
+    // idempotency guard inside _migrateBackupFiles. This catches the
+    // partial-launch hole where the live file is already v2 but a backup is
+    // still v1 (e.g. a previous boot crashed mid-migration). Failures here
+    // are non-fatal: the live file is the source of truth.
+    try {
+      this._migrateBackupFiles();
+    } catch (err) {
+      console.warn('[Store] _migrateBackupFiles unexpected error: ' + err.message);
+    }
     this._recordDiskMtime();
     return this;
+  }
+
+  /**
+   * Walk BACKUP_FILE and every workspaces-*.json in BACKUP_DIR, migrating any
+   * v1 entries to v2 in place via an atomic temp-file-then-rename write.
+   *
+   * Idempotency: per-file `if (parsed.version === 2) continue` makes this a
+   * cheap no-op on subsequent boots when nothing needs doing.
+   *
+   * Failure isolation: a single corrupt backup logs a warning and does NOT
+   * abort the walk; the live file already migrated successfully so backup
+   * recovery is best-effort.
+   */
+  _migrateBackupFiles() {
+    const files = [];
+    if (fs.existsSync(BACKUP_FILE)) files.push(BACKUP_FILE);
+    if (fs.existsSync(BACKUP_DIR)) {
+      try {
+        for (const f of fs.readdirSync(BACKUP_DIR)) {
+          if (f.startsWith('workspaces-') && f.endsWith('.json')) {
+            files.push(path.join(BACKUP_DIR, f));
+          }
+        }
+      } catch (err) {
+        console.warn('[Store] _migrateBackupFiles: could not list ' + BACKUP_DIR + ': ' + err.message);
+      }
+    }
+    for (const f of files) {
+      try {
+        const raw = fs.readFileSync(f, 'utf-8');
+        if (!raw.trim()) continue; // empty file - skip
+        const parsed = JSON.parse(raw);
+        // Per-file idempotency guard: cheap no-op when nothing to do
+        if (parsed && parsed.version === 2) continue;
+        const migrated = migrateStateV1toV2(parsed);
+        const tmp = f + '.' + process.pid + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(migrated, null, 2), 'utf-8');
+        fs.renameSync(tmp, f);
+        console.log('[Store] Migrated backup to v2: ' + f);
+      } catch (err) {
+        // Backup migration is best-effort; log and continue.
+        console.warn('[Store] Backup migration failed for ' + f + ': ' + err.message + '; leaving as-is');
+      }
+    }
   }
 
   /**
@@ -145,6 +280,15 @@ class Store extends EventEmitter {
 
   /**
    * Try to load and parse a state file. Returns merged state or null.
+   *
+   * Read-side defensive default: every session loaded without a `provider`
+   * field is normalized to `provider: 'claude'`. This is layered defense in
+   * addition to the explicit migrateStateV1toV2 call in init(), so any
+   * pre-v2 entry that slips through (e.g. a backup recovered after the
+   * explicit migration ran) still gets tagged on the way in. (MIG-02)
+   *
+   * If parsed.sessions is the wrong shape we skip normalization here and
+   * let migrateStateV1toV2 throw with a useful message during init().
    */
   _tryLoadFile(filePath) {
     try {
@@ -153,10 +297,26 @@ class Store extends EventEmitter {
       if (!raw.trim()) return null; // Empty file
       const parsed = JSON.parse(raw);
       if (!parsed.workspaces) return null; // Invalid structure
+      // Normalize sessions on read: tag missing provider field with 'claude'.
+      // Skip if shape is wrong; migrateStateV1toV2 will throw with detail later.
+      let normalizedSessions;
+      if (parsed.sessions && typeof parsed.sessions === 'object' && !Array.isArray(parsed.sessions)) {
+        normalizedSessions = {};
+        for (const [sid, s] of Object.entries(parsed.sessions)) {
+          if (s && typeof s === 'object') {
+            normalizedSessions[sid] = { provider: 'claude', ...s }; // gsd:provider-literal-allowed - read-side defensive default
+          } else {
+            normalizedSessions[sid] = s; // pass through; migration will throw if non-object
+          }
+        }
+      } else {
+        normalizedSessions = parsed.sessions; // pass through wrong shape so migration can flag it
+      }
       return {
         ...DEFAULT_STATE,
         ...parsed,
         settings: { ...DEFAULT_STATE.settings, ...(parsed.settings || {}) },
+        sessions: normalizedSessions,
         workspaceGroups: parsed.workspaceGroups || {},
         workspaceOrder: parsed.workspaceOrder || [],
         templates: parsed.templates || {},
@@ -1364,4 +1524,4 @@ function getStore() {
   return instance;
 }
 
-module.exports = { Store, getStore };
+module.exports = { Store, getStore, migrateStateV1toV2 };
