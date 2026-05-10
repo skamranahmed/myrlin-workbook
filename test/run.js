@@ -816,6 +816,7 @@ const standaloneTests = [
   'cost-worker-via-claude.test.js', // Plan 14-04: claudeProvider.costAdapter wiring (COST-04)
   'grep-gate.test.js', // Plan 14-05: Forbidden provider-name literals outside src/providers/ (ABST-04)
   'find-jsonl-refactor.test.js', // Plan 15-01: getProviderForSession + claudeProvider.findArtifactPath (DISC-03)
+  'providers-endpoints.test.js', // Plan 15-03: GET/PUT /api/providers (DISC-06, DISC-07)
 ];
 
 let standaloneFailed = 0;

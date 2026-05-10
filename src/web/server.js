@@ -1757,6 +1757,201 @@ app.get('/api/discover', requireAuth, (req, res) => {
 
 
 // ──────────────────────────────────────────────────────────
+//  PROVIDERS - Registry-backed metadata + toggle endpoints
+//  Plan 15-03 (DISC-06, DISC-07). The two endpoints below expose the
+//  Provider registry surface to the frontend. GET returns the tile
+//  shape including a PATH-probe `available` flag; PUT persists toggle
+//  state and runs provider lifecycle hooks. Both routes use the
+//  existing requireAuth middleware. Routes are declared HERE,
+//  immediately after GET /api/discover, so Express's declaration-order
+//  matching reaches them before any later wildcard catch-alls and so
+//  the provider surface lives in one contiguous block in the source.
+// ──────────────────────────────────────────────────────────
+
+// ─── Availability Probe Cache (30s TTL) ────────────────────
+// Keyed by cliBinary so two providers that happen to share a binary
+// name share a probe result. The cache is module-local and reset only
+// by process restart or explicit ?refresh=true on a request.
+const _availabilityCache = new Map(); // Map<cliBinary, {available: boolean, time: number}>
+const AVAILABILITY_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Probe whether the given CLI binary is on PATH. Uses `where` on Windows
+ * and `which` on POSIX. Result is cached for 30s to avoid spawning a
+ * subprocess on every /api/providers request. The cache is keyed by
+ * cliBinary so two providers sharing a binary name share a result.
+ *
+ * The probe has a hard 2-second timeout per spawn so a misbehaving PATH
+ * entry (slow network filesystem, dead drive, etc.) cannot block the
+ * Node event loop for more than 2s per cache miss.
+ *
+ * Defense in depth: JSON.stringify on cliBinary defends against any
+ * shell-special characters in a future provider's binary name. Today
+ * every registered provider's cliBinary is a hardcoded ASCII slug so
+ * the quoting is paranoia, but cheap insurance.
+ *
+ * Plan 15-03 (DISC-06).
+ *
+ * @param {string} cliBinary - The provider's cliBinary field.
+ * @param {boolean} [forceRefresh=false] - Bypass cache and re-probe.
+ * @returns {boolean} True if the binary is reachable via PATH.
+ */
+function probeAvailability(cliBinary, forceRefresh) {
+  const now = Date.now();
+  const cached = _availabilityCache.get(cliBinary);
+  if (!forceRefresh && cached && (now - cached.time) < AVAILABILITY_CACHE_TTL) {
+    return cached.available;
+  }
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  let available = false;
+  try {
+    execSync(cmd + ' ' + JSON.stringify(cliBinary), { stdio: 'pipe', timeout: 2000 });
+    available = true;
+  } catch (_) {
+    available = false;
+  }
+  _availabilityCache.set(cliBinary, { available, time: now });
+  return available;
+}
+
+/**
+ * GET /api/providers
+ *
+ * Returns the list of registered providers with their enabled flag
+ * (from registry.isEnabled) and available flag (PATH probe of
+ * cliBinary). Response shape feeds the Phase 18 Settings UI Providers
+ * section.
+ *
+ * Query params:
+ *   ?refresh=true  Bypass the 30s availability cache and re-probe.
+ *
+ * Response (200):
+ *   [{id, displayName, accentToken, enabled, available}]
+ *
+ * Plan 15-03 (DISC-06).
+ */
+app.get('/api/providers', requireAuth, (req, res) => {
+  const forceRefresh = req.query.refresh === 'true';
+  const all = registry.listAll();
+  const out = all.map((p) => ({
+    id: p.id,
+    displayName: p.displayName,
+    accentToken: p.accentToken,
+    enabled: registry.isEnabled(p.id),
+    available: probeAvailability(p.cliBinary, forceRefresh),
+  }));
+  res.json(out);
+});
+
+/**
+ * PUT /api/providers/:id/enabled
+ *
+ * Toggle a provider's enabled state. Persists immediately to
+ * state.settings.providers via registry.setEnabled + store.save, then
+ * runs the appropriate lifecycle hook (init on toggle-on, dispose on
+ * toggle-off) with a 5-second timeout. Lifecycle failure is logged via
+ * console.warn but does NOT roll back the persisted state; the toggle
+ * is sticky and user retry is the recovery path.
+ *
+ * Toggle-off also clears the toggled provider's per-provider entry in
+ * _discoverCache (if 15-02's per-provider Map has landed; otherwise
+ * the defensive check below is a no-op until 15-02 lands). Other
+ * providers' cache entries remain intact (DISC-05 independence).
+ *
+ * Mid-PTY safety: this handler does NOT kill running PTYs. Phase 14
+ * pty-manager already gates spawns on registry.isEnabled at spawn
+ * time, so toggle-off blocks NEW spawns but leaves running PTYs
+ * untouched.
+ *
+ * Body: {enabled: boolean}
+ *
+ * Responses:
+ *   404  Unknown provider id
+ *   400  Body missing or non-boolean enabled field
+ *   401  Missing or invalid auth (handled by requireAuth)
+ *   500  Store persistence failure
+ *   200  {id, displayName, accentToken, enabled, available}
+ *
+ * Plan 15-03 (DISC-07).
+ */
+app.put('/api/providers/:id/enabled', requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const provider = registry.getProvider(id);
+  if (!provider) {
+    return res.status(404).json({ error: 'Unknown provider: ' + id });
+  }
+
+  const body = req.body || {};
+  if (typeof body.enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Body must include enabled: boolean' });
+  }
+  const enabled = body.enabled;
+  const wasEnabled = registry.isEnabled(id);
+
+  // Persist FIRST. The toggle is sticky; if lifecycle hooks fail the
+  // persisted state still reflects the user's intent and the user can
+  // retry. setEnabled also writes-through to store.state.settings.providers
+  // (see src/providers/index.js); save() writes that to disk.
+  registry.setEnabled(id, enabled);
+  try {
+    getStore().save();
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to persist toggle: ' + (err && err.message ? err.message : err),
+    });
+  }
+
+  // Lifecycle hooks. Best-effort with a 5s timeout via Promise.race so
+  // a hung init/dispose cannot block the response indefinitely. Failure
+  // is logged but does NOT roll back the persisted state.
+  if (enabled && !wasEnabled) {
+    try {
+      await Promise.race([
+        provider.init(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('init timeout')), 5000)),
+      ]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[providers] init ' + id + ' failed: ' + (err && err.message ? err.message : err));
+    }
+  } else if (!enabled && wasEnabled) {
+    try {
+      await Promise.race([
+        provider.dispose(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('dispose timeout')), 5000)),
+      ]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[providers] dispose ' + id + ' failed: ' + (err && err.message ? err.message : err));
+    }
+    // Invalidate THIS provider's discover cache entry. Other providers'
+    // entries remain intact (DISC-05 independence). The defensive check
+    // tolerates BOTH the pre-15-02 shape (scalar _discoverCache = null
+    // with no .delete) AND the post-15-02 shape (per-provider Map with
+    // .delete). Once 15-02 lands the second branch becomes the active
+    // path; until then this is a no-op.
+    if (typeof _discoverCache !== 'undefined' &&
+        _discoverCache &&
+        typeof _discoverCache.delete === 'function') {
+      _discoverCache.delete(id);
+    }
+  }
+
+  // Return the updated tile shape so the client can refresh its UI in
+  // a single round-trip. `available` re-probes (cached) so a freshly
+  // toggled-on provider whose binary was just installed shows the
+  // up-to-date PATH probe result.
+  res.json({
+    id: provider.id,
+    displayName: provider.displayName,
+    accentToken: provider.accentToken,
+    enabled,
+    available: probeAvailability(provider.cliBinary, false),
+  });
+});
+
+
+// ──────────────────────────────────────────────────────────
 //  Session Auto-Title
 // ──────────────────────────────────────────────────────────
 
