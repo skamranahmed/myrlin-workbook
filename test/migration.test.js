@@ -294,6 +294,61 @@ console.log('  ' + '-'.repeat(40));
   fs.rmSync(tempDir, { recursive: true, force: true });
 }
 
+// ─── Test 9 (CDX-10): codex defaults to false on a fresh state file ─────
+// Phase 17 Plan 17-02 regression test. The default seed in
+// src/state/store.js:48 must keep state.settings.providers.codex === false
+// on a fresh state file boot. If a future change accidentally flips Codex on
+// by default (e.g. someone copy-pastes the claude:true entry), this test
+// fails loudly. Mirrors the structure used by Test 8 (spawn a child Node
+// against a fresh tempdir so the singleton boots clean).
+{
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cwm-mig-cdx10-'));
+  // Do NOT pre-create a state file: this exercises the brand-new-install
+  // path where DEFAULT_STATE seeds the providers map.
+  const probe = `
+    process.env.CWM_DATA_DIR = ${JSON.stringify(tempDir)};
+    const { Store } = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'state', 'store'))});
+    const s = new Store().init();
+    const providers = s.state.settings && s.state.settings.providers;
+    if (!providers || typeof providers !== 'object') {
+      console.error('NO_PROVIDERS_BLOCK');
+      process.exit(2);
+    }
+    if (providers.codex !== false) {
+      console.error('CODEX_NOT_FALSE:' + JSON.stringify(providers));
+      process.exit(3);
+    }
+    if (providers.claude !== true) {
+      console.error('CLAUDE_NOT_TRUE:' + JSON.stringify(providers));
+      process.exit(4);
+    }
+    // Also exercise a save+reload round trip so the on-disk shape is
+    // confirmed to preserve the codex:false seed.
+    s.save();
+    process.exit(0);
+  `;
+  const result = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf-8' });
+  check('CDX-10: codex defaults to false on a fresh state file (Store init)',
+    result.status === 0,
+    'exit=' + result.status + ' stderr=' + (result.stderr || '').slice(0, 200));
+
+  // Round-trip verification: read the on-disk JSON directly and assert the
+  // codex:false seed survived the save() that the child just performed.
+  if (result.status === 0) {
+    const liveFile = path.join(tempDir, 'workspaces.json');
+    let onDisk = null;
+    try { onDisk = JSON.parse(fs.readFileSync(liveFile, 'utf-8')); } catch (_) { /* report below */ }
+    check('CDX-10: on-disk providers.codex === false after save',
+      !!onDisk && !!onDisk.settings && !!onDisk.settings.providers && onDisk.settings.providers.codex === false,
+      'on-disk providers=' + JSON.stringify(onDisk && onDisk.settings && onDisk.settings.providers));
+    check('CDX-10: on-disk providers.claude === true after save',
+      !!onDisk && !!onDisk.settings && !!onDisk.settings.providers && onDisk.settings.providers.claude === true,
+      'on-disk providers=' + JSON.stringify(onDisk && onDisk.settings && onDisk.settings.providers));
+  }
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+}
+
 // ─── Cleanup ────────────────────────────────────────────────────────────
 try { fs.rmSync(harnessDataDir, { recursive: true, force: true }); } catch (_) {}
 

@@ -31,6 +31,13 @@
 // at module load (the provider object is built from pure functions).
 const claudeProvider = require('./claude'); // gsd:provider-literal-allowed
 
+// Plan 17-02 (CDX-05/06/07/10 wiring half): the Codex provider object.
+// Same eager-require + self-register pattern as Claude. Codex is NOT
+// force-on: its enabled state comes from store.state.settings.providers.codex
+// which Phase 14 seeded to false on a fresh state file. The toggle lights it
+// up via PUT /api/providers/codex/enabled {enabled: true}.
+const codexProvider = require('./codex'); // gsd:provider-literal-allowed
+
 // ---------------------------------------------------------------------------
 // Type definitions (JSDoc, mirrored verbatim in docs/PROVIDER-INTERFACE.md)
 // ---------------------------------------------------------------------------
@@ -258,6 +265,16 @@ async function initRegistry(store) {
   // real provider without needing to know about provider files.
   if (!_providers.has(claudeProvider.id)) {
     register(claudeProvider);
+  }
+
+  // Plan 17-02 (CDX-05/06/07/10 wiring half): self-register the Codex
+  // provider exactly once. The has() guard mirrors the Claude path so a
+  // test that pre-registers a fake codex with the same id is honored.
+  // Codex is NOT force-on; the enabled state is read from
+  // store.state.settings.providers.codex below (default: false, seeded by
+  // Phase 14 at src/state/store.js).
+  if (!_providers.has(codexProvider.id)) {
+    register(codexProvider);
   }
 
   const cfg = (store && store.state && store.state.settings && store.state.settings.providers) || {};
