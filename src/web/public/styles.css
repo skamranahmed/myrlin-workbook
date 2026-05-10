@@ -84,6 +84,25 @@
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
 
+  /* ─── Provider accent tokens ──────────────────────────────────
+     Per-provider visual identity, layered on top of the Catppuccin
+     palette tokens above. Every theme overrides --mauve, --green,
+     --blue (etc.), so these provider accents inherit the theme's
+     hue automatically; no per-theme override is required.
+
+     The 6%-opacity tint variants use color-mix so the tint hue is
+     theme-derived (mixes with the theme's transparent slot) rather
+     than hardcoded rgba. Pitfall 7 forbids hardcoded rgba here.
+
+     Gemini is reserved for v1.3; the token exists so future CSS
+     selectors do not need a theme cascade rewrite when wired. */
+  --provider-claude-accent: var(--mauve);
+  --provider-codex-accent:  var(--green);
+  --provider-gemini-accent: var(--blue);
+  --provider-claude-tint:   color-mix(in srgb, var(--mauve) 6%, transparent);
+  --provider-codex-tint:    color-mix(in srgb, var(--green) 6%, transparent);
+  --provider-gemini-tint:   color-mix(in srgb, var(--blue) 6%, transparent);
+
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
@@ -10194,3 +10213,30 @@ html {
 .session-schedule-clock { margin-right: 6px; }
 /* Pane-title icon sits inside the title span after the text. */
 .pane-title-clock { margin-left: 6px; opacity: 0.85; }
+
+/* ─── Provider accents (Phase 18 foundation) ──────────────────────
+   Selectors target [data-provider] attributes rendered by app.js on
+   the matching DOM nodes. All values reference theme-derived tokens
+   (--provider-{id}-accent / --provider-{id}-tint at :root) so accents
+   cascade through every Catppuccin theme without per-theme code.
+
+   The terminal-pane background uses a 24px-tall linear gradient that
+   fades to transparent before reaching the xterm canvas; the xterm
+   canvas paints over the pane background, so text contrast is never
+   reduced by the tint (Pitfall F mitigation). */
+.terminal-pane[data-provider="claude"]:not(.terminal-pane-empty) {
+  border-top: 1px solid var(--provider-claude-accent);
+  background: linear-gradient(180deg, var(--provider-claude-tint) 0, transparent 24px), var(--bg-primary);
+}
+.terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) {
+  border-top: 1px solid var(--provider-codex-accent);
+  background: linear-gradient(180deg, var(--provider-codex-tint) 0, transparent 24px), var(--bg-primary);
+}
+
+/* 2px provider stripe on the left edge of the project accordion. */
+.project-accordion[data-provider="claude"] {
+  box-shadow: inset 2px 0 0 var(--provider-claude-accent);
+}
+.project-accordion[data-provider="codex"] {
+  box-shadow: inset 2px 0 0 var(--provider-codex-accent);
+}

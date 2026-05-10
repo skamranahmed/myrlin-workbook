@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+/**
+ * Plan 18-01 gate: CSS provider tokens at :root.
+ *
+ * Locks the shape of the provider-accent layer added in Plan 18-01:
+ *   1. Three accent tokens exist at :root and reference Catppuccin palette
+ *      tokens (var(--mauve|green|blue)), never hex literals.
+ *   2. Three matching tint tokens exist at :root and use color-mix(in srgb,
+ *      ..., transparent), never hardcoded rgba.
+ *   3. Zero hex literals appear in any provider token's value.
+ *   4. The terminal-pane and project-accordion selectors that consume these
+ *      tokens are present so the foundation actually renders.
+ *
+ * The test is a pure string-match gate over styles.css. No DOM, no jsdom,
+ * no browser. Phase 18 visual-QA verification is manual; this gate just
+ * prevents the foundation from drifting.
+ *
+ * Requirements covered: UI-04, UI-05 (foundation layer).
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+
+const STYLES_PATH = path.join(__dirname, '..', 'src', 'web', 'public', 'styles.css');
+const css = fs.readFileSync(STYLES_PATH, 'utf8');
+
+let passed = 0;
+let failed = 0;
+
+/**
+ * Run a single named assertion. Logs pass/fail and tallies the totals so the
+ * exit code reflects the worst outcome instead of bailing on first failure.
+ *
+ * @param {string} name Human-readable test name.
+ * @param {() => void} fn Function that throws on failure.
+ */
+function check(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log('  \x1b[32m✓\x1b[0m ' + name);
+  } catch (err) {
+    failed++;
+    console.log('  \x1b[31m✗\x1b[0m ' + name);
+    console.log('    \x1b[31m' + err.message + '\x1b[0m');
+  }
+}
+
+console.log('\n  \x1b[1mPlan 18-01: CSS provider tokens\x1b[0m');
+console.log('  ' + '─'.repeat(42));
+
+// (1) Accent tokens reference Catppuccin palette tokens, not hex.
+check('--provider-claude-accent references var(--mauve)', () => {
+  assert.ok(
+    /--provider-claude-accent:\s*var\(--mauve\)/.test(css),
+    '--provider-claude-accent must be defined at :root as "var(--mauve)"'
+  );
+});
+
+check('--provider-codex-accent references var(--green)', () => {
+  assert.ok(
+    /--provider-codex-accent:\s*var\(--green\)/.test(css),
+    '--provider-codex-accent must be defined at :root as "var(--green)"'
+  );
+});
+
+check('--provider-gemini-accent references var(--blue)', () => {
+  assert.ok(
+    /--provider-gemini-accent:\s*var\(--blue\)/.test(css),
+    '--provider-gemini-accent must be defined at :root as "var(--blue)" (Gemini reserved for v1.3)'
+  );
+});
+
+// (2) Tint tokens use color-mix; never rgba.
+check('--provider-claude-tint uses color-mix(in srgb, var(--mauve) 6%, transparent)', () => {
+  assert.ok(
+    /--provider-claude-tint:\s*color-mix\(in srgb, var\(--mauve\) 6%, transparent\)/.test(css),
+    '--provider-claude-tint must use color-mix(in srgb, var(--mauve) 6%, transparent)'
+  );
+});
+
+check('--provider-codex-tint uses color-mix(in srgb, var(--green) 6%, transparent)', () => {
+  assert.ok(
+    /--provider-codex-tint:\s*color-mix\(in srgb, var\(--green\) 6%, transparent\)/.test(css),
+    '--provider-codex-tint must use color-mix(in srgb, var(--green) 6%, transparent)'
+  );
+});
+
+check('--provider-gemini-tint uses color-mix(in srgb, var(--blue) 6%, transparent)', () => {
+  assert.ok(
+    /--provider-gemini-tint:\s*color-mix\(in srgb, var\(--blue\) 6%, transparent\)/.test(css),
+    '--provider-gemini-tint must use color-mix(in srgb, var(--blue) 6%, transparent)'
+  );
+});
+
+// (3) Pitfall 7 guard: no hex literal anywhere in a provider token's value.
+check('no hex literals in any --provider-*-{accent,tint} value', () => {
+  const hexInProviderToken = /--provider-[a-z]+-(accent|tint):\s*[^;]*#[0-9a-fA-F]+/g;
+  const offenders = css.match(hexInProviderToken) || [];
+  assert.deepStrictEqual(
+    offenders,
+    [],
+    'Pitfall 7: provider tokens must reference theme tokens (var(--mauve), color-mix), not hex literals. Offenders: ' +
+      offenders.join(' | ')
+  );
+});
+
+// (4) Foundation selectors that consume the tokens must be present, otherwise
+// the tokens are dead code and the next plan in the wave will silently fail.
+check('terminal-pane[data-provider="claude"]:not(.terminal-pane-empty) selector exists', () => {
+  assert.ok(
+    css.includes('.terminal-pane[data-provider="claude"]:not(.terminal-pane-empty)'),
+    'terminal-pane claude selector must be present so the pane tint renders'
+  );
+});
+
+check('terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) selector exists', () => {
+  assert.ok(
+    css.includes('.terminal-pane[data-provider="codex"]:not(.terminal-pane-empty)'),
+    'terminal-pane codex selector must be present so the pane tint renders'
+  );
+});
+
+check('project-accordion[data-provider="claude"] selector exists', () => {
+  assert.ok(
+    css.includes('.project-accordion[data-provider="claude"]'),
+    'project-accordion claude selector must be present so the stripe renders'
+  );
+});
+
+check('project-accordion[data-provider="codex"] selector exists', () => {
+  assert.ok(
+    css.includes('.project-accordion[data-provider="codex"]'),
+    'project-accordion codex selector must be present so the stripe renders'
+  );
+});
+
+// (5) Sanity: the terminal-pane background gradient stops at 24px (Pitfall F:
+// gradient must not bleed onto the xterm canvas and reduce text contrast).
+check('terminal-pane gradient fades to transparent at 24px (Pitfall F guard)', () => {
+  assert.ok(
+    /linear-gradient\(180deg,\s*var\(--provider-claude-tint\)\s*0,\s*transparent\s*24px\)/.test(css),
+    'Pitfall F: pane tint must fade to transparent at 24px so the xterm canvas below is never tinted'
+  );
+});
+
+console.log('  ' + '─'.repeat(42));
+console.log('  [css-tokens] ' + passed + '/' + (passed + failed) + ' tests passed');
+
+if (failed > 0) {
+  process.exit(1);
+}
+process.exit(0);

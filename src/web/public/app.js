@@ -8934,7 +8934,9 @@ class CWMApp {
         const metaRow = metaParts ? `<div class="ws-session-meta-row">${metaParts}</div>` : '';
         const timeEl = timeStr ? `<span class="ws-session-time">${timeStr}</span>` : '';
 
-        return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
+        // Phase 18 data-provider default for sessions from pre-v1.2 servers lacking the field.
+        const sessProvider = this.escapeHtml(s.provider || 'claude'); /* gsd:provider-literal-allowed */
+        return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" data-provider="${sessProvider}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
           <span class="ws-session-dot${tristateAttr}" style="background: ${statusDot}"></span>
           <span class="ws-session-name">${this.escapeHtml(name)}</span>${pip}${timeEl}
           ${metaRow}
@@ -9877,6 +9879,9 @@ class CWMApp {
         }
       }
 
+      // Phase 18 data-provider default for projects from pre-v1.2 servers lacking the field.
+      const projProvider = this.escapeHtml(p.provider || 'claude'); /* gsd:provider-literal-allowed */
+
       // Build session sub-items
       const sessionItems = sessions.map(s => {
         const sessName = s.claudeSessionId || 'unnamed';
@@ -9894,14 +9899,14 @@ class CWMApp {
         const tooltip = effectiveTitle
           ? `${effectiveTitle}\n\nSession: ${sessName}`
           : sessName;
-        return `<div class="project-session-item" draggable="true" data-session-name="${this.escapeHtml(sessName)}" data-project-path="${this.escapeHtml(p.realPath || '')}" data-project-encoded="${this.escapeHtml(encoded)}" title="${this.escapeHtml(tooltip)}">
+        return `<div class="project-session-item" draggable="true" data-session-name="${this.escapeHtml(sessName)}" data-project-path="${this.escapeHtml(p.realPath || '')}" data-project-encoded="${this.escapeHtml(encoded)}" data-provider="${projProvider}" title="${this.escapeHtml(tooltip)}">
           <span class="project-session-name">${this.escapeHtml(displayName)}</span>
           ${sessSize ? `<span class="project-session-size">${sessSize}</span>` : ''}
           ${sessTime ? `<span class="project-session-time">${sessTime}</span>` : ''}
         </div>`;
       }).join('');
 
-      return `<div class="project-accordion${missingClass}${hiddenClass}" data-encoded="${this.escapeHtml(encoded)}" data-path="${this.escapeHtml(p.realPath || '')}">
+      return `<div class="project-accordion${missingClass}${hiddenClass}" data-encoded="${this.escapeHtml(encoded)}" data-path="${this.escapeHtml(p.realPath || '')}" data-provider="${projProvider}">
         <div class="project-accordion-header" draggable="${p.dirExists ? 'true' : 'false'}">
           <span class="project-accordion-chevron">&#9654;</span>
           <span class="project-name" title="${this.escapeHtml(p.realPath || '')}">${this.escapeHtml(name)}</span>
@@ -10526,6 +10531,14 @@ class CWMApp {
     // Ensure pane is visible before mounting terminal
     paneEl.hidden = false;
 
+    // Tag the pane with its provider so CSS selectors (terminal-pane[data-provider="..."])
+    // can render the per-provider accent. The lookup is best-effort: live state first,
+    // then allSessions snapshot, then default for v1.1-shaped sessions lacking the field.
+    const _sessForProvider = (this.state.allSessions || [])
+      .concat(Object.values(this.state.sessions || {}))
+      .find(_s => _s && _s.id === sessionId);
+    paneEl.dataset.provider = (_sessForProvider && _sessForProvider.provider) || 'claude'; /* gsd:provider-literal-allowed (Phase 18 default) */
+
     // Update pane state
     paneEl.classList.remove('terminal-pane-empty');
     const titleEl = paneEl.querySelector('.terminal-pane-title');
@@ -10572,6 +10585,7 @@ class CWMApp {
           window.SchedulePopover.close();
         }
         deadPane.classList.add('terminal-pane-empty');
+        deadPane.removeAttribute('data-provider');
         const header = deadPane.querySelector('.terminal-pane-title');
         if (header) header.textContent = 'Drop a session here';
         const closeBtn2 = deadPane.querySelector('.terminal-pane-close');
@@ -11040,6 +11054,7 @@ class CWMApp {
     // Reset to empty state
     paneEl.classList.remove('terminal-pane-active');
     paneEl.classList.add('terminal-pane-empty');
+    paneEl.removeAttribute('data-provider');
     const titleEl = paneEl.querySelector('.terminal-pane-title');
     if (titleEl) titleEl.textContent = 'Drop a session here';
     const closeBtn = paneEl.querySelector('.terminal-pane-close');

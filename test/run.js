@@ -824,6 +824,8 @@ const standaloneTests = [
   'codex-schema.test.js',    // Plan 17-01: canonical schema fixture + drift gate (CDX-09)
   'codex-spawn.test.js',     // Plan 17-02: SpawnDescriptor + CODEX_HOME scoping (CDX-07 spawn half)
   'codex-search.test.js',    // Plan 17-02: snippet search + compacted exclusion (CDX-05/06)
+  'css-tokens.test.js',         // Plan 18-01: :root provider tokens and selectors (UI-04, UI-05)
+  'data-provider-attr.test.js', // Plan 18-01: data-provider on render sites (UI-03)
 ];
 
 let standaloneFailed = 0;
