@@ -102,6 +102,19 @@ class CWMApp {
       allSessions: [],  // Always holds ALL sessions (for sidebar rendering)
       groups: [],
       projects: [],
+      // Phase 18-02 + 18-04: per-provider project storage (v1.2 native object
+      // shape). Plan 18-04 retired the Phase 15 back-compat shim; state.projects
+      // is now a merged-flat view computed from state.projectsByProvider by
+      // loadProjects, kept populated so Plan 18-02's render-time provider
+      // filter (which walks state.projects) continues to work unchanged.
+      projectsByProvider: {},
+      // Phase 18-02: provider metadata loaded from GET /api/providers; used by
+      // the sidebar tab strip and Plan 18-03's Settings Providers section.
+      providers: [],
+      // Phase 18-02: active sidebar tab filter. 'all' shows every provider;
+      // any other value is a provider id from state.providers. Persisted to
+      // localStorage so reloads land on the user's last selection.
+      activeProviderTab: localStorage.getItem('cwm_activeProviderTab') || 'all',
       activeWorkspace: null,
       selectedSession: null,
       viewMode: localStorage.getItem('cwm_viewMode') || 'terminal',       // workspace | all | recent | terminal
@@ -227,6 +240,8 @@ class CWMApp {
       app: document.getElementById('app'),
       sidebarToggle: document.getElementById('sidebar-toggle'),
       sidebar: document.getElementById('sidebar'),
+      // Phase 18-02: sidebar provider tab strip (rendered by renderProviderTabs)
+      sidebarProviderTabs: document.getElementById('sidebar-provider-tabs'),
       workspaceList: document.getElementById('workspace-list'),
       workspaceCount: document.getElementById('workspace-count'),
       createWorkspaceBtn: document.getElementById('create-workspace-btn'),
@@ -1690,9 +1705,12 @@ class CWMApp {
             const projectName = ps.projectPath ? (ps.projectPath.split('\\').pop() || ps.projectPath.split('/').pop() || claudeSessionId) : claudeSessionId;
             const shortId = claudeSessionId.length > 8 ? claudeSessionId.substring(0, 8) : claudeSessionId;
             const friendlyName = projectName + ' (' + shortId + ')';
+            // Phase 18-04 (UI-10): forward the provider tag from the drag
+            // payload so the new session record retains provider identity.
+            const psProvider = ps.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
             await this.api('POST', '/api/sessions', {
               name: friendlyName, workspaceId: targetWsId, workingDir: ps.projectPath,
-              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId, provider: psProvider, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
             });
             this.showToast(`Session "${friendlyName}" added`, 'success');
             await this.loadSessions();
@@ -1709,9 +1727,11 @@ class CWMApp {
           e.preventDefault(); e.stopPropagation();
           try {
             const project = JSON.parse(projectJson);
+            // Phase 18-04 (UI-10): forward the provider tag from the drag payload.
+            const projProvider = project.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
             await this.api('POST', '/api/sessions', {
               name: project.name, workspaceId: targetWsId, workingDir: project.path,
-              topic: '', command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+              topic: '', command: 'claude', provider: projProvider, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
             });
             this.showToast(`Session "${project.name}" created`, 'success');
             await this.loadSessions();
@@ -1825,11 +1845,17 @@ class CWMApp {
         if (sessionItem) {
           e.stopPropagation();
           const nameEl = sessionItem.querySelector('.project-session-name');
+          // Phase 18-04 (UI-10): forward the provider id from the dragged
+          // element's data-provider attribute (set by Plan 18-01) so drops
+          // preserve provider identity end-to-end. v1.1-shaped data lacks
+          // the field; default to the back-compat value.
+          const dragProvider = sessionItem.dataset.provider || 'claude'; /* gsd:provider-literal-allowed */
           e.dataTransfer.setData('cwm/project-session', JSON.stringify({
             sessionName: sessionItem.dataset.sessionName,
             projectPath: sessionItem.dataset.projectPath,
             projectEncoded: sessionItem.dataset.projectEncoded,
             displayName: nameEl ? nameEl.textContent : '',
+            provider: dragProvider,
           }));
           e.dataTransfer.effectAllowed = 'copy';
           sessionItem.classList.add('dragging');
@@ -1838,10 +1864,14 @@ class CWMApp {
         const header = e.target.closest('.project-accordion-header');
         if (header) {
           const accordion = header.closest('.project-accordion');
+          // Phase 18-04 (UI-10): same provider propagation, sourced from
+          // the parent .project-accordion's data-provider attribute.
+          const accordionProvider = (accordion && accordion.dataset.provider) || 'claude'; /* gsd:provider-literal-allowed */
           e.dataTransfer.setData('cwm/project', JSON.stringify({
             encoded: accordion.dataset.encoded,
             path: accordion.dataset.path,
             name: header.querySelector('.project-name').textContent,
+            provider: accordionProvider,
           }));
           e.dataTransfer.effectAllowed = 'copy';
           header.classList.add('dragging');
@@ -2083,6 +2113,10 @@ class CWMApp {
       this.loadStats(),
       this.loadGroups(),
       this.loadProjects(),
+      // Phase 18-02: load provider registry so the sidebar tab strip is
+      // populated on initial paint. Fails gracefully (warn-only) so a stale
+      // server does not block the rest of the UI.
+      this.loadProviders(),
     ]);
 
     // Restore active workspace from localStorage if still valid
@@ -4420,7 +4454,46 @@ class CWMApp {
       html += `</div>`;
     }
 
+    // ── Providers section placeholder (Phase 18-03) ─────────
+    // The Providers section is rendered asynchronously after the main
+    // innerHTML assignment because _renderProvidersSection may need to
+    // fetch state.providers if it has not been hydrated yet. The
+    // placeholder is a stable DOM anchor that gets swapped out via
+    // outerHTML once the async render resolves. Honors the search
+    // filter: when the filter excludes the section, the placeholder is
+    // simply removed (no flash of empty content).
+    html += `<div id="settings-providers-placeholder"></div>`;
+
     this.els.settingsBody.innerHTML = html;
+
+    // Kick off async Providers section render. Fire-and-forget so the
+    // synchronous render path is unblocked; the placeholder fills in
+    // when the promise resolves. Errors are swallowed (loadProviders
+    // already logs); a missing section is a soft degradation.
+    this._renderProvidersSection(lowerFilter).then(providersHtml => {
+      const placeholder = document.getElementById('settings-providers-placeholder');
+      if (!placeholder) return;
+      if (providersHtml) {
+        // outerHTML swap is atomic at paint time; the placeholder is
+        // replaced wholesale by the rendered section.
+        placeholder.outerHTML = providersHtml;
+        // Bind the toggle change handlers on the freshly rendered
+        // checkboxes. Each tile carries data-provider-toggle="<id>"; the
+        // handler reads the id off the dataset and routes through
+        // _handleProviderToggleChange which owns the modal flow + PUT.
+        this.els.settingsBody.querySelectorAll('input[data-provider-toggle]').forEach(input => {
+          input.addEventListener('change', (e) => this._handleProviderToggleChange(e));
+        });
+      } else {
+        // Filter excluded the section or no providers loaded; remove the
+        // placeholder so the DOM stays clean.
+        placeholder.remove();
+      }
+    }).catch(err => {
+      console.warn('[settings-providers] render failed:', err);
+      const placeholder = document.getElementById('settings-providers-placeholder');
+      if (placeholder) placeholder.remove();
+    });
 
     // ── Hidden items event bindings ────────────────────────
     this.els.settingsBody.querySelectorAll('.settings-unhide-btn').forEach(btn => {
@@ -7391,12 +7464,15 @@ class CWMApp {
 
   async discoverSessions() {
     try {
-      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
-      const data = await this.api('GET', '/api/discover?legacy=1');
-      const projects = data.projects || [];
+      // Phase 18-04: native v1.2 shape (Phase 15 back-compat shim retired).
+      // /api/discover returns { projects: { claude: [...], codex: [...] } };
+      // merge across providers into a flat sorted-by-mtime list so the
+      // launcher's modal continues to receive a plain array.
+      const data = await this.api('GET', '/api/discover');
+      const projects = this._mergeProjectsByProvider(data.projects || {});
 
       if (projects.length === 0) {
-        this.showToast('No Claude projects found on this PC', 'info');
+        this.showToast('No projects found on this PC', 'info');
         return;
       }
 
@@ -8750,22 +8826,30 @@ class CWMApp {
         this.showToast(`Session "${data.name || 'unknown'}" started`, 'success');
         this._throttledLoadSessions();
         this._throttledLoadStats();
+        // Phase 18-02: SSE-driven badge patch. Non-destructive; updates only
+        // the .sidebar-tab-badge textContent so scroll position and focus
+        // are preserved.
+        this._patchProviderTabBadges();
         break;
       case 'session:stopped':
         this.showToast(`Session "${data.name || 'unknown'}" stopped`, 'info');
         this._throttledLoadSessions();
         this._throttledLoadStats();
+        this._patchProviderTabBadges();
         break;
       case 'session:error':
         this.showToast(`Session "${data.name || 'unknown'}" encountered an error`, 'error');
         this._throttledLoadSessions();
         this._throttledLoadStats();
+        this._patchProviderTabBadges();
         break;
       case 'session:created':
       case 'session:deleted':
       case 'session:updated':
+      case 'session:moved':
         this._throttledLoadSessions();
         this._throttledLoadStats();
+        this._patchProviderTabBadges();
         break;
       case 'workspace:created':
       case 'workspace:deleted':
@@ -8837,10 +8921,19 @@ class CWMApp {
       rosewater: '#f5e0dc',
     };
 
+    // Phase 18-02: render-time provider filter. 'all' lets every session
+    // through; any other value filters to sessions matching that provider.
+    // The filter is applied to allWsSessions BEFORE the hidden-set filter
+    // so hidden counts reflect the visible (per-tab) subset.
+    const activeTab = this.state.activeProviderTab || 'all';
+    const matchesActiveProvider = (s) => activeTab === 'all'
+      || (s && (s.provider || 'claude')) === activeTab; /* gsd:provider-literal-allowed */
+
     const renderWorkspaceItem = (ws) => {
       const isActive = this.state.activeWorkspace && this.state.activeWorkspace.id === ws.id;
       const color = colorMap[ws.color] || colorMap.mauve;
-      const allWsSessions = (this.state.allSessions || this.state.sessions).filter(s => s.workspaceId === ws.id);
+      const rawWsSessions = (this.state.allSessions || this.state.sessions).filter(s => s.workspaceId === ws.id);
+      const allWsSessions = rawWsSessions.filter(matchesActiveProvider);
       const wsSessions = allWsSessions.filter(s => this.state.showHidden || !this.state.hiddenSessions.has(s.id));
       const hiddenCount = allWsSessions.length - wsSessions.length;
       const sessionCount = wsSessions.length;
@@ -8908,10 +9001,20 @@ class CWMApp {
             : s.model.split('-').pop();
           badges += `<span class="session-badge session-badge-model">${this.escapeHtml(modelShort)}</span>`;
         }
-        // Cost badge (best-effort from cache)
-        const cachedCost = this._getSessionCostCached(s.id);
-        if (cachedCost !== null && cachedCost !== undefined) {
-          badges += `<span class="session-badge session-badge-cost">$${Number(cachedCost).toFixed(2)}</span>`;
+        // Cost badge (best-effort from cache).
+        // Phase 18-04 (COST-02): if the session's provider does NOT support
+        // cost tracking (Codex today), render an em-dash with a tooltip
+        // instead of a misleading '$0.00'. The provider lookup falls back
+        // to true (Claude semantics) when state.providers has not loaded yet.
+        const costProvider = this._getProviderById(s.provider || 'claude'); /* gsd:provider-literal-allowed */
+        const supportsCost = costProvider ? (costProvider.supportsCost !== false) : true;
+        if (supportsCost) {
+          const cachedCost = this._getSessionCostCached(s.id);
+          if (cachedCost !== null && cachedCost !== undefined) {
+            badges += `<span class="session-badge session-badge-cost">$${Number(cachedCost).toFixed(2)}</span>`;
+          }
+        } else {
+          badges += `<span class="session-badge session-badge-cost-na" title="Cost not tracked for this provider">&mdash;</span>`;
         }
         // Subagent badge (from cached data)
         const cachedSubagents = this._getSubagentsCached(s.id);
@@ -9778,6 +9881,312 @@ class CWMApp {
 
 
   /* ═══════════════════════════════════════════════════════════
+     PROVIDER TABS (Phase 18-02)
+     ─── Tab strip at the top of the sidebar that filters the
+     ─── visible workspace and project list by provider. Pure
+     ─── render-time filter; state.allSessions and state.projects
+     ─── remain unfiltered so the filter is reversible.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Fetch the provider registry from the server and populate the sidebar
+   * tab strip. Called once at app init (after auth succeeds) and again
+   * whenever the Settings Providers section toggles a provider on/off.
+   *
+   * On error, logs a warning and renders an "All" only fallback so the UI
+   * degrades gracefully when the server lags behind the client.
+   * @returns {Promise<void>}
+   */
+  async loadProviders() {
+    try {
+      const data = await this.api('GET', '/api/providers');
+      // GET /api/providers returns either a bare array or { providers: [...] }
+      // depending on phase; defensive normalisation here keeps the tab strip
+      // robust against shape drift.
+      this.state.providers = Array.isArray(data) ? data : (data.providers || []);
+    } catch (err) {
+      console.warn('[provider-tabs] loadProviders failed', err);
+      // Keep whatever providers we already had; never blank the strip on a
+      // transient fetch error.
+    }
+    this.renderProviderTabs();
+  }
+
+  /**
+   * Render the tab strip into #sidebar-provider-tabs. Always emits an "All"
+   * tab as the first child; each enabled provider follows in registration
+   * order. The active tab carries the .active class; click handlers route
+   * through setActiveProviderTab so scroll preservation is centralised.
+   * @returns {void}
+   */
+  renderProviderTabs() {
+    const host = this.els.sidebarProviderTabs || document.getElementById('sidebar-provider-tabs');
+    if (!host) return;
+    const enabled = (this.state.providers || []).filter(p => p && p.enabled);
+    const active = this.state.activeProviderTab || 'all';
+
+    // Edge case: if active tab refers to a now-disabled provider, fall back
+    // to 'all' so the user is never stranded on an empty filter.
+    const enabledIds = new Set(enabled.map(p => p.id));
+    const resolvedActive = (active === 'all' || enabledIds.has(active)) ? active : 'all';
+    if (resolvedActive !== active) {
+      this.state.activeProviderTab = 'all';
+      try { localStorage.setItem('cwm_activeProviderTab', 'all'); } catch (_) {}
+    }
+
+    let html = `<button class="sidebar-tab${resolvedActive === 'all' ? ' active' : ''}" role="tab" data-provider="all" type="button">All<span class="sidebar-tab-badge">${this._countAllSessions()}</span></button>`;
+    for (const p of enabled) {
+      const isActive = resolvedActive === p.id;
+      const count = this._countSessionsByProvider(p.id);
+      html += `<button class="sidebar-tab${isActive ? ' active' : ''}" role="tab" data-provider="${this.escapeHtml(p.id)}" type="button">${this.escapeHtml(p.displayName || p.id)}<span class="sidebar-tab-badge">${count}</span></button>`;
+    }
+    host.innerHTML = html;
+
+    // Bind once per render; innerHTML replacement discarded the old listeners.
+    host.querySelectorAll('.sidebar-tab').forEach(btn => {
+      btn.addEventListener('click', () => this.setActiveProviderTab(btn.dataset.provider));
+    });
+  }
+
+  /**
+   * Switch the active provider tab. Captures scroll position of the current
+   * tab into _tabScrollPositions, mutates state, persists to localStorage,
+   * re-renders the sidebar, and restores the new tab's scroll position via
+   * requestAnimationFrame so the restore lands after layout settles.
+   *
+   * @param {string} id Provider id ('all' or any id from state.providers).
+   * @returns {void}
+   */
+  setActiveProviderTab(id) {
+    if (id == null) return;
+    // Lazy-init the per-tab scroll position cache. Shape:
+    //   { [tabId]: { ws: number, proj: number } }
+    if (!this._tabScrollPositions) this._tabScrollPositions = {};
+    const wsList = this.els.workspaceList;
+    const projList = this.els.projectsList;
+    const oldTab = this.state.activeProviderTab || 'all';
+
+    // Capture BEFORE the state mutation so the right slot gets the old scroll.
+    this._tabScrollPositions[oldTab] = {
+      ws: wsList ? wsList.scrollTop : 0,
+      proj: projList ? projList.scrollTop : 0,
+    };
+
+    this.state.activeProviderTab = id;
+    try { localStorage.setItem('cwm_activeProviderTab', id); } catch (_) {}
+
+    this.renderProviderTabs();
+    if (typeof this.renderWorkspaces === 'function') this.renderWorkspaces();
+    if (typeof this.renderProjects === 'function') this.renderProjects();
+
+    // Restore scroll AFTER the new render's layout settles. innerHTML
+    // assignment silently resets scrollTop to 0; rAF places the restore
+    // on the frame the new DOM is painted.
+    requestAnimationFrame(() => {
+      const saved = this._tabScrollPositions[id];
+      if (!saved) return;
+      if (wsList && typeof saved.ws === 'number') wsList.scrollTop = saved.ws;
+      if (projList && typeof saved.proj === 'number') projList.scrollTop = saved.proj;
+    });
+  }
+
+  /**
+   * Total session count across every provider. Reads state.allSessions
+   * (the canonical full list) with state.sessions as fallback. Returns 0
+   * when neither is populated yet (pre-load).
+   * @returns {number}
+   */
+  _countAllSessions() {
+    const all = this.state.allSessions || this.state.sessions || [];
+    return Array.isArray(all) ? all.length : 0;
+  }
+
+  /**
+   * Session count for a single provider id. Defaults sessions missing the
+   * provider field to the v1.1 back-compat default (Claude) per the rule
+   * documented in RESEARCH.md. The bare literal below carries the
+   * allowlist marker because it is a back-compat default, not a UI
+   * assumption.
+   * @param {string} id Provider id.
+   * @returns {number}
+   */
+  _countSessionsByProvider(id) {
+    const all = this.state.allSessions || this.state.sessions || [];
+    if (!Array.isArray(all)) return 0;
+    let n = 0;
+    for (const s of all) {
+      const p = s && (s.provider || 'claude'); /* gsd:provider-literal-allowed */
+      if (p === id) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Patch the .sidebar-tab-badge text on existing tab buttons in-place.
+   * Mirrors _patchCostBadges (app.js:16742): SSE-driven updates must NOT
+   * trigger a full renderProviderTabs (which would rebind click handlers
+   * and lose focus/animations). Safe to call on every SSE session event.
+   * @returns {void}
+   */
+  _patchProviderTabBadges() {
+    const host = this.els.sidebarProviderTabs || document.getElementById('sidebar-provider-tabs');
+    if (!host) return;
+    const buttons = host.querySelectorAll('.sidebar-tab');
+    buttons.forEach(btn => {
+      const id = btn.dataset.provider;
+      const badge = btn.querySelector('.sidebar-tab-badge');
+      if (!badge) return;
+      const count = id === 'all' ? this._countAllSessions() : this._countSessionsByProvider(id);
+      const text = String(count);
+      if (badge.textContent !== text) badge.textContent = text;
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     PHASE 18-03: SETTINGS PROVIDERS SECTION
+     ─── One tile per provider in the Settings overlay, with
+     ─── toggle, availability indicator, and install hint.
+     ─── Toggling OFF with running PTYs surfaces a confirmation
+     ─── modal; running PTYs are NEVER killed by a toggle.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Look up the provider id for a session. Defaults to the v1.1 back-compat
+   * default for sessions missing the field.
+   * @param {string} sessionId Session id to look up.
+   * @returns {string} Provider id. gsd:provider-literal-allowed
+   */
+  _sessionProviderId(sessionId) {
+    const all = this.state.allSessions || this.state.sessions || [];
+    const sess = Array.isArray(all) ? all.find(s => s && s.id === sessionId) : null;
+    return (sess && sess.provider) || 'claude'; /* gsd:provider-literal-allowed (Phase 18 helper default) */
+  }
+
+  /**
+   * Return the install hint text for a provider id.
+   * @param {string} providerId Provider id from state.providers.
+   * @returns {string} Install hint string.
+   */
+  _installHintFor(providerId) {
+    const hints = {
+      claude: 'Install: npm install -g @anthropic-ai/claude-code', // gsd:provider-literal-allowed
+      codex: 'Install: npm install -g @openai/codex', // gsd:provider-literal-allowed
+    };
+    return hints[providerId] || 'See provider documentation for installation instructions';
+  }
+
+  /**
+   * Render the Settings -> Providers section HTML.
+   * @param {string} filter Lowercased filter from the Settings search input.
+   * @returns {Promise<string>} HTML string for the Providers category block.
+   */
+  async _renderProvidersSection(filter) {
+    const lower = (filter || '').toLowerCase();
+    if (lower) {
+      const keywords = ['provider', 'providers', 'codex', 'claude', 'chatgpt', 'enable', 'enabled', 'cli']; // gsd:provider-literal-allowed
+      if (!keywords.some(k => k.includes(lower) || lower.includes(k))) {
+        return '';
+      }
+    }
+    let providers = this.state.providers;
+    if (!Array.isArray(providers) || providers.length === 0) {
+      try {
+        await this.loadProviders();
+        providers = this.state.providers || [];
+      } catch (_) {
+        providers = [];
+      }
+    }
+    if (!providers || providers.length === 0) return '';
+
+    let html = `<div class="settings-category" data-section="providers">`;
+    html += `<div class="settings-category-label">Providers</div>`;
+    for (const p of providers) {
+      const id = p && p.id;
+      if (!id) continue;
+      const displayName = p.displayName || id;
+      const enabled = !!p.enabled;
+      const available = !!p.available;
+      let statusText;
+      if (enabled && available) statusText = 'Enabled &middot; CLI on PATH';
+      else if (!enabled && available) statusText = 'Disabled &middot; CLI on PATH';
+      else if (!enabled && !available) statusText = 'CLI not found in PATH';
+      else statusText = 'Enabled but CLI not found in PATH';
+      const installHint = available
+        ? ''
+        : `<div class="settings-providers-install-hint">${this.escapeHtml(this._installHintFor(id))}</div>`;
+      html += `
+        <div class="settings-providers-tile" data-provider="${this.escapeHtml(id)}">
+          <div class="settings-providers-swatch" aria-hidden="true"></div>
+          <div class="settings-providers-info">
+            <div class="settings-providers-name">${this.escapeHtml(displayName)}</div>
+            <div class="settings-providers-status" data-available="${available}">${statusText}</div>
+            ${installHint}
+          </div>
+          <label class="settings-toggle" title="Toggle ${this.escapeHtml(displayName)}">
+            <input type="checkbox" data-provider-toggle="${this.escapeHtml(id)}" ${enabled ? 'checked' : ''} />
+            <span class="settings-toggle-track"></span>
+            <span class="settings-toggle-thumb"></span>
+          </label>
+        </div>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  /**
+   * Handle a change event on a provider toggle checkbox.
+   * @param {Event} event The change event from the toggle checkbox.
+   * @returns {Promise<void>}
+   */
+  async _handleProviderToggleChange(event) {
+    const target = event.target;
+    if (!target || !target.dataset || !target.dataset.providerToggle) return;
+    const id = target.dataset.providerToggle;
+    const desired = !!target.checked;
+    const provider = (this.state.providers || []).find(p => p && p.id === id);
+    const displayName = (provider && provider.displayName) || id;
+    const prior = provider ? !!provider.enabled : !desired;
+    if (provider && provider.enabled === desired) return;
+    const revert = () => { target.checked = prior; };
+    if (!desired) {
+      const running = (this.terminalPanes || []).filter(
+        tp => tp && tp.sessionId && this._sessionProviderId(tp.sessionId) === id
+      ).length;
+      if (running > 0) {
+        const plural = running !== 1 ? 's' : '';
+        const confirmed = await this.showConfirmModal({
+          title: `Disable ${displayName}?`,
+          message: `${running} ${this.escapeHtml(displayName)} session${plural} ${running !== 1 ? 'are' : 'is'} running. They will continue but cannot be restarted while ${this.escapeHtml(displayName)} is disabled.`,
+          confirmText: 'Disable',
+          confirmClass: 'btn-danger',
+        });
+        if (!confirmed) { revert(); return; }
+      }
+    }
+    try {
+      const updated = await this.api('PUT', `/api/providers/${encodeURIComponent(id)}/enabled`, { enabled: desired });
+      if (updated && typeof updated === 'object' && updated.id) {
+        const idx = (this.state.providers || []).findIndex(p => p && p.id === updated.id);
+        if (idx >= 0) this.state.providers[idx] = updated;
+        else this.state.providers.push(updated);
+      } else {
+        await this.loadProviders();
+      }
+      if (typeof this.renderProviderTabs === 'function') this.renderProviderTabs();
+      if (typeof this.renderWorkspaces === 'function') this.renderWorkspaces();
+      if (typeof this.renderProjects === 'function') this.renderProjects();
+      const filterVal = (this.els && this.els.settingsSearchInput) ? this.els.settingsSearchInput.value : '';
+      this.renderSettingsBody(filterVal);
+      this.showToast(`${displayName} ${desired ? 'enabled' : 'disabled'}`, 'success');
+    } catch (err) {
+      revert();
+      this.showToast(`Failed to toggle ${displayName}: ${err && err.message ? err.message : 'unknown error'}`, 'error');
+    }
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
      PROJECTS PANEL
      ═══════════════════════════════════════════════════════════ */
 
@@ -9802,16 +10211,50 @@ class CWMApp {
         }
       }
 
-      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
-      const url = forceRefresh ? '/api/discover?refresh=true&legacy=1' : '/api/discover?legacy=1';
+      // Phase 18-04: native v1.2 shape (Phase 15 back-compat shim retired).
+      // /api/discover returns { projects: { claude: [...], codex: [...] } }.
+      const url = forceRefresh ? '/api/discover?refresh=true' : '/api/discover';
       const data = await this.api('GET', url);
-      this.state.projects = data.projects || [];
-      // Cache for 30s
+      const byProvider = (data && typeof data.projects === 'object' && !Array.isArray(data.projects))
+        ? data.projects
+        : {};
+      this.state.projectsByProvider = byProvider;
+      this.state.projects = this._mergeProjectsByProvider(byProvider);
       sessionStorage.setItem('cwm_projects', JSON.stringify({ ts: Date.now(), data: this.state.projects }));
       this.renderProjects();
     } catch {
       // Non-critical - projects panel just stays empty
     }
+  }
+
+  /**
+   * Flatten the per-provider /api/discover response object into a single
+   * array sorted by lastActive (newest first). Tolerates the legacy array
+   * shape and an empty/missing object. Used by every callsite that retired
+   * the Phase 15 back-compat shim in Phase 18-04.
+   *
+   * @param {Object|Array} projectsByProvider Either the v1.2 object map of
+   *   {providerId: ProjectObject[]} OR (defensively) the v1.1 flat array
+   *   from a stale cache or unexpected server response.
+   * @returns {Array} Flat merged array of project objects.
+   */
+  _mergeProjectsByProvider(projectsByProvider) {
+    if (Array.isArray(projectsByProvider)) {
+      return projectsByProvider.slice();
+    }
+    if (!projectsByProvider || typeof projectsByProvider !== 'object') return [];
+    const merged = [];
+    for (const arr of Object.values(projectsByProvider)) {
+      if (Array.isArray(arr)) {
+        for (const p of arr) merged.push(p);
+      }
+    }
+    merged.sort((a, b) => {
+      const ta = (a && (a.lastActive || a.modified)) ? new Date(a.lastActive || a.modified).getTime() : 0;
+      const tb = (b && (b.lastActive || b.modified)) ? new Date(b.lastActive || b.modified).getTime() : 0;
+      return tb - ta;
+    });
+    return merged;
   }
 
   renderProjects() {
@@ -9822,6 +10265,14 @@ class CWMApp {
     if (projects.length === 0) {
       list.innerHTML = '<div style="padding: 12px; text-align: center; font-size: 12px; color: var(--overlay0);">No projects found</div>';
       return;
+    }
+
+    // Phase 18-02: render-time provider filter. Projects from pre-v1.2
+    // servers lack p.provider; the v1.1 default is the Claude provider id
+    // (a back-compat value, not a UI assumption), so the marker stays.
+    const activeTab = this.state.activeProviderTab || 'all';
+    if (activeTab !== 'all') {
+      projects = projects.filter(p => (p && (p.provider || 'claude')) === activeTab); /* gsd:provider-literal-allowed */
     }
 
     // Filter out hidden projects (unless showHidden is on)
@@ -10269,13 +10720,17 @@ class CWMApp {
               const ps = JSON.parse(projSessJson);
               const claudeSessionId = ps.sessionName; // This IS the Claude session UUID
               const displayName = ps.displayName || this.getProjectSessionTitle(claudeSessionId) || claudeSessionId;
-              console.log('[DnD] Project-session drop - resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath);
+              // Phase 18-04 (UI-10): forward provider from drag payload so
+              // the new pane carries the correct identity.
+              const psProvider = ps.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
+              console.log('[DnD] Project-session drop - resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath, 'provider:', psProvider);
               // Open terminal directly - use the Claude session UUID as the PTY session ID
               // so the PTY manager can reuse it on subsequent drops
               this.openTerminalInPane(slotIdx, claudeSessionId, displayName, {
                 cwd: ps.projectPath,
                 resumeSessionId: claudeSessionId,
                 command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+                provider: psProvider,
               });
               this.showToast('Opening session - drag to a project to save it', 'info');
             } catch (err) {
@@ -10291,9 +10746,12 @@ class CWMApp {
             try {
               const project = JSON.parse(projectJson);
               const tempId = 'pty-project-' + Date.now();
+              // Phase 18-04 (UI-10): forward provider from drag payload.
+              const projProvider = project.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
               this.openTerminalInPane(slotIdx, tempId, project.name, {
                 cwd: project.path,
                 command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+                provider: projProvider,
               });
               this.showToast('Opening project - drag to a project to save it', 'info');
             } catch (err) {
@@ -14694,6 +15152,15 @@ class CWMApp {
 
     const { summary, timeline, byModel, byWorkspace, sessions } = data;
 
+    // Phase 18-04 (COST-03): when any enabled provider is cost-unsupported
+    // (Codex today), the aggregate cards / breakdowns disclose "(Claude only)"
+    // so users understand the totals exclude Codex traffic rather than
+    // assuming Codex usage was zero. Computed once from state.providers.
+    const providers = this.state.providers || [];
+    const claudeOnly = Array.isArray(providers)
+      && providers.some(p => p && p.enabled && p.supportsCost === false);
+    const claudeOnlySuffix = claudeOnly ? ' (Claude only)' : '';
+
     // Format currency helper
     const fmtCost = (v) => {
       if (v >= 100) return '$' + v.toFixed(0);
@@ -14734,12 +15201,12 @@ class CWMApp {
       (summary.totalTokens.cacheWrite || 0) + (summary.totalTokens.cacheRead || 0);
     html += `<div class="costs-summary">
       <div class="costs-card">
-        <div class="costs-card-label">Total Cost</div>
+        <div class="costs-card-label">Total Cost${claudeOnlySuffix}</div>
         <div class="costs-card-value green">${fmtCost(summary.totalCost)}</div>
         <div class="costs-card-sub">${fmtTokens(totalTokenCount)} tokens</div>
       </div>
       <div class="costs-card">
-        <div class="costs-card-label">${this.escapeHtml(summary.periodLabel)}</div>
+        <div class="costs-card-label">${this.escapeHtml(summary.periodLabel)}${claudeOnlySuffix}</div>
         <div class="costs-card-value blue">${fmtCost(summary.periodCost)}</div>
         <div class="costs-card-sub">${summary.messageCount} messages</div>
       </div>
@@ -14767,6 +15234,15 @@ class CWMApp {
 
     // ── Breakdown: By Model + By Workspace ──
     html += '<div class="costs-breakdown">';
+
+    // Phase 18-04 (COST-03): inline disclosure note above the breakdowns so
+    // the "(Claude only)" suffix on the summary cards is not the only signal.
+    // The byModel and byWorkspace data is Claude-only by nature today (the
+    // cost worker walks Claude JSONL transcripts) so a one-line note is
+    // sufficient; full Codex cost tracking is v1.3 scope.
+    if (claudeOnly) {
+      html += '<div class="costs-note" style="grid-column: 1 / -1; font-size: 12px; color: var(--text-tertiary); margin-bottom: 4px;">Codex cost tracking not yet supported; aggregates reflect Claude usage only.</div>';
+    }
 
     // By Model
     html += '<div class="costs-breakdown-card"><h3 class="costs-breakdown-title">By Model</h3>';
@@ -14826,10 +15302,19 @@ class CWMApp {
         </tr></thead>
         <tbody id="costs-sessions-tbody">`;
       for (const s of sessions.slice(0, 50)) {
-        html += `<tr data-session-id="${s.id}" class="costs-session-row">
+        // Phase 18-04 (COST-02/03): per-row em-dash for cost-unsupported
+        // providers. data-provider rides the row so per-provider styling
+        // can be added without re-render. The provider field is populated
+        // server-side by /api/cost/dashboard (Phase 18-04 server change).
+        const rowLacksCost = this._sessionProviderLacksCost(s);
+        const rowProvider = this.escapeHtml(s.provider || 'claude'); /* gsd:provider-literal-allowed */
+        const costCell = rowLacksCost
+          ? `<td class="cost-cell cost-cell-na" title="Cost not tracked for this provider">&mdash;</td>`
+          : `<td class="cost-cell">${fmtCost(s.cost)}</td>`;
+        html += `<tr data-session-id="${s.id}" data-provider="${rowProvider}" class="costs-session-row">
           <td class="name-cell" title="${this.escapeHtml(s.name)}">${this.escapeHtml(s.name)}</td>
           <td class="workspace-cell" title="${this.escapeHtml(s.workspaceName)}">${this.escapeHtml(s.workspaceName)}</td>
-          <td class="cost-cell">${fmtCost(s.cost)}</td>
+          ${costCell}
           <td>${s.messageCount}</td>
           <td class="model-cell">${fmtModel(s.model)}</td>
         </tr>`;
@@ -14952,10 +15437,18 @@ class CWMApp {
 
     let rowsHtml = '';
     for (const s of sorted.slice(0, 50)) {
-      rowsHtml += `<tr data-session-id="${s.id}" class="costs-session-row" style="cursor:pointer">
+      // Phase 18-04 (COST-02/03): mirror the initial-render's em-dash
+      // logic on every sort re-render so the disclosure does not drop
+      // when the user clicks a column header.
+      const rowLacksCost = this._sessionProviderLacksCost(s);
+      const rowProvider = this.escapeHtml(s.provider || 'claude'); /* gsd:provider-literal-allowed */
+      const costCell = rowLacksCost
+        ? `<td class="cost-cell cost-cell-na" title="Cost not tracked for this provider">&mdash;</td>`
+        : `<td class="cost-cell">${fmtCost(s.cost)}</td>`;
+      rowsHtml += `<tr data-session-id="${s.id}" data-provider="${rowProvider}" class="costs-session-row" style="cursor:pointer">
         <td class="name-cell" title="${this.escapeHtml(s.name)}">${this.escapeHtml(s.name)}</td>
         <td class="workspace-cell" title="${this.escapeHtml(s.workspaceName)}">${this.escapeHtml(s.workspaceName)}</td>
-        <td class="cost-cell">${fmtCost(s.cost)}</td>
+        ${costCell}
         <td>${s.messageCount}</td>
         <td class="model-cell">${fmtModel(s.model)}</td>
       </tr>`;
@@ -16401,10 +16894,19 @@ class CWMApp {
         const snippet = this.highlightSearchQuery(this.escapeHtml(r.snippet || r.preview || ''), query);
         const sessionId = this.escapeHtml(r.sessionId || '');
         const role = this.escapeHtml(r.role || r.type || '');
+        // Phase 18-04 (SRCH-05): each search result carries the provider id
+        // on data-provider so a CSS selector can color the
+        // .search-result-provider chip via var(--provider-{id}-accent).
+        // The chip text is the provider id uppercased; the default below
+        // is the v1.1 back-compat value for results from pre-v1.2 servers.
+        const providerId = r.provider || 'claude'; /* gsd:provider-literal-allowed */
+        const providerAttr = this.escapeHtml(providerId);
+        const providerLabel = this.escapeHtml(providerId.toUpperCase());
 
         return `
-          <div class="search-result" data-session-id="${sessionId}" data-project-path="${this.escapeHtml(r.projectPath || '')}">
+          <div class="search-result" data-session-id="${sessionId}" data-project-path="${this.escapeHtml(r.projectPath || '')}" data-provider="${providerAttr}">
             <div class="search-result-header">
+              <span class="search-result-provider">${providerLabel}</span>
               <span class="search-result-project">${projectName}</span>
               <span class="search-result-time">${timeStr}</span>
             </div>
@@ -16691,6 +17193,40 @@ class CWMApp {
     this.showToast('Image sent to session', 'success');
   }
 
+  /**
+   * Look up a provider entry in state.providers by id. Returns the bare
+   * provider tile object loaded from GET /api/providers (shape:
+   * {id, displayName, accentToken, enabled, available, supportsCost}) or
+   * null when the registry has not loaded yet OR the id is unknown.
+   * Phase 18-04 (COST-02/03): callers consult this before deciding whether
+   * to render a cost badge or to disclose "(Claude only)" on aggregates.
+   * @param {string} id Provider id to resolve.
+   * @returns {Object|null} The provider tile object, or null if not loaded.
+   */
+  _getProviderById(id) {
+    if (!id) return null;
+    const providers = this.state.providers || [];
+    if (!Array.isArray(providers)) return null;
+    return providers.find(p => p && p.id === id) || null;
+  }
+
+  /**
+   * Convenience check for the cost-display branch. Returns true when the
+   * session's provider is known AND explicitly reports supportsCost:false.
+   * Returns false (i.e., do show cost) when the provider is unknown, has
+   * not loaded yet, or is anything other than an explicit "no" so the
+   * Claude/cost-tracked path remains the default for new providers.
+   * @param {Object} session Session object with optional .provider field.
+   * @returns {boolean} true if the session's provider is cost-unsupported.
+   */
+  _sessionProviderLacksCost(session) {
+    if (!session) return false;
+    const id = session.provider || 'claude'; /* gsd:provider-literal-allowed */
+    const entry = this._getProviderById(id);
+    if (!entry) return false;
+    return entry.supportsCost === false;
+  }
+
   /* ─── Session Cost Cache (best-effort, non-blocking) ──────── */
 
   _getSessionCostCached(sessionId) {
@@ -16750,6 +17286,14 @@ class CWMApp {
       // Find the session element in the sidebar
       const sessionEl = list.querySelector(`[data-session-id="${sid}"]`);
       if (!sessionEl) continue;
+
+      // Phase 18-04 (COST-02): if the row already displays the em-dash
+      // "not tracked" badge, LEAVE IT ALONE. A stale cost arriving from a
+      // batch fetch (e.g., during a provider toggle race) must not silently
+      // replace the disclosure with a dollar amount. The render-side
+      // branch in renderSessionItem already decided the row's provider
+      // lacks cost support; trust that decision until next full re-render.
+      if (sessionEl.querySelector('.session-badge-cost-na')) continue;
 
       // Try to find an existing cost badge
       let badge = sessionEl.querySelector('.session-badge-cost');
@@ -17691,9 +18235,11 @@ class CWMApp {
 
     try {
       // Fetch discovered projects
-      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
-      const data = await this.api('GET', '/api/discover?legacy=1');
-      const discovered = data.projects || [];
+      // Phase 18-04: native v1.2 shape (Phase 15 back-compat shim retired).
+      // Same merge helper as loadProjects/discoverSessions so the launcher
+      // sees the sorted-by-mtime flat list it expects.
+      const data = await this.api('GET', '/api/discover');
+      const discovered = this._mergeProjectsByProvider(data.projects || {});
 
       // Build session count map from current sessions for frecency ranking
       const sessionsByDir = {};

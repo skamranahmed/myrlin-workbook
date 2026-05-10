@@ -826,6 +826,11 @@ const standaloneTests = [
   'codex-search.test.js',    // Plan 17-02: snippet search + compacted exclusion (CDX-05/06)
   'css-tokens.test.js',         // Plan 18-01: :root provider tokens and selectors (UI-04, UI-05)
   'data-provider-attr.test.js', // Plan 18-01: data-provider on render sites (UI-03)
+  'provider-tabs.test.js',      // Plan 18-02: sidebar provider tab strip + scroll preservation (UI-01/02/07/08/09)
+  'settings-providers.test.js', // Plan 18-03: Settings Providers section + toggle confirmation modal (SET-01..06)
+  'cost-display.test.js',       // Plan 18-04: provider-aware cost badges + dashboard disclosure (COST-02/03)
+  'search-render.test.js',      // Plan 18-04: search-result provider chip + accent (SRCH-05)
+  'dragdrop-provider.test.js',  // Plan 18-04: drag-drop provider propagation + legacy shim removal (UI-10)
 ];
 
 let standaloneFailed = 0;

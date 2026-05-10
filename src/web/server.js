@@ -1875,9 +1875,11 @@ function probeAvailability(cliBinary, forceRefresh) {
  *   ?refresh=true  Bypass the 30s availability cache and re-probe.
  *
  * Response (200):
- *   [{id, displayName, accentToken, enabled, available}]
+ *   [{id, displayName, accentToken, enabled, available, supportsCost}]
  *
- * Plan 15-03 (DISC-06).
+ * Plan 15-03 (DISC-06). Plan 18-04 added supportsCost so the frontend can
+ * disclose Codex's "cost not tracked" state with an em-dash + tooltip
+ * instead of misleading "$0.00" badges (COST-02 / COST-03).
  */
 app.get('/api/providers', requireAuth, (req, res) => {
   const forceRefresh = req.query.refresh === 'true';
@@ -1888,6 +1890,11 @@ app.get('/api/providers', requireAuth, (req, res) => {
     accentToken: p.accentToken,
     enabled: registry.isEnabled(p.id),
     available: probeAvailability(p.cliBinary, forceRefresh),
+    // Plan 18-04 (COST-02/03): defensive call. supportsCost() is contract-
+    // required, but defaulting to true protects the frontend from a
+    // broken/misregistered provider rather than silently dropping the
+    // cost badge for Claude.
+    supportsCost: (typeof p.supportsCost === 'function') ? (p.supportsCost() !== false) : true,
   }));
   res.json(out);
 });
@@ -3705,6 +3712,10 @@ app.get('/api/cost/dashboard', requireAuth, async (req, res) => {
         name: session.name || session.id.substring(0, 12),
         workspaceId: workspace.id,
         workspaceName: workspace.name,
+        // Plan 18-04 (COST-02/03): forward the session's provider so the
+        // dashboard table can render an em-dash for cost-unsupported
+        // providers instead of an inaccurate '$0.00'.
+        provider: session.provider || 'claude', // gsd:provider-literal-allowed
         cost: Math.round(sessionCost * 1000) / 1000,
         messageCount: costData.messageCount || 0,
         model: primaryModel,

@@ -10240,3 +10240,125 @@ html {
 .project-accordion[data-provider="codex"] {
   box-shadow: inset 2px 0 0 var(--provider-codex-accent);
 }
+
+
+/* ─── Cost disclosure + search provider accent (Phase 18-04) ──────
+   Three render surfaces consume the :root provider tokens from
+   Plan 18-01:
+
+   1. .session-badge-cost-na — the em-dash badge rendered in place of
+      a $-value when a session's provider does not support cost
+      tracking (Codex today). The dashed border + tertiary color
+      signal a deliberate "not tracked" state; cursor:help cues the
+      native tooltip from the title attribute.
+
+   2. .cost-cell-na — the cost-table column mirror of the badge,
+      same semantics applied to the Costs dashboard sessions table.
+
+   3. .search-result-provider — the uppercase chip rendered inside
+      every search-result header. Color is driven by the parent
+      .search-result[data-provider="..."] selector so every theme
+      cascades the right accent through the provider token layer. */
+.session-badge-cost-na {
+  background: transparent;
+  color: var(--subtext0);
+  border: 1px dashed var(--surface2);
+  cursor: help;
+}
+
+.cost-cell-na {
+  color: var(--subtext0);
+  cursor: help;
+  font-style: italic;
+}
+
+.search-result-provider {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: transparent;
+  /* Default color: tertiary text so an unknown-provider chip is still
+     legible without depending on a per-provider selector below. */
+  color: var(--subtext0);
+}
+
+.search-result[data-provider="claude"] .search-result-provider {
+  color: var(--provider-claude-accent);
+}
+
+.search-result[data-provider="codex"] .search-result-provider {
+  color: var(--provider-codex-accent);
+}
+
+.search-result[data-provider="gemini"] .search-result-provider {
+  color: var(--provider-gemini-accent);
+}
+
+/* ─── Sidebar provider tab strip (Phase 18-02) ────────────────────
+   Tab strip rendered above #sidebar-projects-header by
+   renderProviderTabs(). Each tab carries data-provider and the active
+   tab takes a 2px bottom border in its provider's accent colour
+   (--provider-{id}-accent). The "all" tab uses --accent so it tracks
+   the theme's neutral accent. The badge bubble holds the session
+   count for that provider, updated in-place by _patchProviderTabBadges
+   on SSE events so scroll position is preserved (Pitfall B). */
+.sidebar-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.sidebar-tabs:empty {
+  /* When the tab strip is empty (initial paint, before loadProviders
+     resolves), collapse to zero height so there is no visual gap
+     between the view-toggle and the projects header. */
+  display: none;
+}
+.sidebar-tab {
+  flex: 0 1 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.sidebar-tab:hover {
+  color: var(--text-secondary);
+}
+.sidebar-tab.active {
+  color: var(--text-primary);
+}
+.sidebar-tab.active[data-provider="claude"] {
+  border-bottom-color: var(--provider-claude-accent);
+}
+.sidebar-tab.active[data-provider="codex"] {
+  border-bottom-color: var(--provider-codex-accent);
+}
+.sidebar-tab.active[data-provider="gemini"] {
+  border-bottom-color: var(--provider-gemini-accent);
+}
+.sidebar-tab.active[data-provider="all"] {
+  border-bottom-color: var(--accent, var(--mauve));
+}
+.sidebar-tab-badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--surface0);
+  border-radius: 8px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
