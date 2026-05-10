@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.36] - 2026-05-10
+
+### Changed
+
+- **Slimmed npm tarball** - The v0.9.35 tarball was 2.6 MB across 345 files because `.planning/` (GSD planning docs), `mobile/` (separate React Native app), and `logs/` (runtime logs) were not excluded from npm pack. Added all three to `.npmignore`. Also scrubbed `.planning/` from the full git history via `git filter-repo` (98 files, ~600 KB). The npm package now ships only what is needed to run the workbook.
+
+### Note for contributors
+
+Git history was rewritten on `main` to remove 98 ephemeral planning docs from `.planning/`. Existing clones will need to re-clone or rebase: `git fetch && git reset --hard origin/main`. All substantive commit content (code, docs, mobile app source) is preserved; only `.planning/` artifacts were removed.
+
 ## [0.9.35] - 2026-05-09
 
 ### Fixed
