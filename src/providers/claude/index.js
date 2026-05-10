@@ -108,19 +108,7 @@ async function init() { /* no-op */ }
  */
 async function dispose() { /* no-op */ }
 
-/**
- * spawnCommand placeholder. Plan 14-04 replaces this single function
- * with a real implementation that lives in src/providers/claude/spawn.js
- * and is re-exported from this module. Until then, calling it throws
- * with a message that points at the owning plan, so PTY launches that
- * route through the registry surface failure cleanly rather than
- * silently producing a malformed descriptor.
- *
- * @throws {Error} Always.
- */
-function spawnCommand() {
-  throw new Error('Claude spawnCommand placeholder, overridden by Plan 14-04 (src/providers/claude/spawn.js)');
-}
+const { spawnCommand } = require('./spawn');
 
 module.exports = {
   id: 'claude', // gsd:provider-literal-allowed
