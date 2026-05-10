@@ -7198,65 +7198,12 @@ app.post('/api/tunnel/named/stop', requireAuth, (req, res) => {
 // ──────────────────────────────────────────────────────────
 //  SESSION SEARCH (full-text across all JSONL files)
 // ──────────────────────────────────────────────────────────
-
-// ─── Search File List Cache (30s TTL) ──────────────────────
-let _searchFileCache = null;
-let _searchFileCacheTime = 0;
-const SEARCH_FILE_CACHE_TTL = 30000; // 30 seconds
-
-/**
- * Build a list of all JSONL session files under ~/.claude/projects/.
- * Returns an array of { filePath, sessionId, projectDir, encodedName, realPath, projectName }.
- * Cached in memory for 30 seconds.
- */
-function getSearchableFiles() {
-  const now = Date.now();
-  if (_searchFileCache && (now - _searchFileCacheTime) < SEARCH_FILE_CACHE_TTL) {
-    return _searchFileCache;
-  }
-
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-  if (!fs.existsSync(claudeDir)) {
-    _searchFileCache = [];
-    _searchFileCacheTime = now;
-    return _searchFileCache;
-  }
-
-  const files = [];
-  try {
-    const entries = fs.readdirSync(claudeDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-
-      const projectDir = path.join(claudeDir, entry.name);
-      const realPath = resolveProjectPath(projectDir, entry.name);
-      const projectName = getProjectDisplayName(entry.name, realPath);
-
-      try {
-        const dirFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-        for (const f of dirFiles) {
-          files.push({
-            filePath: path.join(projectDir, f),
-            sessionId: f.replace('.jsonl', ''),
-            projectDir,
-            encodedName: entry.name,
-            realPath,
-            projectName,
-          });
-        }
-      } catch (_) {
-        // Skip directories that can't be read
-      }
-    }
-  } catch (_) {
-    // If the top-level read fails, return empty
-  }
-
-  _searchFileCache = files;
-  _searchFileCacheTime = now;
-  return files;
-}
-
+//
+// Plan 16-01 (SRCH-01..04, SRCH-06): the file-list cache and the JSONL read
+// loop that used to live inline here MOVED into src/providers/claude/search.js
+// as module-scoped private state. The GET /api/search route below is now a
+// per-provider Promise.allSettled dispatcher; see the route handler further
+// down for the dispatch + merge logic.
 
 // ── Files API ──────────────────────────────────────────────────────────────
 const fileManager = require('./file-manager');
@@ -7352,142 +7299,176 @@ app.post('/api/files/save', requireAuth, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Search Dispatcher Constants (Plan 16-01, SRCH-04) ───────────────────────
+//
+// The 5000ms total budget is preserved verbatim from v1.1. With one enabled
+// provider (Claude only, the default for existing users) the per-provider
+// budget equals the full 5000ms so latency parity holds. With two providers
+// enabled the budget splits as floor(5000/2) = 2500ms each.
+const SEARCH_TOTAL_BUDGET_MS = 5000;
+// The race timer fires at perProviderBudget + GRACE; the provider's own
+// self-check (Date.now() - startTime > timeBudgetMs) is the primary timeout
+// mechanism, the race is the second-line defense for a runaway provider.
+const SEARCH_TIMEOUT_GRACE_MS = 100;
+
+/**
+ * Race a provider's search against a hard timeout. The provider's own loop
+ * already self-checks against timeBudgetMs and returns timedOut: true on
+ * exceed; the race timer is the second-line defense for a runaway provider
+ * (e.g. one that synchronously blocks past its budget). The timer is
+ * registered with .unref() so it cannot pin the event loop, and is cleared
+ * in the resolve handler so memory stays bounded across burst requests.
+ *
+ * @param {Object} provider - Registry-resolved provider object (must have id and search()).
+ * @param {string} query - Trimmed query string.
+ * @param {number} limit - Result count cap.
+ * @param {number} timeBudgetMs - Per-provider self-check budget (passed through).
+ * @param {number} graceMs - Extra time before the race resolves with __timedOut.
+ * @returns {Promise<{results: Array, timedOut: boolean, searchedFiles: number}|{__timedOut: true, providerId: string}>}
+ */
+function racedSearch(provider, query, limit, timeBudgetMs, graceMs) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(
+      () => resolve({ __timedOut: true, providerId: provider.id }),
+      timeBudgetMs + graceMs
+    );
+    // Do not pin the event loop on this timer; it must not block process exit.
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([
+    Promise.resolve().then(() => provider.search({ query, limit, timeBudgetMs })),
+    timeout,
+  ]).then((value) => {
+    clearTimeout(timer);
+    return value;
+  });
+}
+
 /**
  * GET /api/search?q=<query>&limit=20
- * Full-text search across all Claude Code JSONL session files.
- * Searches the message.content field (both string and array forms) case-insensitively.
- * Returns matches with ~200 char snippets, sorted by timestamp descending.
- * Protected by auth. Enforces a 5-second timeout, returning partial results if exceeded.
+ *
+ * v1.2 dispatcher (Plan 16-01): calls every enabled provider's .search() in
+ * parallel via Promise.allSettled, merges results sorted by descending
+ * timestamp, slices to limit, and returns {partial, timedOutProviders}
+ * alongside the legacy fields. Each result carries its provider field
+ * (set by the provider, not re-tagged at the dispatcher).
+ *
+ * Auth-protected. Total budget preserved at SEARCH_TOTAL_BUDGET_MS (5000ms);
+ * per-provider budget is floor(TOTAL / enabled.length) so Claude-only callers
+ * (the v1.2 default for existing users) receive the full 5000ms and stay
+ * within the +/-5% latency-parity acceptance criterion.
+ *
+ * Response shape:
+ *   {
+ *     query: string,
+ *     results: SearchResult[],     // merged, sorted desc by timestamp, sliced to limit
+ *     totalMatches: number,        // sum of returned result counts across providers
+ *     searchedFiles: number,       // sum across providers (diagnostic)
+ *     durationMs: number,
+ *     partial: boolean,            // any provider timed out OR rejected
+ *     timedOutProviders: string[], // ids of providers that timed out / rejected
+ *     timedOut: boolean,           // legacy alias = partial; deprecated, removed in a future release
+ *   }
+ *
+ * Requirements: SRCH-01 (allSettled dispatch + merge), SRCH-02 (provider field),
+ * SRCH-03 (partial-results contract), SRCH-04 (split budget; no Claude-only
+ * regression), SRCH-06 (single execution context, not N workers).
  */
-app.get('/api/search', requireAuth, (req, res) => {
+app.get('/api/search', requireAuth, async (req, res) => {
   const query = req.query.q;
   if (!query || typeof query !== 'string' || query.trim().length < 2) {
     return res.status(400).json({ error: 'Query parameter "q" must be at least 2 characters.' });
   }
-
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
-  const searchQuery = query.trim().toLowerCase();
+  const trimmedQuery = query.trim();
   const startTime = Date.now();
-  const TIMEOUT_MS = 5000; // 5-second timeout
 
-  const files = getSearchableFiles();
-  const results = [];
-  let totalMatches = 0;
-  let searchedFiles = 0;
-  let timedOut = false;
-
-  for (const fileInfo of files) {
-    // Check timeout before processing each file
-    if (Date.now() - startTime > TIMEOUT_MS) {
-      timedOut = true;
-      break;
-    }
-
-    searchedFiles++;
-
-    let content;
-    try {
-      content = fs.readFileSync(fileInfo.filePath, 'utf-8');
-    } catch (_) {
-      continue; // Skip files that can't be read
-    }
-
-    const lines = content.split('\n');
-    let sessionName = null; // Lazy - computed on first match
-
-    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-      // Check timeout inside large files too
-      if (Date.now() - startTime > TIMEOUT_MS) {
-        timedOut = true;
-        break;
-      }
-
-      const line = lines[lineIdx];
-      if (!line.trim()) continue;
-
-      let entry;
-      try {
-        entry = JSON.parse(line);
-      } catch (_) {
-        continue; // Skip corrupt/binary lines
-      }
-
-      const inner = entry.message || entry;
-      const role = entry.type || inner.role;
-      if (role !== 'user' && role !== 'human' && role !== 'assistant') continue;
-
-      const c = inner.content;
-      let text = '';
-      if (typeof c === 'string') {
-        text = c;
-      } else if (Array.isArray(c)) {
-        const textBlocks = c.filter(b => b.type === 'text' && b.text);
-        text = textBlocks.map(b => b.text).join('');
-      }
-
-      if (!text) continue;
-
-      // Case-insensitive search
-      const lowerText = text.toLowerCase();
-      const matchIndex = lowerText.indexOf(searchQuery);
-      if (matchIndex === -1) continue;
-
-      totalMatches++;
-
-      // Only collect up to `limit` result objects
-      if (results.length < limit) {
-        // Lazy-load session name on first match for this file
-        if (sessionName === null) {
-          sessionName = extractSessionName(fileInfo.filePath, fileInfo.sessionId);
-        }
-
-        // Build ~200 char snippet around the match
-        const snippetRadius = 100;
-        const snippetStart = Math.max(0, matchIndex - snippetRadius);
-        const snippetEnd = Math.min(text.length, matchIndex + searchQuery.length + snippetRadius);
-        let snippet = text.substring(snippetStart, snippetEnd)
-          .replace(/[\r\n]+/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (snippetStart > 0) snippet = '...' + snippet;
-        if (snippetEnd < text.length) snippet = snippet + '...';
-
-        // Extract timestamp from the entry
-        const timestamp = entry.timestamp || null;
-
-        results.push({
-          sessionId: fileInfo.sessionId,
-          sessionName,
-          projectPath: fileInfo.realPath,
-          projectName: fileInfo.projectName,
-          timestamp,
-          role: (role === 'human') ? 'user' : role,
-          snippet,
-          lineNumber: lineIdx + 1, // 1-based line number
-        });
-      }
-    }
-
-    if (timedOut) break;
+  // PITFALL F7 (mirrors Plan 15-02): snapshot the enabled provider set ONCE
+  // on the first executable line. A mid-request toggle does NOT change this
+  // snapshot.
+  const enabled = registry.listEnabled();
+  if (enabled.length === 0) {
+    return res.json({
+      query: trimmedQuery,
+      results: [],
+      totalMatches: 0,
+      searchedFiles: 0,
+      durationMs: 0,
+      partial: false,
+      timedOutProviders: [],
+      timedOut: false,
+    });
   }
 
-  // Sort by timestamp descending (most recent first); null timestamps go last
-  results.sort((a, b) => {
+  // Per-provider budget. Claude-only users (default v1.2) get the full 5000ms;
+  // Claude+Codex users get 2500ms each, etc.
+  const perProviderBudget = Math.floor(SEARCH_TOTAL_BUDGET_MS / enabled.length);
+
+  // Dispatch in parallel. Promise.allSettled is required so a single failed
+  // provider does not crash the response (SRCH-03).
+  const settled = await Promise.allSettled(
+    enabled.map((p) => racedSearch(p, trimmedQuery, limit, perProviderBudget, SEARCH_TIMEOUT_GRACE_MS))
+  );
+
+  const merged = [];
+  const timedOutProviders = [];
+  let totalMatches = 0;
+  let searchedFiles = 0;
+
+  for (let i = 0; i < enabled.length; i++) {
+    const provider = enabled[i];
+    const result = settled[i];
+    if (result.status === 'rejected') {
+      console.error('[search] provider ' + provider.id + ' rejected: ' +
+        (result.reason && result.reason.message ? result.reason.message : result.reason));
+      timedOutProviders.push(provider.id);
+      continue;
+    }
+    const v = result.value;
+    if (v && v.__timedOut === true) {
+      timedOutProviders.push(provider.id);
+      continue;
+    }
+    if (v && Array.isArray(v.results)) {
+      // Each result already carries its provider field (set inside the
+      // provider). The dispatcher does NOT re-tag; the provider owns its
+      // own identity (SRCH-02).
+      for (const r of v.results) merged.push(r);
+      totalMatches += v.results.length;
+    }
+    if (v && typeof v.searchedFiles === 'number') {
+      searchedFiles += v.searchedFiles;
+    }
+    if (v && v.timedOut === true) {
+      timedOutProviders.push(provider.id);
+      // The provider's own results may still be partially populated; we keep
+      // them in merged but mark the provider in timedOutProviders so the
+      // frontend can surface the partial-results state in the UI.
+    }
+  }
+
+  // Merge sort: descending timestamp (matches v1.1 sort exactly).
+  // null timestamps sink to the end so the v1.1 wire shape is preserved.
+  merged.sort((a, b) => {
     if (!a.timestamp && !b.timestamp) return 0;
     if (!a.timestamp) return 1;
     if (!b.timestamp) return -1;
     return new Date(b.timestamp) - new Date(a.timestamp);
   });
 
-  const durationMs = Date.now() - startTime;
+  const sliced = merged.slice(0, limit);
+  const partial = timedOutProviders.length > 0;
 
   return res.json({
-    query: query.trim(),
-    results,
+    query: trimmedQuery,
+    results: sliced,
     totalMatches,
     searchedFiles,
-    durationMs,
-    timedOut,
+    durationMs: Date.now() - startTime,
+    partial,
+    timedOutProviders,
+    timedOut: partial, // legacy alias for v1.1 callers; deprecated, kept for one release
   });
 });
 
@@ -8053,4 +8034,10 @@ module.exports = {
   groupProviderSessionsForUI,
   registry,
   claudeProvider,
+  // Plan 16-01 (SRCH-01..04, SRCH-06): exposed for the integration tests in
+  // test/search-dispatch.test.js (budget-split assertions, racedSearch
+  // shape spying). Production callers do not consume these exports.
+  racedSearch,
+  SEARCH_TOTAL_BUDGET_MS,
+  SEARCH_TIMEOUT_GRACE_MS,
 };

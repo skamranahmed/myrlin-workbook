@@ -818,6 +818,7 @@ const standaloneTests = [
   'find-jsonl-refactor.test.js', // Plan 15-01: getProviderForSession + claudeProvider.findArtifactPath (DISC-03)
   'providers-endpoints.test.js', // Plan 15-03: GET/PUT /api/providers (DISC-06, DISC-07)
   'discover-route.test.js', // Plan 15-02: per-provider GET /api/discover dispatcher + ?legacy=1 (DISC-01/02/04/05)
+  'search-dispatch.test.js', // Plan 16-01: GET /api/search Promise.allSettled dispatcher (SRCH-01/02/03/04/06)
 ];
 
 let standaloneFailed = 0;
