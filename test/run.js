@@ -815,6 +815,7 @@ const standaloneTests = [
   'pty-passthrough.test.js', // Plan 14-04: PTY pass-through descriptor flow (PTY-01, PTY-03)
   'cost-worker-via-claude.test.js', // Plan 14-04: claudeProvider.costAdapter wiring (COST-04)
   'grep-gate.test.js', // Plan 14-05: Forbidden provider-name literals outside src/providers/ (ABST-04)
+  'find-jsonl-refactor.test.js', // Plan 15-01: getProviderForSession + claudeProvider.findArtifactPath (DISC-03)
 ];
 
 let standaloneFailed = 0;

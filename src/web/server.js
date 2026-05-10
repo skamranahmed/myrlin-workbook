@@ -25,6 +25,42 @@ const td = require('../core/td-adapter');
 const { getDataDir } = require('../utils/data-dir');
 const { Worker } = require('worker_threads');
 
+// Plan 15-01 (DISC-03): provider registry and Claude provider object.
+// The registry resolves session.provider tags to provider objects via
+// getProviderForSession(); claudeProvider supplies cliBinary and
+// findArtifactPath wrappers that route handlers dispatch through so the
+// abstraction is ready for Phase 17 (Codex) without further surgery.
+const registry = require('../providers');
+const claudeProvider = require('../providers/claude');
+
+/**
+ * Resolve the Provider object for a session record. Reads session.provider,
+ * falls back to claudeProvider for missing tags (defense in depth on top of
+ * the state-load normalization from Plan 14-02), and returns the provider
+ * via registry.getProvider. Returns null only if the registry has no
+ * provider with the resolved id (a corrupt session record tagged with a
+ * never-shipped provider id; should never happen in practice but the
+ * route handlers defensively check).
+ *
+ * Plan 15-01 (DISC-03). Used by every transcript-artifact lookup in
+ * route handlers; refactored from direct helper calls so the
+ * abstraction is ready for Phase 17 (Codex).
+ *
+ * @param {Object|null} session - Session record from store.getSession.
+ *                                Tolerates null (returns null).
+ * @returns {Object|null} Provider object, or null if unresolvable.
+ */
+function getProviderForSession(session) {
+  if (!session) return null;
+  // Defensive default: state-load normalization in src/state/store.js already
+  // backfills session.provider, but this helper is the second layer guarding
+  // any session record that bypassed _tryLoadFile (test fixtures, in-memory
+  // mutations, etc.). The literal carries the allowlist marker so the grep
+  // gate in test/grep-gate.test.js is satisfied.
+  const id = session.provider || 'claude'; // gsd:provider-literal-allowed (defensive default; matches state-load normalization)
+  return registry.getProvider(id);
+}
+
 // ─── Cost Worker Thread ──────────────────────────────────
 // Offloads JSONL parsing to a background thread to prevent
 // terminal I/O freezes during cost calculation.
@@ -1334,8 +1370,9 @@ app.post('/api/sessions', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'workspaceId is required.' });
   }
 
-  // Validate fields that flow into shell commands
-  const safeCommand = command ? sanitizeCommand(command) : 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
+  // Validate fields that flow into shell commands. Default v1.1 back-compat:
+  // claudeProvider.cliBinary (Plan 15-01 replaced the bare provider-name literal).
+  const safeCommand = command ? sanitizeCommand(command) : claudeProvider.cliBinary;
   if (command && !safeCommand) {
     return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
   }
@@ -1377,7 +1414,8 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
   if (updates.command !== undefined) {
     const safe = sanitizeCommand(updates.command);
     if (!safe && updates.command) return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
-    updates.command = safe || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
+    // Plan 15-01: default v1.1 back-compat is claudeProvider.cliBinary.
+    updates.command = safe || claudeProvider.cliBinary;
   }
   if (updates.workingDir !== undefined) {
     const safe = sanitizeWorkingDir(updates.workingDir);
@@ -1429,7 +1467,9 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
       setImmediate(() => {
         try {
           const resumeSessionId = session.resumeSessionId || req.params.id;
-          const jsonlPath = findJsonlFile(resumeSessionId);
+          // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+          const provider = getProviderForSession(session);
+          const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
           if (jsonlPath) {
             const summaryText = generateSessionSummary(jsonlPath);
             const fullSummary = `**${session.name}**: ${summaryText}`;
@@ -1593,6 +1633,10 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 // Claude path-decode helpers, MOVED to src/providers/claude/path-decode.js (Plan 14-03 / ABST-03).
+// Transcript artifact lookups were also lifted into path-decode.js by Plan 15-01
+// (DISC-03) and are NO LONGER required directly here; route handlers dispatch
+// through getProviderForSession + claudeProvider.findArtifactPath /
+// findArtifactByWorkingDir so the abstraction is ready for Phase 17 (Codex).
 const {
   decodeClaudePath,
   greedyFsWalk,
@@ -2604,82 +2648,6 @@ const _costCache = new Map();
 const COST_CACHE_TTL = 60000; // 60 seconds
 
 /**
- * Find a JSONL file for a given Claude session UUID by scanning
- * all project directories under ~/.claude/projects/.
- * @param {string} claudeSessionId - The Claude session UUID
- * @returns {string|null} Full path to the .jsonl file, or null if not found
- */
-function findJsonlFile(claudeSessionId) {
-  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
-  if (!fs.existsSync(claudeProjectsDir)) return null;
-
-  try {
-    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory());
-
-    for (const dir of projectDirs) {
-      const candidate = path.join(claudeProjectsDir, dir.name, claudeSessionId + '.jsonl');
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  } catch (_) {}
-  return null;
-}
-
-/**
- * Find JSONL files by matching a working directory to Claude project directories.
- * Used as a fallback when resumeSessionId is not set (e.g. discovered/imported sessions).
- * Returns the most recent JSONL file path, or null.
- * @param {string} workingDir - The session's working directory
- * @returns {{jsonlPath: string, claudeSessionId: string}|null}
- */
-function findJsonlByWorkingDir(workingDir) {
-  if (!workingDir) return null;
-  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
-  if (!fs.existsSync(claudeProjectsDir)) return null;
-
-  try {
-    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory());
-
-    // Normalize the working dir for comparison (case-insensitive, unified separators)
-    const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
-
-    for (const dir of projectDirs) {
-      // Use resolveProjectPath which prefers sessions-index.json (reliable),
-      // falling back to decodeClaudePath for legacy directories
-      const projPath = path.join(claudeProjectsDir, dir.name);
-      const resolvedPath = resolveProjectPath(projPath, dir.name);
-      const normalizedResolved = resolvedPath.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
-
-      if (normalizedResolved === normalizedWorkDir) {
-        // Found matching project directory, get the most recent JSONL
-        const jsonls = fs.readdirSync(projPath)
-          .filter(f => f.endsWith('.jsonl'))
-          .map(f => {
-            try {
-              const stat = fs.statSync(path.join(projPath, f));
-              return { name: f, mtime: stat.mtimeMs };
-            } catch { return null; }
-          })
-          .filter(Boolean)
-          .sort((a, b) => b.mtime - a.mtime);
-
-        if (jsonls.length > 0) {
-          const claudeSessionId = jsonls[0].name.replace('.jsonl', '');
-          return {
-            jsonlPath: path.join(projPath, jsonls[0].name),
-            claudeSessionId,
-          };
-        }
-      }
-    }
-  } catch (_) {}
-  return null;
-}
-
-/**
  * Resolve the Claude CLI binary path. Tries the bare command first,
  * then checks common installation paths across platforms.
  * Caches the result after first successful resolution.
@@ -2694,7 +2662,10 @@ function resolveClaudeCli() {
     execSync(process.platform === 'win32' ? 'where claude' : 'which claude', {
       stdio: 'pipe', timeout: 5000,
     });
-    _cachedClaudePath = 'claude'; // gsd:provider-literal-allowed (claudeProvider.cliBinary equivalent; refactor deferred to Phase 15)
+    // Plan 15-01: PATH-resolved bare-command form. Use the Claude provider's
+    // canonical cliBinary so the value is sourced from the provider object
+    // rather than a duplicated literal here.
+    _cachedClaudePath = claudeProvider.cliBinary;
     return _cachedClaudePath;
   } catch (_) {}
 
@@ -2703,15 +2674,15 @@ function resolveClaudeCli() {
   const candidates = process.platform === 'win32' ? [
     path.join(home, '.claude', 'local', 'claude.exe'),
     path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-    path.join(home, 'AppData', 'Roaming', 'npm', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
-    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
+    path.join(home, 'AppData', 'Roaming', 'npm', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe; binary name literal belongs to claudeProvider.cliBinary)
+    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe; binary name literal belongs to claudeProvider.cliBinary)
     path.join(home, 'scoop', 'shims', 'claude.cmd'),
   ] : [
-    path.join(home, '.claude', 'local', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
+    path.join(home, '.claude', 'local', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe; binary name literal belongs to claudeProvider.cliBinary)
     '/usr/local/bin/claude',
-    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
+    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe; binary name literal belongs to claudeProvider.cliBinary)
     '/opt/homebrew/bin/claude',
-    path.join(home, '.local', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
+    path.join(home, '.local', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe; binary name literal belongs to claudeProvider.cliBinary)
   ];
 
   for (const candidate of candidates) {
@@ -2854,13 +2825,17 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
   const store = getStore();
   const session = store.getSession(req.params.id);
 
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction. Reused
+  // across primary, workingDir-fallback, and last-resort lookups below.
+  const provider = getProviderForSession(session);
+
   let resumeSessionId = (session && session.resumeSessionId) || null;
-  let jsonlPath = resumeSessionId ? findJsonlFile(resumeSessionId) : null;
+  let jsonlPath = (resumeSessionId && provider) ? provider.findArtifactPath(resumeSessionId) : null;
 
   // Fallback: if no JSONL found by resumeSessionId, try matching by workingDir.
   // This handles discovered/imported sessions that don't have resumeSessionId set.
   if (!jsonlPath && session && session.workingDir) {
-    const fallback = findJsonlByWorkingDir(session.workingDir);
+    const fallback = provider ? provider.findArtifactByWorkingDir(session.workingDir) : null;
     if (fallback) {
       jsonlPath = fallback.jsonlPath;
       // Backfill the resumeSessionId so future lookups are fast
@@ -2873,7 +2848,7 @@ app.get('/api/sessions/:id/cost', requireAuth, (req, res) => {
 
   // Last resort: try the Myrlin session ID directly (unlikely to match, but try)
   if (!jsonlPath && !resumeSessionId) {
-    jsonlPath = findJsonlFile(req.params.id);
+    jsonlPath = provider ? provider.findArtifactPath(req.params.id) : null;
     resumeSessionId = req.params.id;
   }
 
@@ -2945,7 +2920,9 @@ app.get('/api/cost/batch', requireAuth, async (req, res) => {
       for (const session of sessions) {
         const resumeSessionId = session.resumeSessionId;
         if (!resumeSessionId) continue;
-        const jsonlPath = findJsonlFile(resumeSessionId);
+        // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+        const provider = getProviderForSession(session);
+        const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
         if (!jsonlPath) continue;
 
         try {
@@ -3019,7 +2996,9 @@ app.get('/api/quota-overview', requireAuth, async (req, res) => {
         const resumeSessionId = session.resumeSessionId;
         if (!resumeSessionId) continue;
 
-        const jsonlPath = findJsonlFile(resumeSessionId);
+        // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+        const provider = getProviderForSession(session);
+        const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
         if (!jsonlPath) continue;
 
         try {
@@ -3135,7 +3114,9 @@ app.get('/api/workspaces/:id/cost', requireAuth, async (req, res) => {
     const resumeSessionId = session.resumeSessionId;
     if (!resumeSessionId) continue;
 
-    const jsonlPath = findJsonlFile(resumeSessionId);
+    // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+    const provider = getProviderForSession(session);
+    const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
     if (!jsonlPath) continue;
 
     try {
@@ -3259,7 +3240,9 @@ app.get('/api/workspaces/:id/analytics', requireAuth, (req, res) => {
       const resumeSessionId = s.resumeSessionId;
       if (!resumeSessionId) continue;
 
-      const jsonlPath = findJsonlFile(resumeSessionId);
+      // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+      const provider = getProviderForSession(s);
+      const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
       if (!jsonlPath) continue;
 
       try {
@@ -3348,7 +3331,9 @@ app.get('/api/cost/dashboard', requireAuth, async (req, res) => {
       for (const session of sessions) {
         const resumeSessionId = session.resumeSessionId;
         if (!resumeSessionId) continue;
-        const jsonlPath = findJsonlFile(resumeSessionId);
+        // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+        const provider = getProviderForSession(session);
+        const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
         if (!jsonlPath) continue;
 
         try {
@@ -3654,8 +3639,11 @@ app.get('/api/sessions/:id/export-context', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No Claude session ID available' });
   }
 
-  // Find the JSONL file using the shared helper
-  const jsonlPath = findJsonlFile(claudeSessionId);
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction. Falls back
+  // to claudeProvider when req.params.id is a direct Claude UUID (no store
+  // session record), preserving the route's pre-Phase-15 behavior.
+  const provider = getProviderForSession(session) || claudeProvider;
+  const jsonlPath = provider.findArtifactPath(claudeSessionId);
 
   if (!jsonlPath) {
     // No JSONL file found - return basic info from store session data
@@ -3956,7 +3944,9 @@ app.post('/api/sessions/:id/extract-tasks', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'No Claude session ID available' });
   }
 
-  const jsonlPath = findJsonlFile(claudeSessionId);
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+  const provider = getProviderForSession(session) || claudeProvider;
+  const jsonlPath = provider.findArtifactPath(claudeSessionId);
   if (!jsonlPath) {
     return res.status(404).json({ error: 'No conversation data found. This session may not have an active Claude conversation yet. Start Claude in this terminal first, or try a discovered session.' });
   }
@@ -4284,7 +4274,7 @@ app.post('/api/sessions/:id/spinoff-batch', requireAuth, async (req, res) => {
           workspaceId,
           name: sessionName,
           workingDir: worktreePath,
-          command: 'claude', // gsd:provider-literal-allowed (worktree-task default; refactor deferred to Phase 15+)
+          command: 'claude', // gsd:provider-literal-allowed (worktree-task default command; v1.1 back-compat; revisit when worktree-task supports multi-provider)
           model: t.model || undefined,
         });
 
@@ -4372,8 +4362,9 @@ app.post('/api/sessions/:id/refocus', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Session has no valid working directory' });
   }
 
-  // Find the JSONL conversation file
-  const jsonlPath = findJsonlFile(claudeSessionId);
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+  const provider = getProviderForSession(session);
+  const jsonlPath = provider ? provider.findArtifactPath(claudeSessionId) : null;
   if (!jsonlPath) {
     return res.status(404).json({ error: 'No conversation data found. This session may not have an active Claude conversation yet. Start Claude in this terminal first, or try a discovered session.' });
   }
@@ -4720,7 +4711,11 @@ app.get('/api/sessions/:id/subagents', requireAuth, (req, res) => {
     });
   }
 
-  const jsonlPath = findJsonlFile(resumeSessionId);
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction. Falls back
+  // to claudeProvider when req.params.id is a direct Claude UUID with no
+  // store session record (preserves pre-Phase-15 behavior).
+  const provider = getProviderForSession(session) || claudeProvider;
+  const jsonlPath = provider.findArtifactPath(resumeSessionId);
   if (!jsonlPath) {
     return res.json({
       sessionId: req.params.id,
@@ -4884,7 +4879,9 @@ app.post('/api/sessions/:id/summarize', requireAuth, (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   const resumeSessionId = session.resumeSessionId || req.params.id;
-  const jsonlPath = findJsonlFile(resumeSessionId);
+  // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+  const provider = getProviderForSession(session);
+  const jsonlPath = provider ? provider.findArtifactPath(resumeSessionId) : null;
 
   if (!jsonlPath) {
     return res.json({ summary: null, message: 'No JSONL data found' });
@@ -5022,8 +5019,9 @@ app.post('/api/templates', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Template name must be 200 characters or fewer.' });
   }
 
-  // Validate fields that flow into shell commands
-  const safeCommand = command ? sanitizeCommand(command) : 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
+  // Validate fields that flow into shell commands. Default v1.1 back-compat:
+  // claudeProvider.cliBinary (Plan 15-01 replaced the bare provider-name literal).
+  const safeCommand = command ? sanitizeCommand(command) : claudeProvider.cliBinary;
   if (command && !safeCommand) {
     return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
   }
@@ -6053,7 +6051,7 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
       workspaceId,
       name: sessionName,
       workingDir: worktreePath,
-      command: 'claude', // gsd:provider-literal-allowed (worktree-session default; refactor deferred to Phase 15+)
+      command: 'claude', // gsd:provider-literal-allowed (worktree-session default command; v1.1 back-compat; revisit when worktree-session supports multi-provider)
       model: model || undefined,
       initialPrompt: safePrompt,
       flags: safeFlags,
@@ -7344,7 +7342,9 @@ function getGlobalSessionFileMap() {
   let checkedSessions = 0;
 
   for (const session of activeSessions) {
-    const jsonlPath = findJsonlFile(session.resumeSessionId);
+    // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+    const provider = getProviderForSession(session);
+    const jsonlPath = provider ? provider.findArtifactPath(session.resumeSessionId) : null;
     if (!jsonlPath) continue;
     checkedSessions++;
     const files = extractModifiedFilesFromJsonl(jsonlPath);
@@ -7707,7 +7707,9 @@ function backfillResumeSessionIds() {
     for (const session of sessions) {
       if (session.resumeSessionId || !session.workingDir) continue;
 
-      const result = findJsonlByWorkingDir(session.workingDir);
+      // Plan 15-01 (DISC-03): dispatch through provider abstraction.
+      const provider = getProviderForSession(session);
+      const result = provider ? provider.findArtifactByWorkingDir(session.workingDir) : null;
       if (result) {
         store.updateSession(session.id, { resumeSessionId: result.claudeSessionId });
         backfilled++;
@@ -7787,4 +7789,8 @@ module.exports = {
   getPtyManager,
   structuredError,
   extractCustomTitle,
+  // Plan 15-01 (DISC-03): exposed for unit tests in
+  // test/find-jsonl-refactor.test.js. Production callers do not consume
+  // this export; the helper is invoked inline by route handlers above.
+  getProviderForSession,
 };

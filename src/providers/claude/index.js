@@ -30,6 +30,7 @@
 const discover = require('./discover');
 const { parseTranscript, extractCustomTitle, extractSessionName } = require('./parse');
 const { search } = require('./search');
+const { findJsonlFile, findJsonlByWorkingDir } = require('./path-decode');
 
 // COST-04: cost-worker is required (and module-cached) so the strict
 // equality check in test/cost-worker-via-claude.test.js holds. The
@@ -108,6 +109,37 @@ async function init() { /* no-op */ }
  */
 async function dispose() { /* no-op */ }
 
+/**
+ * Resolve the on-disk path of a Claude session's transcript artifact.
+ * Wraps the findJsonlFile helper (lifted into ./path-decode.js by Plan 15-01).
+ * Codex (Phase 17) exposes the same method shape for its rollout-*.jsonl files,
+ * which is why route handlers in src/web/server.js dispatch through this method
+ * via getProviderForSession + provider.findArtifactPath.
+ *
+ * Plan 15-01 (DISC-03).
+ *
+ * @param {string} providerSessionId - Claude session UUID.
+ * @returns {string|null} Absolute path to the .jsonl, or null if not found.
+ */
+function findArtifactPath(providerSessionId) {
+  return findJsonlFile(providerSessionId);
+}
+
+/**
+ * Resolve the on-disk path of a Claude transcript by matching a working
+ * directory to a Claude project directory. Used as a fallback when
+ * resumeSessionId is not set. Returns the most recent JSONL file path
+ * along with its claudeSessionId.
+ *
+ * Plan 15-01 (DISC-03).
+ *
+ * @param {string} workingDir - The session's working directory.
+ * @returns {{jsonlPath: string, claudeSessionId: string}|null}
+ */
+function findArtifactByWorkingDir(workingDir) {
+  return findJsonlByWorkingDir(workingDir);
+}
+
 const { spawnCommand } = require('./spawn');
 
 module.exports = {
@@ -125,6 +157,9 @@ module.exports = {
   isIdleSignal: isIdleSignal,
   getKeyBindings: getKeyBindings,
   costAdapter: costAdapter,
+  // Plan 15-01 (DISC-03): transcript artifact path resolution.
+  findArtifactPath: findArtifactPath,
+  findArtifactByWorkingDir: findArtifactByWorkingDir,
   // Re-exports for callers that previously imported from server.js
   extractCustomTitle: extractCustomTitle,
   extractSessionName: extractSessionName,

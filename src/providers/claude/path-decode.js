@@ -21,6 +21,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 /**
  * Decode a Claude projects directory name to a real filesystem path.
@@ -260,6 +261,93 @@ function isLikelyFailedCJKDecode(encodedName) {
   return /-{3,}/.test(encodedName);
 }
 
+/**
+ * Find a JSONL file for a given Claude session UUID by scanning all
+ * project directories under ~/.claude/projects/.
+ *
+ * Lifted VERBATIM from src/web/server.js (formerly line 2612) in
+ * Plan 15-01 (DISC-03). Internal logic unchanged. Wrapped by
+ * claudeProvider.findArtifactPath so route handlers in server.js
+ * dispatch through the Provider abstraction.
+ *
+ * @param {string} claudeSessionId - The Claude session UUID
+ * @returns {string|null} Full path to the .jsonl file, or null if not found
+ */
+function findJsonlFile(claudeSessionId) {
+  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  if (!fs.existsSync(claudeProjectsDir)) return null;
+
+  try {
+    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+
+    for (const dir of projectDirs) {
+      const candidate = path.join(claudeProjectsDir, dir.name, claudeSessionId + '.jsonl');
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Find JSONL files by matching a working directory to Claude project directories.
+ * Used as a fallback when resumeSessionId is not set (e.g. discovered/imported sessions).
+ * Returns the most recent JSONL file path, or null.
+ *
+ * Lifted VERBATIM from src/web/server.js (formerly line 2637) in Plan 15-01
+ * (DISC-03). Internal logic unchanged. Wrapped by
+ * claudeProvider.findArtifactByWorkingDir.
+ *
+ * @param {string} workingDir - The session's working directory
+ * @returns {{jsonlPath: string, claudeSessionId: string}|null}
+ */
+function findJsonlByWorkingDir(workingDir) {
+  if (!workingDir) return null;
+  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  if (!fs.existsSync(claudeProjectsDir)) return null;
+
+  try {
+    const projectDirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory());
+
+    // Normalize the working dir for comparison (case-insensitive, unified separators)
+    const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
+
+    for (const dir of projectDirs) {
+      // Use resolveProjectPath which prefers sessions-index.json (reliable),
+      // falling back to decodeClaudePath for legacy directories
+      const projPath = path.join(claudeProjectsDir, dir.name);
+      const resolvedPath = resolveProjectPath(projPath, dir.name);
+      const normalizedResolved = resolvedPath.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
+
+      if (normalizedResolved === normalizedWorkDir) {
+        // Found matching project directory, get the most recent JSONL
+        const jsonls = fs.readdirSync(projPath)
+          .filter(f => f.endsWith('.jsonl'))
+          .map(f => {
+            try {
+              const stat = fs.statSync(path.join(projPath, f));
+              return { name: f, mtime: stat.mtimeMs };
+            } catch { return null; }
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.mtime - a.mtime);
+
+        if (jsonls.length > 0) {
+          const claudeSessionId = jsonls[0].name.replace('.jsonl', '');
+          return {
+            jsonlPath: path.join(projPath, jsonls[0].name),
+            claudeSessionId,
+          };
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 module.exports = {
   decodeClaudePath,
   greedyFsWalk,
@@ -267,5 +355,7 @@ module.exports = {
   getOriginalPathFromJsonl,
   getProjectDisplayName,
   isLikelyFailedCJKDecode,
+  findJsonlFile,
+  findJsonlByWorkingDir,
   CJK_REGEX,
 };
