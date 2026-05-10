@@ -1692,7 +1692,7 @@ class CWMApp {
             const friendlyName = projectName + ' (' + shortId + ')';
             await this.api('POST', '/api/sessions', {
               name: friendlyName, workspaceId: targetWsId, workingDir: ps.projectPath,
-              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId,
+              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
             });
             this.showToast(`Session "${friendlyName}" added`, 'success');
             await this.loadSessions();
@@ -1711,7 +1711,7 @@ class CWMApp {
             const project = JSON.parse(projectJson);
             await this.api('POST', '/api/sessions', {
               name: project.name, workspaceId: targetWsId, workingDir: project.path,
-              topic: '', command: 'claude',
+              topic: '', command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
             });
             this.showToast(`Session "${project.name}" created`, 'success');
             await this.loadSessions();
@@ -2474,7 +2474,7 @@ class CWMApp {
         const cmdInput = document.getElementById('modal-field-command');
         if (nameInput && !nameInput.value) nameInput.value = tpl.name;
         if (dirInput && tpl.workingDir) dirInput.value = tpl.workingDir;
-        if (cmdInput && tpl.command && tpl.command !== 'claude') cmdInput.value = tpl.command;
+        if (cmdInput && tpl.command && tpl.command !== 'claude') cmdInput.value = tpl.command; // gsd:provider-literal-allowed (template default-equality check; refactor deferred to Phase 18)
         this.showToast(`Template "${tpl.name}" applied`, 'success');
       },
     });
@@ -2509,7 +2509,7 @@ class CWMApp {
     try {
       await this.api('POST', '/api/templates', {
         name: result.name,
-        command: session.command || 'claude',
+        command: session.command || 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
         workingDir: session.workingDir || '',
         bypassPermissions: !!session.bypassPermissions,
         verbose: !!session.verbose,
@@ -2534,7 +2534,7 @@ class CWMApp {
         name: `${name} - new`,
         workspaceId,
         workingDir: dir,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
       };
       if (flags.bypassPermissions) payload.bypassPermissions = true;
       const data = await this.api('POST', '/api/sessions', payload);
@@ -3147,7 +3147,7 @@ class CWMApp {
         this.openTerminalInPane(emptySlot, sessionName, title, {
           cwd: projectPath,
           resumeSessionId: sessionName,
-          command: 'claude',
+          command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
         });
       },
     });
@@ -3174,7 +3174,7 @@ class CWMApp {
           workspaceId: this.state.activeWorkspace.id,
           workingDir: projectPath,
           topic: 'Resumed session',
-          command: 'claude',
+          command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
           resumeSessionId: sessionName,
         }).then(async () => {
           await this.loadSessions();
@@ -3290,7 +3290,7 @@ class CWMApp {
           this.setViewMode('terminal');
           this.openTerminalInPane(emptySlot, sid, displayName, {
             cwd: projectPath,
-            command: 'claude',
+            command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
           });
         },
       });
@@ -3306,7 +3306,7 @@ class CWMApp {
           this.setViewMode('terminal');
           this.openTerminalInPane(emptySlot, sid, displayName, {
             cwd: projectPath,
-            command: 'claude',
+            command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
             bypassPermissions: true,
           });
         },
@@ -3734,7 +3734,7 @@ class CWMApp {
         name: 'New Session',
         description: 'Create a new Claude Code session in a project',
         category: 'action',
-        tags: ['create', 'session', 'start', 'launch', 'claude', 'add'],
+        tags: ['create', 'session', 'start', 'launch', 'claude', 'add'], // gsd:provider-literal-allowed (command palette search keyword; refactor deferred to Phase 18)
         shortcut: 'Ctrl+N',
         icon: '&#43;',
         action: () => this.createSession(),
@@ -7174,7 +7174,7 @@ class CWMApp {
               workspaceId: wsId,
               workingDir: '',
               topic: (data.overallTheme || '').substring(0, 100),
-              command: 'claude',
+              command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
               resumeSessionId: cId,
             });
             await this.loadSessions();
@@ -7298,7 +7298,7 @@ class CWMApp {
         name: `${projectName} - context`,
         workspaceId: wsId,
         workingDir: dir,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
       };
       const data = await this.api('POST', '/api/sessions', payload);
       const newSession = data.session || data;
@@ -7500,7 +7500,7 @@ class CWMApp {
             workspaceId: this.state.activeWorkspace.id,
             workingDir: proj.path,
             topic: '',
-            command: 'claude',
+            command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
           };
           // Pass the Claude CLI session UUID so cost tracking works immediately
           if (proj.sessionId) {
@@ -9486,7 +9486,7 @@ class CWMApp {
     this.els.detailDir.textContent = session.workingDir || '--';
     this.els.detailTopic.textContent = session.topic || '--';
     // Build full command display with flags
-    let cmdDisplay = session.command || 'claude';
+    let cmdDisplay = session.command || 'claude'; // gsd:provider-literal-allowed (v1.1 frontend display fallback; refactor deferred to Phase 18)
     if (session.model) {
       const modelShort = session.model.includes('opus') ? 'opus' : session.model.includes('sonnet') ? 'sonnet' : session.model.includes('haiku') ? 'haiku' : session.model;
       cmdDisplay += ' --model ' + modelShort;
@@ -10134,7 +10134,7 @@ class CWMApp {
       this.openTerminalInPane(emptySlot, id, id, {
         cwd: cardPath,
         resumeSessionId: id,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
       });
       this.showToast('Opening session in terminal', 'info');
     } else {
@@ -10142,7 +10142,7 @@ class CWMApp {
       const name = card.querySelector('.ai-find-card-name')?.textContent || 'new-session';
       this.openTerminalInPane(emptySlot, null, name, {
         cwd: cardPath,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
       });
       this.showToast(`Opening ${name} in terminal`, 'info');
     }
@@ -10268,7 +10268,7 @@ class CWMApp {
               this.openTerminalInPane(slotIdx, claudeSessionId, displayName, {
                 cwd: ps.projectPath,
                 resumeSessionId: claudeSessionId,
-                command: 'claude',
+                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
               });
               this.showToast('Opening session - drag to a project to save it', 'info');
             } catch (err) {
@@ -10286,7 +10286,7 @@ class CWMApp {
               const tempId = 'pty-project-' + Date.now();
               this.openTerminalInPane(slotIdx, tempId, project.name, {
                 cwd: project.path,
-                command: 'claude',
+                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
               });
               this.showToast('Opening project - drag to a project to save it', 'info');
             } catch (err) {
@@ -10316,7 +10316,7 @@ class CWMApp {
                 name: `${wsName} terminal`,
                 workspaceId: workspaceId,
                 topic: '',
-                command: 'claude',
+                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
               });
               await this.loadSessions();
               await this.loadStats();
@@ -15586,7 +15586,7 @@ class CWMApp {
           name: result.branch + ' worktree',
           workspaceId,
           workingDir: data.path,
-          command: 'claude',
+          command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
         });
         await this.loadSessions();
       }
@@ -15638,7 +15638,7 @@ class CWMApp {
         name: result.featureName,
         workspaceId,
         workingDir: sessionDir,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
         topic: 'Feature: ' + result.featureName,
       });
 
@@ -16496,7 +16496,7 @@ class CWMApp {
               name: `${dirName} - continued`,
               workspaceId: session.workspaceId,
               workingDir: session.workingDir || '',
-              command: 'claude',
+              command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
               topic: `Continued from: ${session.name || session.id}`,
             };
             if (session.model) payload.model = session.model;
@@ -17982,7 +17982,7 @@ class CWMApp {
         name,
         workingDir: dir,
         workspaceId,
-        command: 'claude',
+        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
       };
       if (model) payload.model = model;
 

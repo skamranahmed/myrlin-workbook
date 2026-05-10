@@ -259,7 +259,7 @@ class PtySessionManager {
    *
    * @param {string} sessionId - Unique session identifier
    * @param {object} options
-   * @param {string} [options.command='claude'] - Base command to run
+   * @param {string} [options.command='claude'] - Base command to run gsd:provider-literal-allowed
    * @param {string} [options.cwd] - Working directory for the PTY
    * @param {number} [options.cols=120] - Terminal columns
    * @param {number} [options.rows=30] - Terminal rows
@@ -275,7 +275,7 @@ class PtySessionManager {
    *        providers. Plan 14-04 PTY-03 wiring.
    * @returns {PtySession} The PTY session object
    */
-  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [], _ptySpawnForTesting = null, _cwdFromJsonlForTesting = null } = {}) {
+  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [], _ptySpawnForTesting = null, _cwdFromJsonlForTesting = null } = {}) { // gsd:provider-literal-allowed (default-command sentinel paired with useProvider check below)
     // Return existing session if already alive
     const existing = this.sessions.get(sessionId);
     if (existing && existing.alive) {
@@ -300,8 +300,8 @@ class PtySessionManager {
     }
 
     // ── Block A (Plan 14-04): Provider resolution + non-default-command bypass ──
-    // Resolve the session's provider tag from the store (defaults to 'claude'
-    // for back-compat with un-tagged sessions). The 'claude' literal here is
+    // Resolve the session's provider tag from the store (defaults to 'claude' gsd:provider-literal-allowed
+    // for back-compat with un-tagged sessions). The 'claude' literal here is gsd:provider-literal-allowed
     // a back-compat default for the v1.1 schema's un-tagged sessions; Plan
     // 14-02 normalizes them on read, this is a belt-and-suspenders fallback.
     //
@@ -319,7 +319,7 @@ class PtySessionManager {
     // Non-default-command bypass: callers that pass a non-Claude command
     // (e.g., scheduler with command: 'td', templates with custom commands)
     // are NOT routed through the provider. They build their own descriptor
-    // inline. Only the historical default ('claude') goes through the
+    // inline. Only the historical default ('claude') goes through the gsd:provider-literal-allowed
     // provider so we don't silently force-rewrite scheduler/td spawns.
     const useProvider = (command === 'claude'); // gsd:provider-literal-allowed (default-command sentinel)
     let provider = null;
@@ -728,7 +728,7 @@ class PtySessionManager {
         if (storeSession) {
           console.log(`[PTY] Spawning from store data for ${sessionId}: resumeSessionId=${storeSession.resumeSessionId}, cwd=${storeSession.workingDir}, cmd=${storeSession.command}`);
           session = this.spawnSession(sessionId, {
-            command: storeSession.command || 'claude',
+            command: storeSession.command || 'claude', // gsd:provider-literal-allowed (v1.1 back-compat default)
             cwd: storeSession.workingDir || undefined,
             bypassPermissions: storeSession.bypassPermissions || false,
             verbose: storeSession.verbose || false,

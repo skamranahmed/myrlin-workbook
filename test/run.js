@@ -814,6 +814,7 @@ const standaloneTests = [
   'migration.test.js', // Plan 14-02: State schema v1 -> v2 migration (MIG-01..MIG-06)
   'pty-passthrough.test.js', // Plan 14-04: PTY pass-through descriptor flow (PTY-01, PTY-03)
   'cost-worker-via-claude.test.js', // Plan 14-04: claudeProvider.costAdapter wiring (COST-04)
+  'grep-gate.test.js', // Plan 14-05: Forbidden provider-name literals outside src/providers/ (ABST-04)
 ];
 
 let standaloneFailed = 0;

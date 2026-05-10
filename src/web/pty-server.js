@@ -34,7 +34,7 @@ const isSafeShell = (v) => v && typeof v === 'string' && ALLOWED_SHELL_NAMES.inc
  *   - cols: Optional. Terminal columns (default handled by PtySessionManager).
  *   - rows: Optional. Terminal rows.
  *   - cwd: Optional. Working directory for new sessions.
- *   - command: Optional. Command to run (default 'claude').
+ *   - command: Optional. Command to run (default 'claude'). gsd:provider-literal-allowed
  *   - bypassPermissions: Optional. If 'true', adds --dangerously-skip-permissions.
  *
  * @param {import('http').Server} httpServer - The Node.js HTTP server instance

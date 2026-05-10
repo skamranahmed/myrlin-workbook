@@ -83,7 +83,7 @@ function update(panel, session) {
     ['PID', session.pid ? `{${valColor}-fg}${session.pid}{/}` : `{${theme.colors.textTertiary}-fg}none{/}`],
     ['Directory', `{${valColor}-fg}${session.workingDir || 'not set'}{/}`],
     ['Topic', `{${valColor}-fg}${session.topic || 'none'}{/}`],
-    ['Command', `{${valColor}-fg}${session.command || 'claude'}{/}`],
+    ['Command', `{${valColor}-fg}${session.command || 'claude'}{/}`], // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 18)
     ['Created', `{${valColor}-fg}${created}{/}`],
     ['Last Active', `{${valColor}-fg}${lastActive}{/}`],
   ];

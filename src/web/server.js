@@ -1335,7 +1335,7 @@ app.post('/api/sessions', requireAuth, (req, res) => {
   }
 
   // Validate fields that flow into shell commands
-  const safeCommand = command ? sanitizeCommand(command) : 'claude';
+  const safeCommand = command ? sanitizeCommand(command) : 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
   if (command && !safeCommand) {
     return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
   }
@@ -1377,7 +1377,7 @@ app.put('/api/sessions/:id', requireAuth, (req, res) => {
   if (updates.command !== undefined) {
     const safe = sanitizeCommand(updates.command);
     if (!safe && updates.command) return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
-    updates.command = safe || 'claude';
+    updates.command = safe || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
   }
   if (updates.workingDir !== undefined) {
     const safe = sanitizeWorkingDir(updates.workingDir);
@@ -2694,7 +2694,7 @@ function resolveClaudeCli() {
     execSync(process.platform === 'win32' ? 'where claude' : 'which claude', {
       stdio: 'pipe', timeout: 5000,
     });
-    _cachedClaudePath = 'claude';
+    _cachedClaudePath = 'claude'; // gsd:provider-literal-allowed (claudeProvider.cliBinary equivalent; refactor deferred to Phase 15)
     return _cachedClaudePath;
   } catch (_) {}
 
@@ -2703,15 +2703,15 @@ function resolveClaudeCli() {
   const candidates = process.platform === 'win32' ? [
     path.join(home, '.claude', 'local', 'claude.exe'),
     path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-    path.join(home, 'AppData', 'Roaming', 'npm', 'claude'),
-    path.join(home, '.npm-global', 'bin', 'claude'),
+    path.join(home, 'AppData', 'Roaming', 'npm', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
+    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
     path.join(home, 'scoop', 'shims', 'claude.cmd'),
   ] : [
-    path.join(home, '.claude', 'local', 'claude'),
+    path.join(home, '.claude', 'local', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
     '/usr/local/bin/claude',
-    path.join(home, '.npm-global', 'bin', 'claude'),
+    path.join(home, '.npm-global', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
     '/opt/homebrew/bin/claude',
-    path.join(home, '.local', 'bin', 'claude'),
+    path.join(home, '.local', 'bin', 'claude'), // gsd:provider-literal-allowed (Claude CLI install probe)
   ];
 
   for (const candidate of candidates) {
@@ -4284,7 +4284,7 @@ app.post('/api/sessions/:id/spinoff-batch', requireAuth, async (req, res) => {
           workspaceId,
           name: sessionName,
           workingDir: worktreePath,
-          command: 'claude',
+          command: 'claude', // gsd:provider-literal-allowed (worktree-task default; refactor deferred to Phase 15+)
           model: t.model || undefined,
         });
 
@@ -5023,7 +5023,7 @@ app.post('/api/templates', requireAuth, (req, res) => {
   }
 
   // Validate fields that flow into shell commands
-  const safeCommand = command ? sanitizeCommand(command) : 'claude';
+  const safeCommand = command ? sanitizeCommand(command) : 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15)
   if (command && !safeCommand) {
     return res.status(400).json({ error: 'Invalid command. Must not contain shell metacharacters.' });
   }
@@ -6053,7 +6053,7 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
       workspaceId,
       name: sessionName,
       workingDir: worktreePath,
-      command: 'claude',
+      command: 'claude', // gsd:provider-literal-allowed (worktree-session default; refactor deferred to Phase 15+)
       model: model || undefined,
       initialPrompt: safePrompt,
       flags: safeFlags,

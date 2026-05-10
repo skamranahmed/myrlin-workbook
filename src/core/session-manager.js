@@ -57,7 +57,7 @@ function launchSession(sessionId) {
   }
 
   try {
-    const baseCommand = session.command || 'claude';
+    const baseCommand = session.command || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
     const bypassFlag = session.bypassPermissions ? ' --dangerously-skip-permissions' : '';
     const command = baseCommand + bypassFlag;
     const workingDir = expandHome(session.workingDir) || process.cwd();
@@ -171,7 +171,7 @@ function getSessionProcess(sessionId) {
   return {
     pid: session.pid,
     status: session.status,
-    command: session.command || 'claude',
+    command: session.command || 'claude', // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
     workingDir: session.workingDir || '',
   };
 }

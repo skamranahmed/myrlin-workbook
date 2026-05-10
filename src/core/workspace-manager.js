@@ -93,7 +93,7 @@ function addSessionToWorkspace(workspaceId, sessionOpts) {
     workspaceId,
     workingDir: sessionOpts.workingDir || '',
     topic: sessionOpts.topic || '',
-    command: sessionOpts.command || 'claude',
+    command: sessionOpts.command || 'claude', // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
   });
 }
 

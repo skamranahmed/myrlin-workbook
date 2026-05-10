@@ -55,7 +55,7 @@ const DEFAULT_STATE = {
  * v2 adds:
  *   - state.version === 2 (was 1)
  *   - state.settings.providers = { claude: true, codex: false } (default if missing)
- *   - every session entry gets a `provider` field (defaults to 'claude' if missing)
+ *   - every session entry gets a `provider` field (defaults to 'claude' if missing) gsd:provider-literal-allowed
  *
  * Idempotency: passing a state already at v2 returns it unchanged (same reference).
  * Defense in depth: this is the explicit migration; _tryLoadFile also normalizes
@@ -83,7 +83,7 @@ function migrateStateV1toV2(state) {
     throw new Error('migrateStateV1toV2: state.sessions is not an object');
   }
 
-  // Tag every session with provider: 'claude' (input wins on conflict via spread order)
+  // Tag every session with provider: 'claude' (input wins on conflict via spread order) gsd:provider-literal-allowed
   const sessions = {};
   for (const [sid, s] of Object.entries(state.sessions || {})) {
     sessions[sid] = { provider: 'claude', ...s }; // gsd:provider-literal-allowed - default-tag legacy sessions
@@ -282,7 +282,7 @@ class Store extends EventEmitter {
    * Try to load and parse a state file. Returns merged state or null.
    *
    * Read-side defensive default: every session loaded without a `provider`
-   * field is normalized to `provider: 'claude'`. This is layered defense in
+   * field is normalized to `provider: 'claude'`. This is layered defense in gsd:provider-literal-allowed
    * addition to the explicit migrateStateV1toV2 call in init(), so any
    * pre-v2 entry that slips through (e.g. a backup recovered after the
    * explicit migration ran) still gets tagged on the way in. (MIG-02)
@@ -297,7 +297,7 @@ class Store extends EventEmitter {
       if (!raw.trim()) return null; // Empty file
       const parsed = JSON.parse(raw);
       if (!parsed.workspaces) return null; // Invalid structure
-      // Normalize sessions on read: tag missing provider field with 'claude'.
+      // Normalize sessions on read: tag missing provider field with 'claude'. gsd:provider-literal-allowed
       // Skip if shape is wrong; migrateStateV1toV2 will throw with detail later.
       let normalizedSessions;
       if (parsed.sessions && typeof parsed.sessions === 'object' && !Array.isArray(parsed.sessions)) {
@@ -674,7 +674,7 @@ class Store extends EventEmitter {
 
   // ─── Session CRUD ────────────────────────────────────────
 
-  createSession({ name, workspaceId, workingDir = '', topic = '', command = 'claude', resumeSessionId = null, tags = [], initialPrompt = null, flags = [] }) {
+  createSession({ name, workspaceId, workingDir = '', topic = '', command = 'claude', resumeSessionId = null, tags = [], initialPrompt = null, flags = [] }) { // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
     if (!this._state.workspaces[workspaceId]) return null;
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -1052,7 +1052,7 @@ class Store extends EventEmitter {
    * @param {{ name: string, command?: string, workingDir?: string, bypassPermissions?: boolean, verbose?: boolean, model?: string, agentTeams?: boolean }} params
    * @returns {object} The created template
    */
-  createTemplate({ name, command = 'claude', workingDir = '', bypassPermissions = false, verbose = false, model = '', agentTeams = false }) {
+  createTemplate({ name, command = 'claude', workingDir = '', bypassPermissions = false, verbose = false, model = '', agentTeams = false }) { // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const template = {

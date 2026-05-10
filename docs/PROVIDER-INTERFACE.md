@@ -79,3 +79,42 @@ The registry is module-imports based on purpose. Filesystem auto-discovery is re
 ## Why no auto-discovery, why not config-driven
 
 Grep is the navigation tool. A new contributor reading `src/providers/index.js` should be able to see every provider that exists with a single search; filesystem walks at runtime would hide that. Config-driven loading would also let an end-user accidentally enable a provider whose code is not in the running build, leading to confusing "provider not found" errors at the worst moment. Static registration trades a tiny amount of flexibility for full traceability and a zero-surprise startup sequence.
+
+## Provider-Name Literals Outside src/providers/
+
+The grep gate at `test/grep-gate.test.js` walks `src/` and fails any line outside `src/providers/` that contains a bare quoted `'claude'` or `'codex'` literal. This is the regression net for ABST-04 (zero provider-name leakage outside the abstraction). It runs as part of `npm test` and exits non-zero on any unflagged literal.
+
+Legitimate exceptions exist: bootstrap defaults, migration defaults, v1.1 back-compat fallbacks, install-path probes for a specific CLI binary. Mark these with the same-line comment:
+
+```
+// gsd:provider-literal-allowed
+```
+
+Or for inline form (inside expressions, JSDoc, multi-token lines):
+
+```
+providerId === 'claude' /* gsd:provider-literal-allowed */
+```
+
+Line-based allowlists are rejected because line numbers drift across commits. Comment markers travel with the line they exempt. The marker substring is what the gate matches; surrounding text is free-form so you can document why the exception exists (e.g., `// gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 18)`).
+
+The grep gate also includes a subtree-exclusion self-test: it creates a temporary fixture under `src/providers/claude/` containing the forbidden literal, runs the walker, and asserts the fixture is NOT flagged. This proves the exclusion logic is real and prevents silent regression where a future refactor breaks subtree exclusion and turns the gate into a no-op. The fixture is deleted in a `finally` block regardless of test outcome.
+
+The walker also skips `node_modules` (defensive, although it should not appear under `src/`) and any dot-prefixed directory (e.g., `src/web/public/.backup/`).
+
+Current legitimate-exception sites in v1.2 (the marker is present on each):
+
+* `src/state/store.js`: DEFAULT_STATE.settings.providers bootstrap, `_tryLoadFile` session normalization, `migrateStateV1toV2` session tagging, `createSession` and `createTemplate` defaults.
+* `src/web/pty-manager.js`: `providerId` back-compat default, `useProvider` sentinel (`command === 'claude'`), cwd JSONL fallback gate, JSONL UUID watcher gate, JSDoc `@param`.
+* `src/web/server.js`: `_cachedClaudePath` cache, install-path candidates list, worktree-task and worktree-session creation defaults, command sanitization fallback.
+* `src/web/pty-server.js`: JSDoc `command` default note.
+* `src/core/session-manager.js` and `src/core/workspace-manager.js`: v1.1 back-compat defaults.
+* `src/web/public/app.js`: 23 frontend back-compat defaults; tagged for Phase 18 refactor when sidebar tabs and per-provider session creation land.
+* `src/index.js`: TUI demo data; tagged for Phase 18.
+* `src/ui/session-detail.js`: TUI session detail display fallback; tagged for Phase 18.
+
+Do not add new exceptions casually. If a new literal is needed, prefer pushing the consuming code into `src/providers/<id>/` first, or derive the value from the session record's `provider` field plus a registry lookup. Phase 15 will refactor the discovery dispatcher and remove most of the server.js exceptions; Phase 18 owns the frontend refactor.
+
+## Em-Dash Convention in This Doc
+
+Project policy forbids em dashes (Unicode U+2014) and double-hyphens in prose. The grep gate's resolution-text uses single hyphens for its bullet list. The verify command for this file is a `grep -qE` invocation with a regex alternation matching the em dash codepoint OR a doubled-hyphen sequence; if either is present in the doc body the doc fails verification. The em dashes inside that grep regex pattern are functional (they search for em dashes); that is the single legitimate use of the character anywhere in the codebase, and it lives in shell scripts and verify commands, never in source-checked prose.

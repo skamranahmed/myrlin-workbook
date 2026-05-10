@@ -107,7 +107,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws1.id,
     workingDir: path.join(demoBase, 'project-alpha', 'src'),
     topic: 'React component library',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s1.id, { status: 'running', pid: 12340 });
   store.addSessionLog(s1.id, 'Session launched with PID 12340');
@@ -118,7 +118,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws1.id,
     workingDir: path.join(demoBase, 'project-alpha', 'perf'),
     topic: 'Performance profiling and optimization',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s2.id, { status: 'idle', pid: 12341 });
   store.addSessionLog(s2.id, 'Analyzing render performance');
@@ -128,7 +128,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws1.id,
     workingDir: path.join(demoBase, 'project-alpha', 'test'),
     topic: 'Integration tests for UI components',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s3.id, { status: 'stopped' });
   store.addSessionLog(s3.id, 'Tests completed: 47/48 passed');
@@ -139,7 +139,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws2.id,
     workingDir: path.join(demoBase, 'backend-api', 'src'),
     topic: 'REST API for resource management',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s4.id, { status: 'running', pid: 12345 });
   store.addSessionLog(s4.id, 'Implementing /api/v1/resources endpoint');
@@ -149,7 +149,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws2.id,
     workingDir: path.join(demoBase, 'backend-api', 'db'),
     topic: 'Database schema and migrations',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s5.id, { status: 'error' });
   store.addSessionLog(s5.id, 'Migration failed: FK constraint violation');
@@ -160,7 +160,7 @@ function seedDemoData(store, notifications) {
     workspaceId: ws3.id,
     workingDir: path.join(demoBase, 'docs'),
     topic: 'System architecture documentation',
-    command: 'claude',
+    command: 'claude', // gsd:provider-literal-allowed (TUI demo data; refactor deferred to Phase 18)
   });
   store.updateSession(s6.id, { status: 'stopped' });
 
