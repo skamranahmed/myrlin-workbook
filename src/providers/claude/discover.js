@@ -8,15 +8,20 @@
  * MOVED helpers from path-decode.js (resolveProjectPath) and parse.js
  * (extractCustomTitle, extractSessionName) so the abstraction is real.
  *
- * No Phase 14 route consumes this yet. The existing /api/discover route
- * in src/web/server.js continues to walk the filesystem inline. Phase 15
- * will rewrite /api/discover to call this function and may extend it to
- * cover additional metadata (mtime sorting refinements, project name
- * grouping, etc.).
+ * Plan 15-02 (DISC-01/02/04/05) consumes this from the new per-provider
+ * /api/discover dispatcher in src/web/server.js. The dispatcher groups the
+ * returned ProviderSession[] by projectPath into the v1.2 accordion shape
+ * the frontend renders; the encodedName field below is what the v1.1 shape
+ * (?legacy=1 back-compat) uses as the accordion key.
  *
  * @param {Object} [opts]
  * @param {boolean} [opts.forceRefresh=false] - bypass any caching layer (no caching in Phase 14)
- * @returns {Promise<Array<{provider:string,providerSessionId:string,projectPath:string,title:string|null,lastActive:Date,sizeBytes:number}>>}
+ * @returns {Promise<Array<{provider:string,providerSessionId:string,projectPath:string,encodedName:string,title:string|null,lastActive:Date,sizeBytes:number}>>}
+ *   ProviderSession[] entries. The encodedName field (Plan 15-02) carries
+ *   the ~/.claude/projects/<encodedName>/ directory basename and is
+ *   preserved end-to-end so the v1.1 frontend's accordion-key shape
+ *   continues to work. The field is OPTIONAL on the Provider contract;
+ *   Codex's discover (Phase 17) may set it to null or omit it entirely.
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  *
@@ -105,6 +110,7 @@ async function discover(opts) {
         provider: 'claude', // gsd:provider-literal-allowed
         providerSessionId: providerSessionId,
         projectPath: projectPath,
+        encodedName: entry.name, // Plan 15-02 (DISC-01): preserved for v1.1 frontend accordion key
         title: title,
         lastActive: stat.mtime,
         sizeBytes: stat.size,

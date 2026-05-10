@@ -817,6 +817,7 @@ const standaloneTests = [
   'grep-gate.test.js', // Plan 14-05: Forbidden provider-name literals outside src/providers/ (ABST-04)
   'find-jsonl-refactor.test.js', // Plan 15-01: getProviderForSession + claudeProvider.findArtifactPath (DISC-03)
   'providers-endpoints.test.js', // Plan 15-03: GET/PUT /api/providers (DISC-06, DISC-07)
+  'discover-route.test.js', // Plan 15-02: per-provider GET /api/discover dispatcher + ?legacy=1 (DISC-01/02/04/05)
 ];
 
 let standaloneFailed = 0;

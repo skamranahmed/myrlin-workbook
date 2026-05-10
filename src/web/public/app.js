@@ -7391,7 +7391,8 @@ class CWMApp {
 
   async discoverSessions() {
     try {
-      const data = await this.api('GET', '/api/discover');
+      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
+      const data = await this.api('GET', '/api/discover?legacy=1');
       const projects = data.projects || [];
 
       if (projects.length === 0) {
@@ -9799,7 +9800,8 @@ class CWMApp {
         }
       }
 
-      const url = forceRefresh ? '/api/discover?refresh=true' : '/api/discover';
+      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
+      const url = forceRefresh ? '/api/discover?refresh=true&legacy=1' : '/api/discover?legacy=1';
       const data = await this.api('GET', url);
       this.state.projects = data.projects || [];
       // Cache for 30s
@@ -17674,7 +17676,8 @@ class CWMApp {
 
     try {
       // Fetch discovered projects
-      const data = await this.api('GET', '/api/discover');
+      // Phase 15 shim; Phase 18 removes ?legacy=1 once the frontend learns the v1.2 shape
+      const data = await this.api('GET', '/api/discover?legacy=1');
       const discovered = data.projects || [];
 
       // Build session count map from current sessions for frecency ranking

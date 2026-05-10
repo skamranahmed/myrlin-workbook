@@ -1649,110 +1649,159 @@ const {
 // Claude parse helpers, MOVED to src/providers/claude/parse.js (Plan 14-03 / ABST-03).
 const { extractCustomTitle, extractSessionName } = require('../providers/claude/parse');
 
-// ─── Discover Cache (30s TTL) ──────────────────────────────
-let _discoverCache = null;
-let _discoverCacheTime = 0;
+// ─── Discover Cache (30s TTL, per-provider) ──────────────────────────────
+// Plan 15-02 (DISC-05): per-provider cache keyed by provider id. Toggling
+// a single provider does NOT invalidate other providers' cache entries; the
+// TTL check happens per-key so a fresh scan for Codex does not force a
+// re-walk of Claude's tree. Plan 15-03's PUT /api/providers/:id/enabled
+// handler invokes _discoverCache.delete(id) on toggle-off to drop the
+// toggled provider's slot while leaving sibling slots intact.
+const _discoverCache = new Map(); // Map<providerId, {data: Array, time: number}>
 const DISCOVER_CACHE_TTL = 30000; // 30 seconds
 
 /**
- * GET /api/discover
- * Scans ~/.claude/projects/ for all Claude Code sessions.
- * Returns projects with their session counts, paths, and total file sizes.
- * Results are cached in memory for 30 seconds.
+ * Group a provider's ProviderSession[] return into the v1.2 per-project
+ * accordion shape the existing frontend renders. Grouping key is
+ * projectPath (the resolved cwd). Each output entry has:
+ *   { encodedName, realPath, displayName, failedDecode, dirExists,
+ *     hasClaudeMd, sessionCount, totalSize, lastActive,
+ *     sessions: [{ claudeSessionId, modified, size, title, provider }] }
+ *
+ * encodedName comes from the provider's session record (Plan 15-02 added
+ * it to claudeProvider.discover); for providers that don't expose it
+ * the field is set to null and the display-name fallback uses realPath.
+ *
+ * Plan 15-02 (DISC-01).
+ *
+ * @param {Array} sessions - ProviderSession[] from provider.discover().
+ * @param {Object} provider - The provider object (used for provider.id tagging).
+ * @returns {Array} Project accordion array, sorted by lastActive descending.
  */
-app.get('/api/discover', requireAuth, (req, res) => {
+function groupProviderSessionsForUI(sessions, provider) {
+  const byProject = new Map();
+  for (const s of sessions) {
+    const key = s.projectPath || '(unknown)';
+    let bucket = byProject.get(key);
+    if (!bucket) {
+      bucket = {
+        realPath: s.projectPath || '(unknown)',
+        encodedName: s.encodedName || null,
+        displayName: null,
+        failedDecode: false,
+        dirExists: false,
+        hasClaudeMd: false,
+        sessionCount: 0,
+        totalSize: 0,
+        lastActive: null,
+        sessions: [],
+      };
+      byProject.set(key, bucket);
+    }
+    bucket.sessionCount++;
+    bucket.totalSize += (s.sizeBytes || 0);
+    if (!bucket.lastActive || (s.lastActive && new Date(s.lastActive) > new Date(bucket.lastActive))) {
+      bucket.lastActive = s.lastActive;
+    }
+    bucket.sessions.push({
+      claudeSessionId: s.providerSessionId, // legacy field name; v1.1 frontend uses this key
+      provider: provider.id,
+      modified: s.lastActive,
+      size: s.sizeBytes,
+      title: s.title || null,
+    });
+  }
+
+  const projects = Array.from(byProject.values());
+  for (const p of projects) {
+    p.displayName = getProjectDisplayName(p.encodedName || p.realPath, p.realPath);
+    p.failedDecode = p.encodedName ? isLikelyFailedCJKDecode(p.encodedName) : false;
+    try { p.dirExists = fs.existsSync(p.realPath); } catch (_) { /* ignore */ }
+    try { p.hasClaudeMd = fs.existsSync(path.join(p.realPath, 'CLAUDE.md')); } catch (_) { /* ignore */ }
+    p.sessions.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+  }
+  projects.sort((a, b) => {
+    if (!a.lastActive) return 1;
+    if (!b.lastActive) return -1;
+    return new Date(b.lastActive) - new Date(a.lastActive);
+  });
+  return projects;
+}
+
+/**
+ * GET /api/discover
+ * Plan 15-02 (DISC-01/02/04/05): per-provider registry dispatcher.
+ *
+ * Default response shape: { projects: { <providerId>: [<ProjectAccordion>...] } }
+ * where projects is a plain object keyed by registered-and-enabled provider id.
+ * Each session record inside the per-project accordion carries a provider tag.
+ *
+ * Backward compat: ?legacy=1 returns the v1.1 array shape
+ * { projects: [<ProjectAccordion>...] } populated with Claude entries only.
+ * Codex entries are dropped from the legacy response intentionally; pre-v1.2
+ * callers do not understand provider tagging. New callers should consume the
+ * default object shape.
+ *
+ * Snapshot semantics (DISC-04, PITFALL F7): registry.listEnabled() is called
+ * ONCE on the first executable line of the route, ensuring a mid-request
+ * toggle cannot produce a half-toggled response.
+ *
+ * Per-provider cache (DISC-05): _discoverCache is a Map keyed by provider id;
+ * toggling a single provider does NOT invalidate other providers' cache
+ * entries.
+ *
+ * Provider failure isolation: if a provider.discover throws, that provider's
+ * slot is set to [] and the error is logged via console.error; other
+ * providers' results are preserved.
+ *
+ * Query params:
+ *   ?refresh=true  bypass cache for all enabled providers
+ *   ?legacy=1      return v1.1 array shape (Claude-only)
+ */
+app.get('/api/discover', requireAuth, async (req, res) => {
   const now = Date.now();
   const forceRefresh = req.query.refresh === 'true';
-  if (!forceRefresh && _discoverCache && (now - _discoverCacheTime) < DISCOVER_CACHE_TTL) {
-    return res.json(_discoverCache);
+  const wantLegacy = req.query.legacy === '1';
+
+  // PITFALL F7: snapshot the enabled providers ONCE at request entry.
+  // A mid-request toggle does NOT change this snapshot. The Set inside
+  // the registry mutates, but our local array is a fresh copy.
+  const enabled = registry.listEnabled();
+  if (enabled.length === 0) {
+    return res.json(wantLegacy ? { projects: [] } : { projects: {} });
   }
 
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
-  if (!fs.existsSync(claudeDir)) {
-    const result = { projects: [] };
-    _discoverCache = result;
-    _discoverCacheTime = now;
-    return res.json(result);
-  }
-
-  try {
-    const entries = fs.readdirSync(claudeDir, { withFileTypes: true });
-    const projects = [];
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-
-      const projectDir = path.join(claudeDir, entry.name);
-      const realPath = resolveProjectPath(projectDir, entry.name);
-
-      // Count .jsonl session files and compute total size
-      let sessionFiles = [];
-      let totalSize = 0;
+  const projects = {};
+  for (const provider of enabled) {
+    let entry = _discoverCache.get(provider.id);
+    if (forceRefresh || !entry || (now - entry.time) >= DISCOVER_CACHE_TTL) {
       try {
-        sessionFiles = fs.readdirSync(projectDir)
-          .filter(f => f.endsWith('.jsonl'))
-          .map(f => {
-            const stat = fs.statSync(path.join(projectDir, f));
-            totalSize += stat.size;
-            return { name: f.replace('.jsonl', ''), modified: stat.mtime, size: stat.size };
-          })
-          .sort((a, b) => b.modified - a.modified);
-      } catch (_) {
-        // skip if can't read
+        const sessions = await provider.discover({ forceRefresh });
+        if (!Array.isArray(sessions)) {
+          throw new Error('provider.discover returned non-array');
+        }
+        const grouped = groupProviderSessionsForUI(sessions, provider);
+        entry = { data: grouped, time: now };
+        _discoverCache.set(provider.id, entry);
+      } catch (err) {
+        console.error('[discover] provider ' + provider.id + ' failed: ' + (err && err.message ? err.message : err));
+        entry = { data: [], time: now };
+        _discoverCache.set(provider.id, entry);
       }
-
-      // Extract the last custom-title from each JSONL file
-      const sessionTitles = {};
-      for (const sf of sessionFiles) {
-        const title = extractCustomTitle(path.join(projectDir, sf.name + '.jsonl'));
-        if (title) sessionTitles[sf.name] = title;
-      }
-
-      // Check for CLAUDE.md
-      let hasClaudeMd = false;
-      try {
-        hasClaudeMd = fs.existsSync(path.join(realPath, 'CLAUDE.md'));
-      } catch (_) {}
-
-      // Check if directory actually exists
-      let dirExists = false;
-      try {
-        dirExists = fs.existsSync(realPath);
-      } catch (_) {}
-
-      // Generate a display name that handles failed CJK decoding gracefully
-      const displayName = getProjectDisplayName(entry.name, realPath);
-      const failedDecode = isLikelyFailedCJKDecode(entry.name);
-
-      projects.push({
-        encodedName: entry.name,
-        realPath,
-        displayName,
-        failedDecode,
-        dirExists,
-        hasClaudeMd,
-        sessionCount: sessionFiles.length,
-        totalSize,
-        lastActive: sessionFiles.length > 0 ? sessionFiles[0].modified : null,
-        sessions: sessionFiles.map(s => ({ claudeSessionId: s.name, modified: s.modified, size: s.size, title: sessionTitles[s.name] || null })),
-      });
     }
-
-    // Sort by lastActive descending
-    projects.sort((a, b) => {
-      if (!a.lastActive) return 1;
-      if (!b.lastActive) return -1;
-      return new Date(b.lastActive) - new Date(a.lastActive);
-    });
-
-    const result = { projects };
-    _discoverCache = result;
-    _discoverCacheTime = now;
-    return res.json(result);
-  } catch (err) {
-    return res.status(500).json({ error: 'Failed to scan projects: ' + err.message });
+    projects[provider.id] = entry.data;
   }
+
+  if (wantLegacy) {
+    // v1.1 shape: array of project accordions, Claude-only. Codex entries
+    // are dropped intentionally; pre-v1.2 callers do not understand provider
+    // tagging. New callers should consume the default object shape. We
+    // source the key from claudeProvider.id (registry-sourced provider name)
+    // so the grep gate stays clean without an allowlist marker.
+    const claudeProjects = projects[claudeProvider.id] || [];
+    return res.json({ projects: claudeProjects });
+  }
+
+  return res.json({ projects });
 });
 
 
@@ -2625,35 +2674,38 @@ app.post('/api/ai/find-session', requireAuth, async (req, res) => {
   const workspaces = store.getAllWorkspacesList();
   const sessions = store.getAllSessionsList();
 
-  // Discover projects from Claude's local data
-  const claudeProjectsDir = path.join(os.homedir(), '.claude', 'projects');
+  // Plan 15-02 (DISC-01): dispatch the discovery scan through the provider
+  // registry instead of walking ~/.claude/projects/ inline. The dispatch
+  // re-uses groupProviderSessionsForUI so the per-project accordion shape
+  // is identical to what GET /api/discover produces. Provider failure is
+  // isolated (one failing provider does not poison other providers'
+  // contributions). Downstream consumers (enrichMatch and the keyword
+  // fallback below) read `encodedName`, `name`, `path`, `sessionCount`,
+  // `lastActive`, `sessionTitles`; all are preserved. `provider` is added
+  // as a forward-compat field surfaced into the LLM prompt metadata.
+  const enabledForFindSession = registry.listEnabled();
   let discoveredProjects = [];
-  if (fs.existsSync(claudeProjectsDir)) {
+  for (const findSessionProvider of enabledForFindSession) {
+    let providerSessions;
     try {
-      const dirs = fs.readdirSync(claudeProjectsDir, { withFileTypes: true })
-        .filter(d => d.isDirectory());
-      discoveredProjects = dirs.map(d => {
-        const projectDir = path.join(claudeProjectsDir, d.name);
-        const realPath = resolveProjectPath(projectDir, d.name);
-        const name = getProjectDisplayName(d.name, realPath);
-        let sessionCount = 0;
-        let lastActive = null;
-        const sessionTitles = [];
-        try {
-          const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-          sessionCount = files.length;
-          for (const f of files) {
-            try {
-              const stat = fs.statSync(path.join(projectDir, f));
-              if (!lastActive || stat.mtime > new Date(lastActive)) lastActive = stat.mtime;
-            } catch (_) {}
-            const title = extractCustomTitle(path.join(projectDir, f));
-            if (title) sessionTitles.push(title);
-          }
-        } catch (_) {}
-        return { encodedName: d.name, name, path: realPath, sessionCount, lastActive, sessionTitles };
+      providerSessions = await findSessionProvider.discover({ forceRefresh: false });
+    } catch (err) {
+      console.error('[find-session] provider ' + findSessionProvider.id + ' failed: ' + (err && err.message ? err.message : err));
+      continue;
+    }
+    if (!Array.isArray(providerSessions)) continue;
+    const grouped = groupProviderSessionsForUI(providerSessions, findSessionProvider);
+    for (const g of grouped) {
+      discoveredProjects.push({
+        provider: findSessionProvider.id,
+        encodedName: g.encodedName,
+        name: g.displayName,
+        path: g.realPath,
+        sessionCount: g.sessionCount,
+        lastActive: g.lastActive,
+        sessionTitles: g.sessions.map((s) => s.title).filter(Boolean),
       });
-    } catch (_) {}
+    }
   }
 
   // Build compact metadata for AI matching
@@ -2667,6 +2719,10 @@ app.post('/api/ai/find-session', requireAuth, async (req, res) => {
       status: s.status, lastActive: s.lastActive, createdAt: s.createdAt
     })),
     discoveredProjects: discoveredProjects.map(p => ({
+      // Plan 15-02 (DISC-01): provider is forward-compat metadata for
+      // the LLM; the prompt does not require the LLM to use it, but
+      // including it lets future-aware prompts disambiguate by provider.
+      provider: p.provider,
       encodedName: p.encodedName, name: p.name, path: p.path,
       sessionCount: p.sessionCount, lastActive: p.lastActive,
       sessionTitles: p.sessionTitles
@@ -7988,4 +8044,13 @@ module.exports = {
   // test/find-jsonl-refactor.test.js. Production callers do not consume
   // this export; the helper is invoked inline by route handlers above.
   getProviderForSession,
+  // Plan 15-02 (DISC-01/02/04/05): exposed for the integration tests in
+  // test/discover-route.test.js (cache-spy, snapshot semantics, per-
+  // provider invalidation). Production callers do not consume these
+  // exports; they are inline state inside the /api/discover handler.
+  _discoverCache,
+  DISCOVER_CACHE_TTL,
+  groupProviderSessionsForUI,
+  registry,
+  claudeProvider,
 };
