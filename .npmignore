@@ -23,11 +23,18 @@ scripts/wake-mac.js
 # State (user-specific, generated at runtime - NOT src/state/)
 /state/
 
+# GSD planning artifacts (ephemeral, not needed at runtime)
+.planning/
+
+# Mobile app source (separate React Native app, not part of npm package)
+mobile/
+
 # Backup files
 src/web/public/.backup/
 
 # Log and data files
 *.log
+logs/
 cron-*.json
 
 # Internal docs

@@ -53,3 +53,10 @@ scripts/setup-autostart.ps1
 # Frontend backup snapshots
 src/web/public/.backup/
 .todos/
+
+# GSD planning artifacts (ephemeral, not for public repo)
+.planning/
+
+# Cron run state (per-machine)
+cron-full.json
+cron-runs.json
