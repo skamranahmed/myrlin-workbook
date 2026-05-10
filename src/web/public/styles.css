@@ -10362,3 +10362,63 @@ html {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+
+/* ─── Settings Providers section (Phase 18-03) ────────────────────
+   One tile per registered provider in the Settings overlay. Accent
+   swatch is a 10x28 stripe coloured per data-provider attribute via
+   the :root provider tokens from Plan 18-01 so every Catppuccin
+   theme inherits the correct accent automatically. */
+.settings-providers-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: 8px;
+}
+.settings-providers-tile:last-child {
+  margin-bottom: 0;
+}
+.settings-providers-swatch {
+  width: 10px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--overlay0);
+  flex-shrink: 0;
+}
+.settings-providers-tile[data-provider="claude"] .settings-providers-swatch {
+  background: var(--provider-claude-accent);
+}
+.settings-providers-tile[data-provider="codex"] .settings-providers-swatch {
+  background: var(--provider-codex-accent);
+}
+.settings-providers-tile[data-provider="gemini"] .settings-providers-swatch {
+  background: var(--provider-gemini-accent);
+}
+.settings-providers-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.settings-providers-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.settings-providers-status {
+  font-size: 11px;
+  color: var(--subtext0);
+  margin-top: 2px;
+}
+.settings-providers-status[data-available="false"] {
+  color: var(--peach);
+}
+.settings-providers-install-hint {
+  font-size: 11px;
+  color: var(--subtext0);
+  margin-top: 4px;
+  font-family: var(--font-mono, monospace);
+  user-select: text;
+  word-break: break-all;
+}
