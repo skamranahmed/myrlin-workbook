@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RolloutLine",
+  "type": "object",
+  "required": ["type", "timestamp", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Discriminant for the envelope variant. Five values are observed in the wild on Codex >= 0.45 rollouts.",
+      "enum": [
+        "session_meta",
+        "turn_context",
+        "event_msg",
+        "response_item",
+        "compacted"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp at which Codex emitted the line."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Variant-specific payload. Schemas for each variant live in the Codex CLI source; this fixture only enforces top-level envelope shape."
+    }
+  },
+  "_meta": {
+    "source": "hand-coded fallback; replace via 'node scripts/regen-codex-schema.js' when a Codex CLI with 'app-server generate-internal-json-schema' is installed",
+    "generatedFrom": "Codex CLI >= 0.45 (envelope-shaped rollouts)",
+    "lastVerifiedAgainst": "0.125.0-alpha.3 (dev machine, 2026-05-10)",
+    "phase": "17",
+    "plan": "17-01",
+    "requirementId": "CDX-09"
+  }
+}

@@ -1,0 +1,11 @@
+{"timestamp":"2026-04-26T06:20:55.558Z","type":"session_meta","payload":{"id":"019dc872-a308-7111-ba78-068f9294120c","timestamp":"2026-04-26T06:20:49.540Z","cwd":"/home/user/project","originator":"Codex Desktop","cli_version":"0.125.0","model_provider":"openai"}}
+{"timestamp":"2026-04-26T06:20:55.563Z","type":"event_msg","payload":{"type":"task_started","turn_id":"019dc872-a43d-7f61-9efb-b9edefedc890","started_at":1777184449}}
+{"timestamp":"2026-04-26T06:20:55.564Z","type":"turn_context","payload":{"turn_id":"019dc872-a43d-7f61-9efb-b9edefedc890","cwd":"/home/user/project","model":"gpt-5-codex","current_date":"2026-04-26","summary":"auto"}}
+{"timestamp":"2026-04-26T06:20:55.566Z","type":"event_msg","payload":{"type":"thread_name_updated","thread_id":"019dc872-a308-7111-ba78-068f9294120c","thread_name":"Test fixture session"}}
+{"timestamp":"2026-04-26T06:20:55.567Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello from the test fixture, please summarize."}]}}
+{"timestamp":"2026-04-26T06:21:09.811Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Sure, here is the summary for the test fixture."}]}}
+{"timestamp":"2026-04-26T06:21:10.000Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"ls\",\"workdir\":\"/home/user/project\"}"}}
+{"timestamp":"2026-04-26T06:21:10.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_abc123","output":"Exit code: 0\nWall time: 0.1s\nfile1.txt\nfile2.txt"}}
+{"timestamp":"2026-04-26T06:21:18.103Z","type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"gAAAAABp7a..."}}
+{"timestamp":"2026-04-26T06:21:30.000Z","type":"event_msg","payload":{"type":"user_message","message":"This event_msg duplicate should be skipped by parser."}}
+{"timestamp":"2026-04-26T06:25:00.000Z","type":"compacted","payload":{"summary":"Earlier turns about file listings have been compacted."}}

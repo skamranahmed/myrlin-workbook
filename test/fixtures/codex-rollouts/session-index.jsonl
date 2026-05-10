@@ -1,0 +1,5 @@
+{"id":"019dc872-a308-7111-ba78-068f9294120c","thread_name":"Test fixture session","updated_at":"2026-04-26T06:25:00.000Z"}
+{"id":"019dbc37-4284-71c2-b216-8f9b6c431001","thread_name":"Legacy fixture","updated_at":"2026-04-23T21:20:39.287Z"}
+{"id":"019dcac8-f459-7fa0-83e8-3c3112d0fe0e","thread_name":"Another session","updated_at":"2026-04-26T13:14:20.000Z"}
+{"id":"019d0000-0000-7000-8000-000000000099","thread_name":"Stale entry, file missing","updated_at":"2026-04-26T14:00:00.000Z"}
+{"id":"019d0000-0000-7000-8000-0000000000aa","thread_name":"Another stale","updated_at":"2026-04-26T14:01:00.000Z"}

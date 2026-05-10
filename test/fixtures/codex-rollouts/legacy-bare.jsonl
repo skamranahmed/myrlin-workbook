@@ -1,0 +1,5 @@
+{"id":"019dbc37-4284-71c2-b216-8f9b6c431001","timestamp":"2026-04-23T21:20:30.000Z","cwd":"/home/user/legacy","cli_version":"0.42.0","model_provider":"openai"}
+{"role":"user","content":[{"type":"input_text","text":"Legacy bare-JSON user message."}],"timestamp":"2026-04-23T21:20:31.000Z"}
+{"role":"assistant","content":[{"type":"output_text","text":"Legacy bare-JSON assistant reply."}],"timestamp":"2026-04-23T21:20:32.000Z"}
+{"role":"user","content":[{"type":"input_text","text":"Second legacy turn."}],"timestamp":"2026-04-23T21:20:33.000Z"}
+{"role":"assistant","content":[{"type":"output_text","text":"Second legacy reply."}],"timestamp":"2026-04-23T21:20:34.000Z"}
