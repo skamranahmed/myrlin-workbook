@@ -810,6 +810,7 @@ const standaloneTests = [
   'scheduler.test.js',
   'scheduler-api.test.js',
   'instance-colors.test.js',
+  'providers-registry.test.js', // Plan 14-01: Provider registry contract (ABST-01/02/05/06/07, COST-01)
 ];
 
 let standaloneFailed = 0;
