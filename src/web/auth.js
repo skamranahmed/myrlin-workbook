@@ -128,7 +128,7 @@ function loadPassword() {
     return process.env.CWM_PASSWORD;
   }
 
-  // 2. Home directory config (~/.myrlin/config.json) — persists across reinstalls
+  // 2. Home directory config (~/.myrlin/config.json), persists across reinstalls
   const homePassword = readPasswordFromFile(HOME_CONFIG_FILE);
   if (homePassword) {
     // Also sync to local config so it's visible in the project

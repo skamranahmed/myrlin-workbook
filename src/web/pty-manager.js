@@ -75,8 +75,8 @@ function cwdFromJsonl(sessionId) {
       const jsonlPath = path.join(claudeDir, dir.name, sessionId + '.jsonl');
       if (!fs.existsSync(jsonlPath)) continue;
 
-      // Try sessions-index.json — originalPath is the project-wide cwd,
-      // entries[].projectPath is per-session
+      // Try sessions-index.json. originalPath is the project-wide cwd;
+      // entries[].projectPath is per-session.
       try {
         const indexPath = path.join(claudeDir, dir.name, 'sessions-index.json');
         if (fs.existsSync(indexPath)) {
@@ -548,7 +548,7 @@ class PtySessionManager {
         try {
           if (ws.readyState === 1) { // WebSocket.OPEN
             // Backpressure check: if this client's send buffer exceeds 64KB,
-            // it can't keep up — skip it so other terminals stay responsive.
+            // it can't keep up; skip it so other terminals stay responsive.
             // Data is preserved in scrollback for reconnection.
             if (ws.bufferedAmount < 65536) {
               ws.send(data);
@@ -775,7 +775,7 @@ class PtySessionManager {
 
     // Replay scrollback buffer BEFORE adding to broadcast set.
     // This ensures the client receives the full historical output first,
-    // then starts receiving only NEW live data — no interleaving.
+    // then starts receiving only NEW live data, no interleaving.
     if (session.scrollback.length > 0) {
       const replay = session.scrollback.join('');
       try {
