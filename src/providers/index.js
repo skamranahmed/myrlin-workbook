@@ -204,8 +204,8 @@ function isEnabled(id) {
 /**
  * Toggle a provider's enabled state. Updates the in-memory Set AND writes
  * through to the captured store reference at
- * store.state.settings.providers[id]. This does NOT call store.save() — the
- * store is responsible for persisting on its next mutation. Toggling an id
+ * store.state.settings.providers[id]. This does NOT call store.save();
+ * the store is responsible for persisting on its next mutation. Toggling an id
  * that has not been registered is allowed (the Set tracks the desired state
  * even if the provider object lands later via register()).
  *
