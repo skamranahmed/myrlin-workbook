@@ -1965,7 +1965,15 @@ app.get('/api/discover', requireAuth, async (req, res) => {
     return res.json({ projects: claudeProjects });
   }
 
-  return res.json({ projects });
+  // Plan 22-01: include ad-hoc provider-settings keyed by upstream
+  // session UUID so the bottom status strip can hydrate on first render
+  // for discovered Codex Desktop sessions that have no Myrlin store
+  // record. The frontend reads state.adHocProviderSettings from this
+  // field; only `codex` carries data today, but the shape is open for
+  // future providers (gemini, etc.).
+  const store = getStore();
+  const adHocRoot = (store._state && store._state.providerSessionSettings) || {};
+  return res.json({ projects, adHocProviderSettings: adHocRoot });
 });
 
 

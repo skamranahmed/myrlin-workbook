@@ -843,6 +843,7 @@ const standaloneTests = [
   'adhoc-pane-menu.test.js',         // Plan 22-04: ad-hoc pane right-click menu reduced fallback
   'provider-label-pill.test.js',     // Plan 22-02: pane provider pill + sidebar stripes
   'workspace-group-ux.test.js',      // Plan 22-05: workspace group color stripe + chip
+  'codex-status-strip.test.js',      // Plan 22-01: Codex bottom status strip + chip click handlers
 ];
 
 let standaloneFailed = 0;

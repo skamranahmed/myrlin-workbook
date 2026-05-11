@@ -10464,8 +10464,19 @@ class CWMApp {
         : {};
       this.state.projectsByProvider = byProvider;
       this.state.projects = this._mergeProjectsByProvider(byProvider);
+      // Plan 22-01: hydrate ad-hoc provider-settings cache from the
+      // discover response so the Codex bottom status strip can render
+      // saved settings for upstream sessions that have no Myrlin store
+      // record. Shape: { codex: { <uuid>: {...} }, ... }.
+      this.state.adHocProviderSettings = (data && data.adHocProviderSettings && typeof data.adHocProviderSettings === 'object')
+        ? data.adHocProviderSettings
+        : {};
       sessionStorage.setItem('cwm_projects', JSON.stringify({ ts: Date.now(), data: this.state.projects }));
       this.renderProjects();
+      // Refresh any open Codex strips with the newly hydrated cache.
+      if (typeof this._renderCodexStatusStrip === 'function' && Array.isArray(this.terminalPanes)) {
+        this.terminalPanes.forEach((tp, idx) => { if (tp) this._renderCodexStatusStrip(idx); });
+      }
     } catch {
       // Non-critical - projects panel just stays empty
     }
@@ -11291,6 +11302,11 @@ class CWMApp {
       pillEl.textContent = labelFromRegistry || (pid ? pid.charAt(0).toUpperCase() + pid.slice(1) : '');
       pillEl.hidden = !pid;
     }
+    // Plan 22-01: render the Codex bottom status strip on Codex panes.
+    // No-op on Claude panes. Idempotent — re-render on subsequent attach.
+    if (typeof this._renderCodexStatusStrip === 'function') {
+      this._renderCodexStatusStrip(slotIdx);
+    }
     const closeBtn = paneEl.querySelector('.terminal-pane-close');
     if (closeBtn) closeBtn.hidden = false;
     const uploadBtn2 = paneEl.querySelector('.terminal-pane-upload');
@@ -11632,6 +11648,15 @@ class CWMApp {
         });
         if (!sess.providerSettings) sess.providerSettings = {};
         sess.providerSettings.codex = next; // gsd:provider-literal-allowed
+        // Also mirror into the ad-hoc cache so the strip render path
+        // (which falls back to adHocProviderSettings) sees the change
+        // even when the session has no Myrlin store record.
+        if (!this.state.adHocProviderSettings) this.state.adHocProviderSettings = {};
+        if (!this.state.adHocProviderSettings.codex /* gsd:provider-literal-allowed */) this.state.adHocProviderSettings.codex = {}; // gsd:provider-literal-allowed
+        this.state.adHocProviderSettings.codex[sessionId] = next; // gsd:provider-literal-allowed
+        if (typeof this._renderCodexStatusStrip === 'function') {
+          this._renderCodexStatusStrip(slotIdx);
+        }
         this.showToast('Codex settings updated — restart pane to apply', 'info');
       } catch (err) {
         this.showToast(err.message || 'Failed to update Codex settings', 'error');
@@ -11768,6 +11793,119 @@ class CWMApp {
     });
 
     return codexItems;
+  }
+
+  /**
+   * Render the Codex bottom status strip on a pane (Plan 22-01).
+   *
+   * Mirrors Codex Desktop's bottom bar: a single row of clickable chips
+   * showing model / sandbox / approval / effort / [BYPASS] / [features].
+   * Each chip click opens the corresponding submenu from
+   * _buildCodexPaneMenu anchored to the chip's screen rect, so settings
+   * are discoverable + changeable without right-clicking.
+   *
+   * Idempotent: safe to call multiple times on the same pane; the
+   * function replaces innerHTML on the existing strip if one exists.
+   * Bails (and removes any existing strip) on empty panes or non-Codex
+   * panes — the CSS selector restricts visibility too, but cleaning the
+   * DOM avoids leftover nodes after pane provider swaps.
+   *
+   * @param {number} slotIdx
+   */
+  _renderCodexStatusStrip(slotIdx) {
+    const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+    if (!paneEl) return;
+    const isCodex = paneEl.dataset.provider === 'codex'; // gsd:provider-literal-allowed (CSS attribute selector match)
+    const isEmpty = paneEl.classList.contains('terminal-pane-empty');
+    let strip = paneEl.querySelector(':scope > .codex-pane-status');
+    if (!isCodex || isEmpty) {
+      if (strip) strip.remove();
+      return;
+    }
+    if (!strip) {
+      strip = document.createElement('div');
+      strip.className = 'codex-pane-status';
+      paneEl.appendChild(strip);
+      strip.addEventListener('click', (e) => this._onCodexStatusChipClick(e, slotIdx));
+    }
+    const tp = this.terminalPanes[slotIdx];
+    if (!tp) { strip.innerHTML = ''; return; }
+    const sessionId = tp.sessionId;
+    const allSessions = [
+      ...(this.state.sessions || []),
+      ...(this.state.allSessions || []),
+    ];
+    const sess = allSessions.find(s => s && s.id === sessionId) || {};
+    const adHoc = (this.state.adHocProviderSettings && this.state.adHocProviderSettings.codex /* gsd:provider-literal-allowed */) || {};
+    const settings = (sess.providerSettings && sess.providerSettings.codex) /* gsd:provider-literal-allowed */ || adHoc[sessionId] || {};
+
+    const esc = (s) => this.escapeHtml(String(s));
+    const chip = (key, label, value, isDefault, extraClass = '') => {
+      const cls = 'codex-status-chip' + (extraClass ? ' ' + extraClass : '');
+      const valCls = 'codex-status-chip-value' + (isDefault ? ' is-default' : '');
+      return `<span class="${cls}" data-chip="${esc(key)}">
+        <span class="codex-status-chip-label">${esc(label)}:</span>
+        <span class="${valCls}">${esc(value)}</span>
+      </span>`;
+    };
+
+    const chips = [];
+    chips.push(chip('model', 'model', settings.model || 'gpt-5-codex', !settings.model));
+    chips.push(chip('sandbox', 'sandbox', settings.sandbox || 'workspace-write', !settings.sandbox));
+    chips.push(chip('approval', 'approval', settings.approvalPolicy || 'on-request', !settings.approvalPolicy));
+    chips.push(chip('effort', 'effort', settings.reasoningEffort || 'medium', !settings.reasoningEffort));
+    if (settings.bypassApprovalsAndSandbox === true) {
+      chips.push(`<span class="codex-status-chip codex-status-chip-bypass" data-chip="bypass">BYPASS</span>`);
+    }
+    const activeFeatures = Array.isArray(settings.features) ? settings.features : [];
+    if (activeFeatures.length > 0) {
+      chips.push(chip('features', 'features', String(activeFeatures.length), false));
+    }
+    strip.innerHTML = chips.join('');
+  }
+
+  /**
+   * Click handler for chip clicks on the Codex status strip.
+   * Maps the chip's data-chip key to the matching submenu label produced
+   * by _buildCodexPaneMenu, then renders that submenu's items anchored to
+   * the chip's rect via the existing _renderContextItems renderer.
+   *
+   * @param {Event} e
+   * @param {number} slotIdx
+   */
+  _onCodexStatusChipClick(e, slotIdx) {
+    const chipEl = e.target.closest('.codex-status-chip');
+    if (!chipEl) return;
+    e.stopPropagation();
+    const key = chipEl.dataset.chip;
+    const tp = this.terminalPanes[slotIdx];
+    if (!tp) return;
+    const items = this._buildCodexPaneMenu(slotIdx, tp);
+    const labelMap = {
+      model: 'Model',
+      sandbox: 'Sandbox',
+      approval: 'Approval Policy',
+      effort: 'Reasoning Effort',
+      bypass: null, // bypass chip click triggers the same action as the menu item
+      features: 'Features',
+    };
+    const rect = chipEl.getBoundingClientRect();
+    if (key === 'bypass') {
+      // The bypass chip is only visible when bypass is ON. Clicking it
+      // toggles OFF (no confirmation required for disabling). Find the
+      // bypass item and fire its action directly.
+      const bypassItem = items.find(it => /Bypass/.test(it.label));
+      if (bypassItem && typeof bypassItem.action === 'function') bypassItem.action();
+      return;
+    }
+    const matchLabel = labelMap[key];
+    if (!matchLabel) return;
+    const item = items.find(it => it.label === matchLabel);
+    if (!item || !Array.isArray(item.submenu)) return;
+    // Render the submenu's items as a top-level menu anchored to the
+    // chip rect. Uses the existing _renderContextItems renderer that
+    // owns positioning + dismiss.
+    this._renderContextItems(matchLabel, item.submenu, rect.left, rect.bottom);
   }
 
   showTerminalContextMenu(slotIdx, x, y) {

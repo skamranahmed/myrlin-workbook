@@ -10259,6 +10259,70 @@ html {
   padding-left: 11px;
 }
 
+/* Codex pane bottom status strip (Plan 22-01). Absolute-positioned along
+   the bottom edge of any Codex pane. Hidden on Claude panes (only
+   inserted into the DOM when data-provider="codex"). Chips are clickable
+   and open the matching submenu from _buildCodexPaneMenu. */
+.terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) {
+  padding-bottom: 28px; /* room for the strip */
+}
+.codex-pane-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--green));
+  border-top: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  z-index: 5;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.codex-pane-status::-webkit-scrollbar { display: none; }
+.codex-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--surface-1);
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.codex-status-chip:hover {
+  background: color-mix(in srgb, var(--green) 12%, var(--surface-1));
+  border-color: var(--green);
+}
+.codex-status-chip-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.codex-status-chip-value { color: var(--text-base); }
+.codex-status-chip-value.is-default {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.codex-status-chip-bypass {
+  background: color-mix(in srgb, var(--red) 18%, var(--surface-1));
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.codex-status-chip-bypass:hover {
+  background: color-mix(in srgb, var(--red) 28%, var(--surface-1));
+}
+
 /* Pane header provider label pill (Plan 22-02). Hidden via [hidden]
    when the pane is empty. Sits left of the title; uses --surface-2 for
    the background and the matching --provider-*-accent for the dot. */
