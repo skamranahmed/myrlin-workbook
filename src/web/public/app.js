@@ -10667,19 +10667,25 @@ class CWMApp {
     this.setViewMode('terminal');
 
     if (type === 'session') {
-      // Resume existing session
+      // Resume existing session.
+      // Plan 19-02: AI find-session cards currently only surface Claude
+      // sessions (multi-provider find is deferred to v1.3). Resolve cliBinary
+      // through the helper anyway so the back-compat default lives in one
+      // place and a future find-session payload that includes a provider id
+      // lights up without further frontend edits.
       this.openTerminalInPane(emptySlot, id, id, {
         cwd: cardPath,
         resumeSessionId: id,
-        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+        command: this.getProviderCliBinary(null),
       });
       this.showToast('Opening session in terminal', 'info');
     } else {
-      // Workspace or discovered project: open a new session in the project directory
+      // Workspace or discovered project: open a new session in the project directory.
+      // Plan 19-02: same v1.1 back-compat default routed through the helper.
       const name = card.querySelector('.ai-find-card-name')?.textContent || 'new-session';
       this.openTerminalInPane(emptySlot, null, name, {
         cwd: cardPath,
-        command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+        command: this.getProviderCliBinary(null),
       });
       this.showToast(`Opening ${name} in terminal`, 'info');
     }
@@ -10805,10 +10811,14 @@ class CWMApp {
               console.log('[DnD] Project-session drop - resumeSessionId:', claudeSessionId, 'cwd:', ps.projectPath, 'provider:', psProvider);
               // Open terminal directly - use the Claude session UUID as the PTY session ID
               // so the PTY manager can reuse it on subsequent drops
+              // Plan 19-02: resolve cliBinary from the dragged session's
+              // provider so a dropped Codex session spawns `codex resume`
+              // instead of `claude --resume`. Phase 18-04 already plumbed
+              // psProvider through; this commit closes the loop on `command`.
               this.openTerminalInPane(slotIdx, claudeSessionId, displayName, {
                 cwd: ps.projectPath,
                 resumeSessionId: claudeSessionId,
-                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+                command: this.getProviderCliBinary(psProvider),
                 provider: psProvider,
               });
               this.showToast('Opening session - drag to a project to save it', 'info');
@@ -10827,9 +10837,11 @@ class CWMApp {
               const tempId = 'pty-project-' + Date.now();
               // Phase 18-04 (UI-10): forward provider from drag payload.
               const projProvider = project.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
+              // Plan 19-02: resolve cliBinary from the dragged project's
+              // provider so a Codex-tagged project drop spawns `codex`.
               this.openTerminalInPane(slotIdx, tempId, project.name, {
                 cwd: project.path,
-                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+                command: this.getProviderCliBinary(projProvider),
                 provider: projProvider,
               });
               this.showToast('Opening project - drag to a project to save it', 'info');
@@ -10856,11 +10868,15 @@ class CWMApp {
             try {
               const ws = this.state.workspaces.find(w => w.id === workspaceId);
               const wsName = ws ? ws.name : 'Project';
+              // Plan 19-02: workspace drops do not yet carry a provider tag
+              // on the workspace itself (workspaces are provider-agnostic
+              // containers); use the back-compat default through the helper
+              // so the literal lives in one place.
               const data = await this.api('POST', '/api/sessions', {
                 name: `${wsName} terminal`,
                 workspaceId: workspaceId,
                 topic: '',
-                command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+                command: this.getProviderCliBinary(null),
               });
               await this.loadSessions();
               await this.loadStats();
@@ -17311,6 +17327,40 @@ class CWMApp {
     const providers = this.state.providers || [];
     if (!Array.isArray(providers)) return null;
     return providers.find(p => p && p.id === id) || null;
+  }
+
+  /**
+   * Plan 19-02: resolve the CLI binary name for a provider id, used at the
+   * 5 spawn sites that previously hardcoded the default Claude literal
+   * (AI find-session card, project drops, workspace drops). Reads from the
+   * fetched spec map first (window.CWMProviderSpecs, populated by
+   * fetchProviderSpecs) so new providers light up without frontend edits.
+   * Falls back to the state.providers list if specs are not yet available,
+   * then to the v1.1 back-compat default (see marker line below).
+   *
+   * Marker rationale: the literal on the final fallback line is the
+   * back-compat default (v1.1 callers passed no provider id at all; the
+   * literal preserves their behavior). Marked per the grep gate's
+   * exemption mechanism (see test/grep-gate.test.js).
+   *
+   * @param {string} providerId Provider id from session/project/UI context.
+   * @returns {string} The cliBinary string for the resolved provider.
+   */
+  getProviderCliBinary(providerId) {
+    const specs = (typeof window !== 'undefined' && window.CWMProviderSpecs) || null;
+    const spec = (specs && providerId && specs[providerId]) ||
+      (specs && specs.claude) || // gsd:provider-literal-allowed (Phase 19 fallback to Claude spec)
+      null;
+    if (spec && typeof spec.cliBinary === 'string' && spec.cliBinary.length > 0) {
+      return spec.cliBinary;
+    }
+    // Spec map not yet fetched: try state.providers (loaded by loadProviders).
+    const entry = this._getProviderById(providerId);
+    if (entry && typeof entry.cliBinary === 'string' && entry.cliBinary.length > 0) {
+      return entry.cliBinary;
+    }
+    // v1.1 back-compat default. Existing un-tagged callers expect Claude.
+    return 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default)
   }
 
   /**

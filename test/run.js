@@ -836,6 +836,7 @@ const standaloneTests = [
   'idle-signal-dispatch.test.js',    // Plan 19-02: frontend idle dispatch through per-provider spec (PTY-04)
   'keybindings-dispatch.test.js',    // Plan 19-02: Shift+Enter dispatch + backend-frontend parity (PTY-05)
   'idle-signal-parity.test.js',      // Plan 19-02: backend.isIdleSignal vs frontend regex parity (PTY-04 drift gate)
+  'bracketed-paste-isolation.test.js', // Plan 19-02: per-pane paste listener scope (PTY-06)
 ];
 
 let standaloneFailed = 0;

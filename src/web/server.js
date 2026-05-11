@@ -1888,6 +1888,10 @@ app.get('/api/providers', requireAuth, (req, res) => {
     id: p.id,
     displayName: p.displayName,
     accentToken: p.accentToken,
+    // Plan 19-02: expose cliBinary so the frontend can build the spec
+    // map (window.CWMProviderSpecs) and remove the 5 hardcoded default
+    // provider literals in app.js drop / spawn callsites.
+    cliBinary: p.cliBinary,
     enabled: registry.isEnabled(p.id),
     available: probeAvailability(p.cliBinary, forceRefresh),
     // Plan 18-04 (COST-02/03): defensive call. supportsCost() is contract-
