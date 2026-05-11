@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.3] - 2026-05-11
+
+### Changed
+
+- **Codex panes now visually distinct.** Bumped per-provider pane styling from a 1px top accent + 24px fade to a 3px top accent + 2px bottom accent + 64px tint fade + ~4% saturation whole-pane background derived from each provider's Catppuccin token. Claude panes get a mauve treatment, Codex get green; works across all 13 themes via `color-mix()`. The xterm canvas still paints opaque over its own area so text contrast is unaffected (Pitfall F still satisfied). Updated `test/css-tokens.test.js` Pitfall F guard to allow any 16-128px tint cutoff instead of pinning to 24px exactly.
+
+### Planned (deferred to v1.2.0-alpha.4)
+
+- Right-click "Codex settings" submenu on Codex panes surfacing model, sandbox, approval policy, reasoning effort, bypass toggle, and feature flags. Plan written to `.planning/phases/21-codex-pane-customization/21-01-PLAN.md`.
+
 ## [1.2.0-alpha.2] - 2026-05-11
 
 ### Fixed

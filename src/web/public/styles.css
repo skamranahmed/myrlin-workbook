@@ -10224,13 +10224,25 @@ html {
    fades to transparent before reaching the xterm canvas; the xterm
    canvas paints over the pane background, so text contrast is never
    reduced by the tint (Pitfall F mitigation). */
+/* Per-design 2026-05-11: pane-provider visual treatment bumped to be
+   noticeable at-a-glance for mixed-provider grids. Combines a 3px solid
+   accent strip at top (was 1px), a deeper top-fade tint (was 24px), and
+   a 2px bottom accent. Whole-pane subtle background tint via color-mix
+   (12% saturation) sits BEHIND the xterm canvas; xterm paints opaque
+   over its own area so text contrast is never reduced (Pitfall F). */
 .terminal-pane[data-provider="claude"]:not(.terminal-pane-empty) {
-  border-top: 1px solid var(--provider-claude-accent);
-  background: linear-gradient(180deg, var(--provider-claude-tint) 0, transparent 24px), var(--bg-primary);
+  border-top: 3px solid var(--provider-claude-accent);
+  border-bottom: 2px solid var(--provider-claude-accent);
+  background:
+    linear-gradient(180deg, var(--provider-claude-tint) 0, transparent 64px),
+    color-mix(in srgb, var(--mauve) 4%, var(--bg-primary));
 }
 .terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) {
-  border-top: 1px solid var(--provider-codex-accent);
-  background: linear-gradient(180deg, var(--provider-codex-tint) 0, transparent 24px), var(--bg-primary);
+  border-top: 3px solid var(--provider-codex-accent);
+  border-bottom: 2px solid var(--provider-codex-accent);
+  background:
+    linear-gradient(180deg, var(--provider-codex-tint) 0, transparent 64px),
+    color-mix(in srgb, var(--green) 4%, var(--bg-primary));
 }
 
 /* 2px provider stripe on the left edge of the project accordion. */

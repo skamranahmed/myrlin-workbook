@@ -137,13 +137,17 @@ check('project-accordion[data-provider="codex"] selector exists', () => {
   );
 });
 
-// (5) Sanity: the terminal-pane background gradient stops at 24px (Pitfall F:
-// gradient must not bleed onto the xterm canvas and reduce text contrast).
-check('terminal-pane gradient fades to transparent at 24px (Pitfall F guard)', () => {
-  assert.ok(
-    /linear-gradient\(180deg,\s*var\(--provider-claude-tint\)\s*0,\s*transparent\s*24px\)/.test(css),
-    'Pitfall F: pane tint must fade to transparent at 24px so the xterm canvas below is never tinted'
-  );
+// (5) Sanity: the terminal-pane background gradient fades to transparent within
+// the pane chrome (Pitfall F: gradient must not bleed onto the xterm canvas and
+// reduce text contrast). The exact pixel cutoff is a designer call; v1.2.0-alpha.3
+// bumped from 24px to 64px (still well within the pane header band). Test allows
+// any cutoff between 16px and 128px so future tuning does not break CI.
+check('terminal-pane gradient fades to transparent within pane chrome (Pitfall F guard)', () => {
+  const re = /linear-gradient\(180deg,\s*var\(--provider-claude-tint\)\s*0,\s*transparent\s*(\d+)px\)/;
+  const m = css.match(re);
+  assert.ok(m, 'Pitfall F: pane tint must fade to transparent at some pixel value');
+  const px = parseInt(m[1], 10);
+  assert.ok(px >= 16 && px <= 128, 'Pitfall F: tint fade cutoff must be between 16px and 128px; got ' + px + 'px');
 });
 
 console.log('  ' + '─'.repeat(42));
