@@ -845,6 +845,7 @@ const standaloneTests = [
   'workspace-group-ux.test.js',      // Plan 22-05: workspace group color stripe + chip
   'codex-status-strip.test.js',      // Plan 22-01: Codex bottom status strip + chip click handlers
   'codex-discover-watcher.test.js',  // Plan 22-03: fs.watch debounce + 5-min fallback poll
+  'settings-nav-rail.test.js',       // alpha.9: left-side category rail for settings panel
 ];
 
 let standaloneFailed = 0;

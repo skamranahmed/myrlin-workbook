@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.9] - 2026-05-11
+
+### Added
+
+- **Settings page left-side category rail.** Sticky nav inside the Settings panel listing every category from the registry plus an explicit "Providers" entry. Click any item to smooth-scroll to that section; a scroll-spy keeps the active item highlighted as you scroll naturally. Plays with all 13 Catppuccin themes via existing tokens (`--mauve` accent, `--surface-1` hover). Builds automatically from `settingsRegistry`; async Providers section joins the rail after it renders.
+
+### Changed
+
+- **Autostart Scheduled Task pins `PORT=3457`** (matching the current Cloudflared tunnel mapping) via a small `scripts/autostart-wrapper.cmd` shim emitted by `setup-autostart.ps1`. Without this pin, a reboot would default the workbook to `:3456` and silently break `workbook.myrlin.dev`. The wrapper is gitignored (user-specific paths).
+
 ## [1.2.0-alpha.8] - 2026-05-11
 
 ### Added

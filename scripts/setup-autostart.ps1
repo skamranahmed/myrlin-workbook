@@ -47,9 +47,20 @@ Write-Host ''
 # own logging (logs/server.log) so we do not redirect stdio here; Task
 # Scheduler captures stdout/stderr to its history when verbose history is
 # enabled (Event Viewer > Microsoft > Windows > TaskScheduler).
+# alpha.9: bake PORT=3457 into the action so the workbook always binds
+# to the port the cloudflared tunnel routes to. Default is 3456, which
+# would silently break workbook.myrlin.dev after a reboot. Override via
+# `setx PORT 3456` + re-register if you want to standardize differently.
+$portWrapperPath = Join-Path $ProjectRoot 'scripts\autostart-wrapper.cmd'
+$wrapperContents = @"
+@echo off
+set PORT=3457
+"$NodeExe" --max-old-space-size=4096 "$SupervisorScript"
+"@
+$wrapperContents | Out-File -FilePath $portWrapperPath -Encoding ascii -NoNewline
+
 $action = New-ScheduledTaskAction `
-    -Execute $NodeExe `
-    -Argument "--max-old-space-size=4096 `"$SupervisorScript`"" `
+    -Execute $portWrapperPath `
     -WorkingDirectory $ProjectRoot
 
 # Trigger: at system boot. Delay 30s so the network stack is up before

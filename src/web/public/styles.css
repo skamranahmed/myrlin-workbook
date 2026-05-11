@@ -2052,6 +2052,68 @@ textarea.input {
   min-height: 0;
 }
 
+/* alpha.9: left-side category rail. Builds from the settingsRegistry's
+   `category` field. Clicking an item smooth-scrolls the body to the
+   matching section; a scroll-spy keeps the active item highlighted as
+   the user scrolls naturally. Theme-safe via existing tokens. */
+.settings-content {
+  display: grid;
+  grid-template-columns: 152px 1fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.settings-nav {
+  border-right: 1px solid var(--surface-2);
+  padding: 8px 6px 12px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+}
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-nav-item:hover {
+  background: var(--surface-1);
+  color: var(--text-base);
+}
+.settings-nav-item.is-active {
+  background: color-mix(in srgb, var(--mauve) 18%, var(--surface-1));
+  color: var(--text-base);
+  font-weight: 500;
+  border-left: 2px solid var(--mauve);
+  padding-left: 8px; /* compensate for the 2px border so text doesn't jump */
+}
+.settings-nav-item.is-dimmed {
+  opacity: 0.35;
+  pointer-events: none;
+}
+/* When the rail is empty (no categories yet), collapse the column to
+   keep the body full-width during loading. */
+.settings-nav:empty {
+  display: none;
+}
+.settings-content:has(.settings-nav:empty) {
+  grid-template-columns: 1fr;
+}
+
 .settings-category {
   padding: 0 20px;
 }

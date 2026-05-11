@@ -4452,7 +4452,11 @@ class CWMApp {
 
     let html = '';
     for (const [category, items] of Object.entries(groups)) {
-      html += `<div class="settings-category">`;
+      // alpha.9: tag each category with a slug-id + data-category so the
+      // settings nav rail can smooth-scroll into it and the scroll-spy
+      // can match the visible category back to the rail entry.
+      const slug = this._settingsCategorySlug(category);
+      html += `<div class="settings-category" id="settings-cat-${this.escapeHtml(slug)}" data-category="${this.escapeHtml(category)}">`;
       html += `<div class="settings-category-label">${this.escapeHtml(category)}</div>`;
       for (const item of items) {
         if (item.type === 'scale') {
@@ -4619,6 +4623,11 @@ class CWMApp {
 
     this.els.settingsBody.innerHTML = html;
 
+    // alpha.9: build the left-side category nav rail. After the Providers
+    // section async-renders below, we re-build the rail so the Providers
+    // entry shows up. Empty filter case is handled there too.
+    this._buildSettingsNav(Object.keys(groups));
+
     // Kick off async Providers section render. Fire-and-forget so the
     // synchronous render path is unblocked; the placeholder fills in
     // when the promise resolves. Errors are swallowed (loadProviders
@@ -4637,6 +4646,17 @@ class CWMApp {
         this.els.settingsBody.querySelectorAll('input[data-provider-toggle]').forEach(input => {
           input.addEventListener('change', (e) => this._handleProviderToggleChange(e));
         });
+        // alpha.9: providers section landed — append it to the rail and
+        // mark the section element with the slug id so click/spy work.
+        const section = this.els.settingsBody.querySelector('.settings-category[data-section="providers"]');
+        if (section) {
+          section.id = 'settings-cat-providers';
+          section.dataset.category = 'Providers';
+        }
+        const allCats = Array.from(this.els.settingsBody.querySelectorAll('.settings-category'))
+          .map(el => el.dataset.category)
+          .filter(Boolean);
+        this._buildSettingsNav(allCats);
       } else {
         // Filter excluded the section or no providers loaded; remove the
         // placeholder so the DOM stays clean.
@@ -4869,6 +4889,118 @@ class CWMApp {
   filterSettings() {
     const val = this.els.settingsSearchInput ? this.els.settingsSearchInput.value : '';
     this.renderSettingsBody(val);
+  }
+
+  /**
+   * Slugify a category name for use as a DOM id. Lowercases, replaces
+   * non-alphanumeric runs with single hyphens, strips leading/trailing
+   * hyphens. Stable: same input always yields the same slug. Plan
+   * alpha.9 nav rail.
+   *
+   * @param {string} category
+   * @returns {string}
+   */
+  _settingsCategorySlug(category) {
+    return String(category || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      || 'misc';
+  }
+
+  /**
+   * Build the left-side category rail (alpha.9). Idempotent: replaces
+   * the rail's innerHTML and re-binds click handlers each call.
+   *
+   * Click → smooth-scroll the body to the matching #settings-cat-<slug>
+   *   section. A ResizeObserver-driven scroll-spy keeps the active item
+   *   highlighted as the user scrolls.
+   *
+   * @param {string[]} categories - ordered list of category names from
+   *   the rendered body (sync + async sections combined).
+   */
+  _buildSettingsNav(categories) {
+    const nav = document.getElementById('settings-nav');
+    if (!nav) return;
+    if (!Array.isArray(categories) || categories.length === 0) {
+      nav.innerHTML = '';
+      return;
+    }
+    // Deduplicate while preserving order.
+    const seen = new Set();
+    const ordered = categories.filter(c => {
+      if (!c || seen.has(c)) return false;
+      seen.add(c);
+      return true;
+    });
+    nav.innerHTML = ordered.map(cat => {
+      const slug = this._settingsCategorySlug(cat);
+      return `<button class="settings-nav-item" data-slug="${this.escapeHtml(slug)}" type="button">${this.escapeHtml(cat)}</button>`;
+    }).join('');
+
+    nav.querySelectorAll('.settings-nav-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const slug = btn.dataset.slug;
+        const target = document.getElementById('settings-cat-' + slug);
+        if (target && this.els.settingsBody) {
+          // smooth-scroll inside the settings body, not the page
+          this.els.settingsBody.scrollTo({
+            top: target.offsetTop - 8,
+            behavior: 'smooth',
+          });
+        }
+      });
+    });
+
+    // Mark the first visible item as active so the rail has an anchor
+    // before the user scrolls.
+    const firstBtn = nav.querySelector('.settings-nav-item');
+    if (firstBtn) firstBtn.classList.add('is-active');
+
+    // Wire scroll-spy once per settings open. The handler is throttled
+    // via requestAnimationFrame so smooth-scroll animations don't peg
+    // the main thread.
+    if (!this._settingsScrollSpyBound && this.els.settingsBody) {
+      this._settingsScrollSpyBound = true;
+      let ticking = false;
+      const onScroll = () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          this._updateSettingsActiveNavItem();
+          ticking = false;
+        });
+      };
+      this.els.settingsBody.addEventListener('scroll', onScroll, { passive: true });
+    }
+  }
+
+  /**
+   * Scroll-spy: find the topmost category section currently in view
+   * inside the settings body and mark its rail item is-active.
+   * Plan alpha.9 nav rail.
+   */
+  _updateSettingsActiveNavItem() {
+    const body = this.els.settingsBody;
+    const nav = document.getElementById('settings-nav');
+    if (!body || !nav) return;
+    const bodyTop = body.getBoundingClientRect().top;
+    const sections = body.querySelectorAll('.settings-category');
+    let active = null;
+    for (const sec of sections) {
+      const rect = sec.getBoundingClientRect();
+      // Section counts as "active" once its top crosses 60px below the
+      // settings body's top edge.
+      if (rect.top - bodyTop <= 60) active = sec;
+      else break;
+    }
+    if (!active) active = sections[0];
+    if (!active) return;
+    const slug = active.id.replace(/^settings-cat-/, '');
+    nav.querySelectorAll('.settings-nav-item').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.slug === slug);
+    });
   }
 
   /** Apply current settings to the UI (CSS classes, visibility toggles) */
