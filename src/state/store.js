@@ -38,6 +38,14 @@ const DEFAULT_STATE = {
   worktreeTasks: {},      // { taskId: { id, workspaceId, sessionId, featureId, branch, worktreePath, repoDir, description, baseBranch, status, createdAt, completedAt } }
   pushDevices: [],        // [{ token: string, platform: 'ios' | 'android', registeredAt: string }]
   pairedDevices: [],      // [{ deviceId, token, deviceName, platform, appVersion, pairedAt, lastSeenAt, expiresAt, pushToken, pushPreferences }]
+  // Ad-hoc per-(provider, providerSessionId) settings bundle.
+  // For discovered Codex Desktop sessions opened via right-click "Open in
+  // Terminal" there is no Myrlin store record (the session lives in
+  // ~/.codex/sessions/), so per-session provider-settings have nowhere to
+  // live on state.sessions. This slot stores them keyed by the upstream
+  // CLI's session UUID instead. pty-manager.spawnSession looks here when
+  // no store record exists. Phase 21 Plan 21-01 alpha.6 fix.
+  providerSessionSettings: {}, // { [providerId]: { [uuid]: { ...settings } } }
   settings: {
     autoRecover: true,
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
@@ -323,6 +331,9 @@ class Store extends EventEmitter {
         features: parsed.features || {},
         pushDevices: parsed.pushDevices || [],
         pairedDevices: parsed.pairedDevices || [],
+        providerSessionSettings: parsed.providerSessionSettings && typeof parsed.providerSessionSettings === 'object' && !Array.isArray(parsed.providerSessionSettings)
+          ? parsed.providerSessionSettings
+          : {},
       };
     } catch (_) {
       return null;
@@ -775,6 +786,60 @@ class Store extends EventEmitter {
     this.save();
     this.emit('session:updated', session);
     return session;
+  }
+
+  /**
+   * Read ad-hoc provider settings keyed by (providerId, upstreamSessionId).
+   *
+   * Used for sessions that exist only in the upstream provider's storage
+   * (e.g. a Codex Desktop session in ~/.codex/sessions/) and have no
+   * Myrlin store record. Returns null when no bundle is set so the caller
+   * can fall back to defaults or skip.
+   *
+   * @param {string} providerId - Registry-issued provider id.
+   * @param {string} upstreamSessionId - Provider-native session UUID
+   *   (Codex rollout UUID, Claude session UUID, etc.).
+   * @returns {Object|null} Settings bundle or null.
+   */
+  getProviderSessionSettings(providerId, upstreamSessionId) {
+    if (!providerId || !upstreamSessionId) return null;
+    const root = this._state.providerSessionSettings;
+    if (!root || typeof root !== 'object') return null;
+    const byProvider = root[providerId];
+    if (!byProvider || typeof byProvider !== 'object') return null;
+    const bundle = byProvider[upstreamSessionId];
+    return bundle && typeof bundle === 'object' ? bundle : null;
+  }
+
+  /**
+   * Persist ad-hoc provider settings for an upstream session UUID. Used by
+   * the PUT /api/sessions/:id/provider-settings route when no Myrlin store
+   * record exists for the session id.
+   *
+   * Behavior:
+   *   - Replaces (does not merge) the existing bundle for that
+   *     (providerId, upstreamSessionId) pair. Caller sends the canonical
+   *     full bundle each PUT so this matches the in-store behavior.
+   *   - Initializes the nested objects lazily.
+   *   - Saves immediately (settings changes are user-intent; durability
+   *     matters even if the user closes the tab right after).
+   *
+   * @param {string} providerId
+   * @param {string} upstreamSessionId
+   * @param {Object} settings
+   * @returns {Object} The persisted bundle.
+   */
+  setProviderSessionSettings(providerId, upstreamSessionId, settings) {
+    if (!this._state.providerSessionSettings || typeof this._state.providerSessionSettings !== 'object') {
+      this._state.providerSessionSettings = {};
+    }
+    if (!this._state.providerSessionSettings[providerId] || typeof this._state.providerSessionSettings[providerId] !== 'object') {
+      this._state.providerSessionSettings[providerId] = {};
+    }
+    this._state.providerSessionSettings[providerId][upstreamSessionId] = settings;
+    this.save();
+    this.emit('providerSessionSettings:updated', { providerId, upstreamSessionId });
+    return settings;
   }
 
   /**

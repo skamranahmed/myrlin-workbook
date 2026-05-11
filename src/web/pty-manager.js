@@ -350,16 +350,34 @@ class PtySessionManager {
     let descriptor;
     if (useProvider) {
       // Phase 21 Plan 21-01: per-session providerSettings drives provider CLI flags.
-      // Read the bundle for THIS provider so a Claude session never receives
-      // a Codex-shaped bundle and vice versa. Missing/non-object yields null;
-      // the provider's spawnCommand treats null as "no extra flags".
-      const providerSettingsBundle = storeSession
-        && storeSession.providerSettings
-        && typeof storeSession.providerSettings === 'object'
-        && storeSession.providerSettings[providerId]
-        && typeof storeSession.providerSettings[providerId] === 'object'
-        ? storeSession.providerSettings[providerId]
-        : null;
+      // Two lookup paths:
+      //   1. Store-managed: storeSession.providerSettings[providerId]
+      //   2. Ad-hoc (alpha.6): state.providerSessionSettings[providerId][resumeSessionId|sessionId]
+      // The store path wins when present. The ad-hoc path covers discovered
+      // Codex Desktop sessions opened via right-click "Open in Terminal"
+      // where no Myrlin store record exists. Read both so a setting change
+      // on an ad-hoc pane survives the next pane restart.
+      let providerSettingsBundle = null;
+      if (storeSession
+          && storeSession.providerSettings
+          && typeof storeSession.providerSettings === 'object'
+          && storeSession.providerSettings[providerId]
+          && typeof storeSession.providerSettings[providerId] === 'object') {
+        providerSettingsBundle = storeSession.providerSettings[providerId];
+      } else {
+        const adhocKey = resumeSessionId || sessionId;
+        providerSettingsBundle = store.getProviderSessionSettings(providerId, adhocKey);
+      }
+      // Diagnostic line so logs/server.log shows what flags entered the
+      // spawn descriptor when the user reports "session not found" or
+      // similar CLI-level failures. Cheap (only fires per spawn) and
+      // omits any sensitive fields (settings keys are all enum/short).
+      try {
+        console.log('[PTY] spawn provider=' + providerId
+          + ' sessionId=' + sessionId
+          + ' resumeSessionId=' + (resumeSessionId || '<fresh>')
+          + ' providerSettings=' + (providerSettingsBundle ? JSON.stringify(providerSettingsBundle) : '<none>'));
+      } catch (_) { /* console.log can EPIPE; never fatal */ }
       try {
         descriptor = provider.spawnCommand({
           sessionId,

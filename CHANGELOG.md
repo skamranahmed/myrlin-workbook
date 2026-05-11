@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.6] - 2026-05-11
+
+### Fixed
+
+- **Codex settings menu items 404'd on right-click-opened Codex Desktop panes.** Enabling bypass (or changing any of the 6 menu items) on a Codex pane that was opened via right-click "Open in Terminal" returned "Session not found." The PUT `/api/sessions/:id/provider-settings` endpoint required a Myrlin store record, but discovered Codex Desktop sessions use the upstream Codex UUID directly as the pane id and never get a store record until the user adds them to a workspace. Architectural root cause: the alpha.4 settings persistence model only addressed managed sessions, not ad-hoc panes.
+
+### Changed
+
+- **New state slot `providerSessionSettings`** stores per-(provider, upstreamSessionId) settings bundles for ad-hoc sessions. `pty-manager` looks up this slot when no store record exists for the pane, so settings persist across pane restarts even for never-saved Codex Desktop sessions.
+- **PUT route now accepts `provider` in the body** as a fallback when the URL `:id` is not in `store.sessions`. Provider id is validated against `^[a-z][a-z0-9_-]{0,32}$` and the upstream session id against the existing shell-safe regex. Same per-key enum validation runs in both paths.
+- **Diagnostic spawn log line.** `pty-manager` now logs `[PTY] spawn provider=... sessionId=... resumeSessionId=... providerSettings=...` once per spawn so `logs/server.log` shows what flags entered the descriptor when a CLI-level "session not found" is reported. Settings keys are enum/short so no sensitive data leaks.
+
+### Tests
+
+- Added 5 new ad-hoc cases to `test/codex-settings-route.test.js` (13 total): 200 on ad-hoc PUT with `body.provider`, 404 on ad-hoc PUT without `body.provider`, 404 on malformed provider id, 400 on enum violation in ad-hoc path, 400 on shell-unsafe url :id.
+
 ## [1.2.0-alpha.5] - 2026-05-11
 
 ### Fixed

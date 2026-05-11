@@ -202,6 +202,65 @@ function req(server, method, urlPath, opts) {
     assertEqual(r.status, 401);
   });
 
+  // ─── Test 9: alpha.6 ad-hoc path (no store record) ───────────────────────
+  await test('alpha.6: 200 on ad-hoc PUT (sessionId not in store + body.provider=codex)', async () => {
+    const adHocUuid = 'dba521c8-69e7-4f00-9c00-aaaaaaaaaaaa';
+    const r = await req(listener, 'PUT', '/api/sessions/' + adHocUuid + '/provider-settings', {
+      body: {
+        provider: 'codex', // gsd:provider-literal-allowed (test fixture)
+        settings: { bypassApprovalsAndSandbox: true, model: 'gpt-5-codex' },
+      },
+    });
+    assertEqual(r.status, 200, 'expected 200, got ' + r.status + ' body=' + JSON.stringify(r.body));
+    assertEqual(r.body.success, true);
+    assertEqual(r.body.adHoc, true, 'response must flag adHoc=true');
+    assertEqual(r.body.settings.bypassApprovalsAndSandbox, true);
+    // Verify persistence through the store helper.
+    const bundle = store.getProviderSessionSettings('codex', adHocUuid); // gsd:provider-literal-allowed (test fixture)
+    assert(bundle && bundle.bypassApprovalsAndSandbox === true, 'bundle must be persisted in providerSessionSettings');
+    assertEqual(bundle.model, 'gpt-5-codex');
+  });
+
+  // ─── Test 10: ad-hoc PUT without body.provider falls through to 404 ──────
+  await test('alpha.6: 404 on ad-hoc PUT missing body.provider', async () => {
+    const adHocUuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const r = await req(listener, 'PUT', '/api/sessions/' + adHocUuid + '/provider-settings', {
+      body: { settings: { model: 'gpt-5-codex' } },
+    });
+    assertEqual(r.status, 404, 'no store record + no provider tag = ambiguous = 404');
+  });
+
+  // ─── Test 11: ad-hoc PUT with bad provider id format → 400 ───────────────
+  await test('alpha.6: 400 on ad-hoc PUT with malformed provider id', async () => {
+    const adHocUuid = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    const r = await req(listener, 'PUT', '/api/sessions/' + adHocUuid + '/provider-settings', {
+      body: { provider: 'BAD;rm', settings: { model: 'gpt-5-codex' } },
+    });
+    // Malformed provider id does not match the strict regex; the route
+    // ignores it and falls through to the 404 branch (no store record).
+    assertEqual(r.status, 404);
+  });
+
+  // ─── Test 12: ad-hoc PUT validation still enforces enum allow-list ───────
+  await test('alpha.6: 400 on ad-hoc PUT with enum-violating value', async () => {
+    const adHocUuid = 'cccccccc-dddd-eeee-ffff-000000000000';
+    const r = await req(listener, 'PUT', '/api/sessions/' + adHocUuid + '/provider-settings', {
+      body: { provider: 'codex', settings: { sandbox: 'neverexists' } }, // gsd:provider-literal-allowed (test fixture)
+    });
+    assertEqual(r.status, 400);
+  });
+
+  // ─── Test 13: ad-hoc PUT URL :id must be shell-safe ──────────────────────
+  await test('alpha.6: 400 on ad-hoc PUT with shell-unsafe url :id', async () => {
+    // Express will percent-decode the URL; we pass an already-decoded
+    // payload that, post-decode, contains a semicolon. The route's
+    // ad-hoc-key regex (^[a-zA-Z0-9_-]+$) must reject it.
+    const r = await req(listener, 'PUT', '/api/sessions/' + encodeURIComponent('id;rm') + '/provider-settings', {
+      body: { provider: 'codex', settings: { model: 'gpt-5-codex' } }, // gsd:provider-literal-allowed (test fixture)
+    });
+    assertEqual(r.status, 400);
+  });
+
   // Cleanup
   store.deleteSession(sess.id);
   store.deleteSession(claudeSess.id);

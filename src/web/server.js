@@ -1577,14 +1577,37 @@ app.put('/api/sessions/:id/provider-settings', requireAuth, (req, res) => {
   const store = getStore();
   const sessionId = req.params.id;
   const session = store.getSession(sessionId);
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found.' });
-  }
   const settings = req.body && req.body.settings;
   if (settings === undefined || settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
     return res.status(400).json({ error: 'settings must be a plain object' });
   }
-  const providerId = session.provider || 'claude'; // gsd:provider-literal-allowed (back-compat default; tag for un-tagged legacy sessions)
+
+  // Provider resolution. Three sources, priority high → low:
+  //   1. session.provider when a Myrlin store record exists (authoritative).
+  //   2. req.body.provider when the caller explicitly tags an ad-hoc session
+  //      (the typical Codex Desktop right-click-opened pane case where
+  //      :id is the Codex UUID and no store record exists).
+  //   3. None → 404 (ad-hoc PUT without provider tag is ambiguous: we can't
+  //      know which enum allow-list to validate against).
+  let providerId = null;
+  let isAdHoc = false;
+  if (session) {
+    providerId = session.provider || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged legacy sessions)
+  } else if (typeof req.body.provider === 'string' && /^[a-z][a-z0-9_-]{0,32}$/.test(req.body.provider)) {
+    // alpha.6 ad-hoc fallback: allow per-(provider, upstream-uuid) settings
+    // for discovered sessions that have no Myrlin store entry yet.
+    providerId = req.body.provider;
+    isAdHoc = true;
+    // The url :id must look like a safe upstream session id (the same
+    // shell-safe shape resumeSessionId uses elsewhere). Reject otherwise so
+    // a hostile caller can't pollute state with arbitrary keys.
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      return res.status(400).json({ error: 'invalid session id for ad-hoc provider-settings' });
+    }
+  } else {
+    return res.status(404).json({ error: 'Session not found.' });
+  }
+
   // Per-provider validation. Today only Codex has a settings surface; Claude
   // gets a 400 until a future plan defines its bundle shape.
   if (providerId === 'codex') { // gsd:provider-literal-allowed
@@ -1595,6 +1618,18 @@ app.put('/api/sessions/:id/provider-settings', requireAuth, (req, res) => {
   } else {
     return res.status(400).json({ error: 'provider does not accept provider-settings: ' + providerId });
   }
+
+  if (isAdHoc) {
+    store.setProviderSessionSettings(providerId, sessionId, settings);
+    return res.json({
+      success: true,
+      sessionId,
+      provider: providerId,
+      settings,
+      adHoc: true,
+    });
+  }
+
   const updated = store.updateSessionProviderSettings(sessionId, providerId, settings);
   if (!updated) {
     return res.status(404).json({ error: 'Session not found.' });

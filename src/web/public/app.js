@@ -11447,13 +11447,22 @@ class CWMApp {
     const sess = allSessions.find(s => s && s.id === sessionId) || {};
     const codexSettings = (sess.providerSettings && sess.providerSettings.codex) /* gsd:provider-literal-allowed */ || {};
 
+    // alpha.6: include `provider` in the body so the server's ad-hoc
+    // fallback can persist settings for Codex Desktop panes that were
+    // right-click-opened (no Myrlin store record yet). When a store record
+    // exists the server ignores body.provider and uses session.provider.
+    // Read the provider id from the pane's data-provider attribute (set by
+    // openTerminalInPane / restored layout); fall back to the Codex id
+    // because this factory only fires on Codex panes via the dispatcher.
+    const paneElForMenu = document.getElementById(`term-pane-${slotIdx}`);
+    const codexProviderId = (paneElForMenu && paneElForMenu.dataset && paneElForMenu.dataset.provider) || 'codex'; /* gsd:provider-literal-allowed (Codex pane default for this menu factory) */
     const putSettings = async (partial) => {
       const next = { ...codexSettings, ...partial };
       try {
-        await this.api('PUT', '/api/sessions/' + encodeURIComponent(sessionId) + '/provider-settings', { settings: next });
-        // Mutate the cached session so subsequent menu opens reflect the
-        // change without a full refetch. The next saveTerminalLayout or
-        // loadSessions tick will rehydrate from the server.
+        await this.api('PUT', '/api/sessions/' + encodeURIComponent(sessionId) + '/provider-settings', {
+          settings: next,
+          provider: codexProviderId,
+        });
         if (!sess.providerSettings) sess.providerSettings = {};
         sess.providerSettings.codex = next; // gsd:provider-literal-allowed
         this.showToast('Codex settings updated — restart pane to apply', 'info');
