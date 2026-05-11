@@ -839,6 +839,7 @@ const standaloneTests = [
   'bracketed-paste-isolation.test.js', // Plan 19-02: per-pane paste listener scope (PTY-06)
   'codex-settings-route.test.js',    // Plan 21-01: PUT /api/sessions/:id/provider-settings (Codex menu persistence)
   'pane-context-menu.test.js',       // Plan 21-01: Codex pane right-click menu structure gate
+  'project-session-resume-provider.test.js', // alpha.5 bug fix: discovered-session right-click routes by provider
 ];
 
 let standaloneFailed = 0;

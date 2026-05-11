@@ -1829,7 +1829,11 @@ class CWMApp {
         const sessionItem = e.target.closest('.project-session-item');
         if (sessionItem) {
           e.preventDefault(); e.stopPropagation();
-          this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, e.clientX, e.clientY);
+          // Forward provider from data-provider so Codex sessions resume
+          // through `codex resume <id>` instead of `claude resume <id>`.
+          // Bug fix v1.2.0-alpha.5: previously hardcoded to claude here.
+          const itemProvider = sessionItem.dataset.provider || 'claude'; /* gsd:provider-literal-allowed (back-compat default) */
+          this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, e.clientX, e.clientY, itemProvider);
           return;
         }
         const header = e.target.closest('.project-accordion-header');
@@ -1888,7 +1892,10 @@ class CWMApp {
         if (sessionItem) {
           projLPTimer = setTimeout(() => {
             const touch = e.touches[0];
-            if (touch) this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, touch.clientX, touch.clientY);
+            if (touch) {
+              const itemProvider = sessionItem.dataset.provider || 'claude'; /* gsd:provider-literal-allowed (back-compat default) */
+              this.showProjectSessionContextMenu(sessionItem.dataset.sessionName, sessionItem.dataset.projectPath, touch.clientX, touch.clientY, itemProvider);
+            }
           }, 500);
           return;
         }
@@ -3172,10 +3179,17 @@ class CWMApp {
     return parts.join(' > ');
   }
 
-  showProjectSessionContextMenu(sessionName, projectPath, x, y) {
+  showProjectSessionContextMenu(sessionName, projectPath, x, y, provider) {
     const items = [];
+    // Bug fix v1.2.0-alpha.5: previously this function hardcoded the
+    // Claude cliBinary so right-click "Open in Terminal" on a Codex Desktop
+    // session spawned the wrong CLI and failed with "session id cannot be
+    // found". Provider now flows from the data-provider attribute on the
+    // session item through the contextmenu dispatcher.
+    const resolvedProvider = provider || 'claude'; /* gsd:provider-literal-allowed (back-compat default) */
+    const cliBinary = this.getProviderCliBinary(resolvedProvider);
 
-    // Open in terminal (resume the Claude session) - no workspace needed
+    // Open in terminal - resume the session via the right provider's CLI.
     items.push({
       label: 'Open in Terminal', icon: '&#9654;', action: () => {
         const emptySlot = this.terminalPanes.findIndex(p => p === null);
@@ -3188,7 +3202,8 @@ class CWMApp {
         this.openTerminalInPane(emptySlot, sessionName, title, {
           cwd: projectPath,
           resumeSessionId: sessionName,
-          command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+          command: cliBinary,
+          provider: resolvedProvider,
         });
       },
     });
@@ -3200,7 +3215,6 @@ class CWMApp {
           this.showToast('Select or create a project first', 'warning');
           return;
         }
-        // Prefer custom title from Claude session, fall back to folder name + short UUID
         const customTitle = this.getProjectSessionTitle(sessionName);
         let friendlyName;
         if (customTitle) {
@@ -3215,7 +3229,8 @@ class CWMApp {
           workspaceId: this.state.activeWorkspace.id,
           workingDir: projectPath,
           topic: 'Resumed session',
-          command: 'claude', // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+          command: cliBinary,
+          provider: resolvedProvider,
           resumeSessionId: sessionName,
         }).then(async () => {
           await this.loadSessions();

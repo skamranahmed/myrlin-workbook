@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.5] - 2026-05-11
+
+### Fixed
+
+- **"Session id cannot be found" when right-clicking a Codex Desktop session and choosing Open in Terminal.** `showProjectSessionContextMenu` hardcoded the Claude CLI binary for its Open in Terminal action and its Add to Project POST. Right-clicking any Codex (or future-provider) session in Discovered Projects sent `claude resume <codex-uuid>` to the PTY, and Claude rightly refused because the UUID lives in `~/.codex/sessions/`, not `~/.claude/projects/`. The contextmenu dispatcher now forwards `sessionItem.dataset.provider` and the menu factory resolves the CLI via `getProviderCliBinary(provider)`. Drag-drop already did the right thing (Plan 19-02 closed that loop); this closes the right-click loop too. Reported by Arthur. Added regression test `test/project-session-resume-provider.test.js`.
+
+### Added
+
+- **True boot-time auto-start (Windows).** `scripts/setup-autostart.ps1` now registers `Myrlin-Workbook` as a Scheduled Task with `AtStartup` trigger + S4U logon, so the workbook starts the moment the machine boots — no user login needed. Three-strike Task Scheduler restart-on-failure policy covers the rare case where the supervisor itself dies. To install: `powershell -ExecutionPolicy Bypass -File scripts/setup-autostart.ps1`. Cleans up the legacy `CWM-GUI-AutoStart` task on upgrade.
+- **Supervisor never gives up (default).** `CWM_MAX_RESTARTS` default raised from `20` to `Infinity` so an unattended autostart session never throws up its hands. Set `CWM_MAX_RESTARTS=20` for debug runs that want to fail loud. Added exponential back-off after 5 consecutive fast-fails (capped at 60s) so a wedged port or bad config doesn't burn CPU.
+
 ## [1.2.0-alpha.4] - 2026-05-11
 
 ### Added

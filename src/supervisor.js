@@ -98,7 +98,20 @@ const guiArgs = process.argv.slice(2);
 const guiScript = path.join(__dirname, 'gui.js');
 
 const RESTART_DELAY = parseInt(process.env.CWM_RESTART_DELAY, 10) || 2000;
-const MAX_RESTARTS = parseInt(process.env.CWM_MAX_RESTARTS, 10) || 20;
+// Default raised from 20 to Infinity (alpha.5) so an unattended autostart
+// session (Windows Task Scheduler at system boot) never gives up restarting
+// after a transient hiccup. Hard cap still settable via CWM_MAX_RESTARTS for
+// debug runs that want to fail loud.
+const MAX_RESTARTS = (() => {
+  const env = parseInt(process.env.CWM_MAX_RESTARTS, 10);
+  return Number.isFinite(env) && env > 0 ? env : Infinity;
+})();
+// Crash-loop back-off: after this many consecutive fast-fails, escalate the
+// retry delay so a bad config doesn't peg the CPU. Caps the back-off so the
+// supervisor still recovers when the underlying cause clears (e.g., the
+// port was busy, then freed).
+const BACKOFF_AFTER = 5;       // consecutive fast restarts before backing off
+const BACKOFF_MAX_DELAY = 60000; // 60s ceiling on the back-off delay
 // Reset the consecutive restart counter after this many ms of stable uptime
 const STABLE_THRESHOLD = 30000; // 30 seconds
 
@@ -147,15 +160,25 @@ function startChild() {
     }
 
     const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+    // Exponential back-off when crashes happen in quick succession so a
+    // wedged dependency (e.g., port 3456 held by a zombie) doesn't burn
+    // CPU spinning at 2s intervals. Resets to RESTART_DELAY after a
+    // stable run (STABLE_THRESHOLD reset above).
+    let delay = RESTART_DELAY;
+    if (consecutiveRestarts > BACKOFF_AFTER) {
+      const excess = consecutiveRestarts - BACKOFF_AFTER;
+      delay = Math.min(BACKOFF_MAX_DELAY, RESTART_DELAY * Math.pow(2, excess));
+    }
     logCrash('supervisor', `Server exited (${reason}), restart #${consecutiveRestarts}`, {
       exitCode: code,
       signal,
       uptimeMs: uptime,
       consecutiveRestarts,
+      delayMs: delay,
     });
-    try { console.log(`[supervisor] Server exited (${reason}). Restarting in ${RESTART_DELAY}ms...`); } catch (_) {}
+    try { console.log(`[supervisor] Server exited (${reason}). Restarting in ${delay}ms (attempt ${consecutiveRestarts})...`); } catch (_) {}
 
-    setTimeout(startChild, RESTART_DELAY);
+    setTimeout(startChild, delay);
   });
 
   child.on('error', (err) => {
