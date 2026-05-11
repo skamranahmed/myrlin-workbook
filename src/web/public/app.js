@@ -4413,8 +4413,33 @@ class CWMApp {
           s.category.toLowerCase().includes(lowerFilter))
       : registry;
 
+    // alpha.7 fix for the user-reported bug: "if i type provider, the
+    // providers section does not show up." The Providers section is
+    // rendered asynchronously below (_renderProvidersSection), so a
+    // static-registry-empty result must NOT short-circuit the render --
+    // it would skip the async section entirely and produce a false
+    // "No matching settings" state. Instead, render an empty body and
+    // let the async section fill it in; if BOTH are empty, the empty
+    // state is shown by _renderProvidersSection's fallback.
     if (filtered.length === 0) {
-      this.els.settingsBody.innerHTML = '<div class="settings-empty">No matching settings</div>';
+      this.els.settingsBody.innerHTML = '<div id="settings-providers-placeholder"></div><div class="settings-empty" id="settings-empty-fallback">No matching settings</div>';
+      this._renderProvidersSection(lowerFilter).then(providersHtml => {
+        const placeholder = document.getElementById('settings-providers-placeholder');
+        const emptyEl = document.getElementById('settings-empty-fallback');
+        if (placeholder && providersHtml) {
+          placeholder.outerHTML = providersHtml;
+          if (emptyEl) emptyEl.remove();
+          this.els.settingsBody.querySelectorAll('input[data-provider-toggle]').forEach(input => {
+            input.addEventListener('change', (e) => this._handleProviderToggleChange(e));
+          });
+        } else if (placeholder) {
+          placeholder.remove();
+        }
+      }).catch(err => {
+        console.warn('[settings-providers] render failed:', err);
+        const placeholder = document.getElementById('settings-providers-placeholder');
+        if (placeholder) placeholder.remove();
+      });
       return;
     }
 
