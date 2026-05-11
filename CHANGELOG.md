@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.0] - 2026-05-11
+
+> **Alpha release.** First publishable cut of v1.2 Multi-Provider Chat Discovery. Ships under the `alpha` npm dist-tag; install with `npm i myrlin-workbook@alpha`. Existing users on `latest` (v0.9.36) are unaffected. Production-ready stable v1.2 follows after dogfooding.
+
+### Added
+
+- **Multi-provider session support.** Myrlin now manages sessions from multiple AI coding CLIs through a clean `Provider` abstraction at `src/providers/`. Ships Claude Code (existing) + ChatGPT Codex (new). Gemini and others drop in via the same interface in v1.3.
+- **ChatGPT Codex provider.** Discovers Codex sessions from `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` (default `~/.codex`), parses the RolloutLine envelope schema (`session_meta`, `turn_context`, `event_msg`, `response_item`, `compacted`), supports pre-0.45 bare-JSON fallback, runs `codex resume <id>` as a full PTY pane. Off by default; enable via Settings → Providers.
+- **Sidebar provider tabs.** New tab strip in the sidebar header filters discovered sessions by provider (All / Claude / ChatGPT). Tab state persists in localStorage; switching preserves scroll position; badges show per-provider session counts and update live via SSE.
+- **Per-provider visual identity.** Each session item, project accordion, and terminal pane carries a `data-provider` attribute. CSS tokens `--provider-claude-accent` (mauve), `--provider-codex-accent` (green), `--provider-gemini-accent` (blue, reserved) cascade through all 13 themes automatically via the existing Catppuccin palette.
+- **Settings → Providers section.** One tile per registered provider with toggle switch, accent swatch, and CLI availability check. Disabling a provider with running PTYs shows a confirmation modal warning that sessions will continue but cannot be restarted.
+- **Per-provider PTY behaviors.** Idle detection, Shift+Enter key bindings, and bracketed paste are all dispatched per-pane based on the active session's provider. No cross-contamination between Claude and Codex panes.
+- **API additions (additive only, no breaking changes):**
+  - `GET /api/providers` — returns `[{id, displayName, accentToken, enabled, available, supportsCost, cliBinary}]`
+  - `PUT /api/providers/:id/enabled` — toggles a provider; calls `provider.init()` or `provider.dispose()` with 5s timeouts
+  - `GET /api/discover` — now returns `{projects: {claude: [...], codex: [...]}}` keyed by provider id; `?legacy=1` retains v1.1 array shape for one release
+  - `GET /api/search` — `Promise.allSettled` dispatcher across enabled providers; each result carries `provider` field; response includes `partial: true` + `timedOutProviders: [...]` on timeout
+  - All `GET /api/sessions` and `GET /api/workspaces/:id` records now carry a `provider` field (defaults to `'claude'` for backward compat)
+- **State migration v1 → v2.** Schema bump with layered defense: explicit `migrateStateV1toV2()` + read-side defensive `provider: 'claude'` default. `_migrateBackupFiles()` runs unconditionally on init. Idempotent on re-launch; refuses to start with clear error on corrupt fixture.
+- **Cost tracking discipline.** `Provider.supportsCost()` is mandatory in the interface. Codex sessions show `—` with "Cost not tracked for this provider" tooltip — never $0.00. Aggregate cost totals exclude unsupported providers and disclose "(Claude only)" on aggregates. Real cost tracking for non-Claude providers will follow in v1.3.
+- **Grep gate (CI).** `test/grep-gate.test.js` enforces zero `'claude'` or `'codex'` string literals outside `src/providers/`. Legitimate exceptions carry `// gsd:provider-literal-allowed` markers. Prevents the abstraction from rotting as future providers are added.
+- **Drag-drop preserves provider.** Dragging a session across workspaces preserves its provider tag in the receiving `/api/sessions` request.
+
+### Changed
+
+- **Internal refactor.** Existing Claude code (~600 LOC) relocated from `src/web/server.js` into `src/providers/claude/{index,discover,parse,path-decode,spawn,search}.js`. No user-facing behavior change.
+- **pty-manager pass-through mode.** Provider returns a `SpawnDescriptor`; pty-manager owns `node-pty.spawn`. Non-default-command spawns (scheduler/td/templates) bypass the provider lookup entirely.
+- **Search per-provider.** Each provider now implements `search({query, limit, timeBudgetMs})`. The server endpoint dispatches via `Promise.allSettled`. Claude-only search latency unchanged.
+
+### Fixed
+
+- Provider-tagged sessions in mixed-workspace scenarios now correctly route artifact reads through `getProviderForSession(session)`, eliminating the implicit "always Claude" assumption that prevented mixing providers in one workspace.
+
+### Note for users
+
+- **This is an alpha.** Install with `npm i myrlin-workbook@alpha`. The `latest` tag still points at v0.9.36 (Claude-only stable). Feedback welcome via GitHub issues.
+- **Codex CLI required for ChatGPT support.** Install `@openai/codex` separately. Myrlin only discovers and runs the CLI; it does not bundle it.
+- **State auto-migrates on first launch.** No user action required. Backup files are migrated alongside the live file.
+
+### Note for contributors
+
+- New top-level `src/providers/` directory with one subdirectory per provider. To add a new provider, copy `src/providers/codex/` as a template, implement the 13-method `Provider` interface (see `docs/PROVIDER-INTERFACE.md`), and register in `src/providers/index.js`.
+- Test count: 260+ across 24 standalone files (up from 109 in v0.9.36). New phase-specific tests live under `test/<feature>.test.js` and are wired via `test/run.js`.
+
 ## [0.9.36] - 2026-05-10
 
 ### Changed

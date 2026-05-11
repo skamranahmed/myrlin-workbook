@@ -1,7 +1,7 @@
 {
   "name": "myrlin-workbook",
-  "version": "0.9.36",
-  "description": "Browser-based project manager for Claude Code sessions - session discovery, multi-terminal, cost tracking, docs, and kanban board",
+  "version": "1.2.0-alpha.0",
+  "description": "Browser-based project manager for AI coding assistants (Claude Code, ChatGPT Codex). Multi-provider session discovery, search, live terminals, docs, kanban, themes.",
   "main": "src/index.js",
   "bin": {
     "myrlin-workbook": "./src/gui.js",
@@ -33,6 +33,11 @@
   },
   "keywords": [
     "claude",
+    "claude-code",
+    "codex",
+    "chatgpt",
+    "openai",
+    "multi-provider",
     "workspace",
     "manager",
     "terminal",

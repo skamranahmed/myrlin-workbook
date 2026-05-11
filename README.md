@@ -10,7 +10,12 @@
 </p>
 
 <p align="center">
-Open-source workspace manager for Claude Code - multi-pane embedded terminals, kanban task board with PR automation, cost tracking, conflict detection, per-project docs, session templates, model orchestration, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session you've ever run, organizes them into projects with focused work contexts. Runs in your browser, everything stays local.
+Open-source workspace manager for AI coding CLIs. <b>Now multi-provider</b> (v1.2 alpha): Claude Code <i>and</i> ChatGPT Codex through one unified interface, with Gemini next. Multi-pane embedded terminals, cross-provider search, kanban with PR automation, cost tracking, conflict detection, per-project docs, session templates, 13 themes, <a href="#full-feature-list">and more</a>. Discovers every session across every provider, organizes them into projects. Runs in your browser, everything stays local.
+</p>
+
+<p align="center">
+  <b>v1.2 alpha:</b> <code>npm i myrlin-workbook@alpha</code> — multi-provider, off by default for existing Claude users.<br>
+  <b>v0.9 stable:</b> <code>npm i myrlin-workbook</code> — Claude-only, unchanged.
 </p>
 
 <p align="center">
