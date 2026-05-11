@@ -1914,6 +1914,13 @@ class CWMApp {
     this.showApp();
     this.initDragAndDrop();
     this.initTerminalResize();
+    // Plan 19-02 (PTY-04, PTY-05): build window.CWMProviderSpecs BEFORE
+    // restoring terminal panes. TerminalPane.mount() reads its provider
+    // spec at mount time; if the spec map is missing, idle dispatch and
+    // Shift+Enter fall back to the defensive Claude defaults baked into
+    // terminal.js. Fetching before initTerminalGroups means real specs are
+    // available for both Claude and Codex panes on first paint.
+    await this.fetchProviderSpecs();
     // Terminal group restore spawns PTY sessions and can be slow.
     // Run it in the background so login resolves immediately.
     this.initTerminalGroups().catch(e => console.error('Terminal groups init:', e));
@@ -9910,6 +9917,78 @@ class CWMApp {
       // transient fetch error.
     }
     this.renderProviderTabs();
+  }
+
+  /**
+   * Plan 19-02 (PTY-04, PTY-05): build the runtime per-provider spec map
+   * that terminal.js consults at pane mount time.
+   *
+   * Merges server-side metadata (id, displayName, cliBinary, accentToken)
+   * from GET /api/providers with the frontend-only runtime data
+   * (idleRegexes, shiftEnter) defined in provider-specs.js. The result is
+   * exposed as window.CWMProviderSpecs so the vanilla TerminalPane class
+   * can read it without an import dance.
+   *
+   * Defensive fallbacks (in priority order):
+   *   1. /api/providers reachable: build full map from server + locals.
+   *   2. Server unreachable: synthesize a Claude-only map from locals so
+   *      the existing Claude flow keeps working.
+   *   3. Local specs missing entirely: leave CWMProviderSpecs undefined;
+   *      terminal.js falls back to its baked-in Claude regex/keybindings.
+   *
+   * Called from _initializeApp BEFORE initTerminalGroups so restored panes
+   * have specs available when they mount.
+   *
+   * @returns {Promise<void>}
+   */
+  async fetchProviderSpecs() {
+    const locals = (typeof window !== 'undefined' && window.CWMProviderSpecLocals) || null;
+    if (!locals) {
+      // provider-specs.js failed to load; leave CWMProviderSpecs undefined
+      // so terminal.js uses its defensive baked-in defaults. Log once for
+      // visibility; do not block app init.
+      console.warn('[provider-specs] CWMProviderSpecLocals missing; using terminal.js defaults');
+      return;
+    }
+    try {
+      const data = await this.api('GET', '/api/providers');
+      const providers = Array.isArray(data) ? data : (data.providers || []);
+      const specs = {};
+      for (const p of providers) {
+        if (!p || !p.id) continue;
+        const local = locals[p.id] || {};
+        specs[p.id] = {
+          id: p.id,
+          displayName: p.displayName,
+          accentToken: p.accentToken,
+          cliBinary: p.cliBinary,
+          // Frontend runtime data carried over from provider-specs.js.
+          // Missing locals -> spec has no idleRegexes/shiftEnter; the
+          // helpers in terminal.js fall back to Claude-shaped defaults.
+          idleRegexes: local.idleRegexes,
+          shiftEnter: local.shiftEnter,
+        };
+      }
+      window.CWMProviderSpecs = specs;
+    } catch (err) {
+      // /api/providers unreachable (server stale, auth race). Synthesize a
+      // Claude-only map from the frontend locals so existing Claude flows
+      // keep working. Codex panes restored from layout in this state will
+      // gracefully default to Claude regex / shiftEnter, which is the same
+      // behavior we had before Plan 19-02.
+      console.warn('[provider-specs] /api/providers fetch failed; falling back to Claude-only locals', err);
+      const claudeLocal = locals.claude || {};
+      window.CWMProviderSpecs = {
+        // gsd:provider-literal-allowed (Phase 19 fallback when server is unreachable)
+        claude: {
+          id: 'claude', // gsd:provider-literal-allowed
+          displayName: 'Claude Code',
+          cliBinary: 'claude', // gsd:provider-literal-allowed
+          idleRegexes: claudeLocal.idleRegexes,
+          shiftEnter: claudeLocal.shiftEnter,
+        },
+      };
+    }
   }
 
   /**

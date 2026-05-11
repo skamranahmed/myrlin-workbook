@@ -1761,6 +1761,13 @@
   <script src="vendor/xterm/xterm.min.js"></script>
   <script src="vendor/xterm-addon-fit/xterm-addon-fit.min.js"></script>
   <script src="vendor/xterm-addon-web-links/xterm-addon-web-links.min.js"></script>
+  <!-- Plan 19-02 (PTY-04, PTY-05): frontend mirror of per-provider runtime
+       behavior. MUST load before terminal.js so window.CWMProviderSpecLocals
+       is available when TerminalPane class is parsed and instances mount.
+       app.js fetchProviderSpecs() (called from _initializeApp) merges the
+       server-side /api/providers metadata onto these locals to build the
+       runtime map window.CWMProviderSpecs. -->
+  <script src="provider-specs.js"></script>
   <script src="terminal.js"></script>
   <script src="instance-colors.js"></script>
   <script src="app.js"></script>
