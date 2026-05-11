@@ -477,6 +477,53 @@ check('Test 7 (PTY-02): spawnOpts.provider=codex routes through codex provider',
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// Test 8 (Plan 19-01 PTY-08): CODEX_HOME propagates only to its spawn
+// ──────────────────────────────────────────────────────────────────────
+// Per-spawn env scoping safety net at the pty-passthrough layer (the
+// dedicated env-scoping suite lives in test/pty-codex-spawn.test.js). This
+// extra assertion in pty-passthrough makes sure the descriptor.env merge
+// behavior still routes CODEX_HOME correctly through the new sentinel.
+check('Test 8 (PTY-08): Codex descriptor.env.CODEX_HOME propagates only on Codex spawn', () => {
+  const { ptyMgr, store } = buildFixture({ includeClaude: true });
+  const registry = require('../src/providers');
+  const { spawnCommand: codexSpawnCommand } = require('../src/providers/codex/spawn');
+  const codexProvider = makeFakeProvider('codex', { /* gsd:provider-literal-allowed */
+    cliBinary: 'codex', /* gsd:provider-literal-allowed */
+    spawnCommand: codexSpawnCommand,
+  });
+  registry.register(codexProvider);
+  registry.setEnabled('codex', true); /* gsd:provider-literal-allowed */
+
+  const originalCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = os.tmpdir();
+
+  let captured = null;
+  const spy = (shell, shellArgs, spawnOpts) => {
+    captured = spawnOpts;
+    return makeStubPty();
+  };
+
+  try {
+    const sid = makeSessionWithProvider(store, 'codex', { /* gsd:provider-literal-allowed */
+      command: 'codex', /* gsd:provider-literal-allowed */
+    });
+    ptyMgr.spawnSession(sid, {
+      command: 'codex', /* gsd:provider-literal-allowed */
+      resumeSessionId: 'pty-test-codex-uuid-8',
+      _ptySpawnForTesting: spy,
+    });
+  } finally {
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  }
+
+  assert.ok(captured, 'pty.spawn must have been invoked');
+  assert.strictEqual(captured.env.CODEX_HOME, os.tmpdir(),
+    'Codex spawn env must carry CODEX_HOME captured from process.env at spawn time, got: ' +
+    captured.env.CODEX_HOME);
+});
+
+// ──────────────────────────────────────────────────────────────────────
 console.log('  ' + '-'.repeat(42));
 console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');
 console.log('  ' + '-'.repeat(42) + '\n');
