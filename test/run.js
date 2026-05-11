@@ -844,6 +844,7 @@ const standaloneTests = [
   'provider-label-pill.test.js',     // Plan 22-02: pane provider pill + sidebar stripes
   'workspace-group-ux.test.js',      // Plan 22-05: workspace group color stripe + chip
   'codex-status-strip.test.js',      // Plan 22-01: Codex bottom status strip + chip click handlers
+  'codex-discover-watcher.test.js',  // Plan 22-03: fs.watch debounce + 5-min fallback poll
 ];
 
 let standaloneFailed = 0;

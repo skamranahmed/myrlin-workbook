@@ -108,6 +108,14 @@ let _storeRef = null;
 /** @type {boolean} guards initRegistry idempotency */
 let _initialized = false;
 
+/**
+ * @type {((providerId: string) => void) | null}
+ * Plan 22-03 callback the server passes through initRegistry. Fired by
+ * a provider's watcher when on-disk state changes; the server uses it
+ * to invalidate the discover cache + broadcast SSE.
+ */
+let _onProviderChange = null;
+
 // Validation tables. Lifted to module scope so the validator does not allocate
 // per-call; also makes the contract trivially greppable.
 const REQUIRED_FIELDS = ['id', 'displayName', 'accentToken', 'cliBinary'];
@@ -253,11 +261,17 @@ function setEnabled(id, on) {
  * @returns {Promise<void>} Resolves once every enabled provider's init() settles.
  * @sideeffect Captures _storeRef, mutates _enabled, may invoke provider.init().
  */
-async function initRegistry(store) {
+async function initRegistry(store, opts) {
   if (_initialized && _storeRef === store) {
     return; // idempotent: same store ref, no-op
   }
   _storeRef = store;
+  // Plan 22-03: optional onProviderChange callback that providers can
+  // wire to (e.g., codex fs.watch -> SSE rebroadcast). Stored so we can
+  // pass it through to each provider.init() below.
+  _onProviderChange = (opts && typeof opts.onProviderChange === 'function')
+    ? opts.onProviderChange
+    : null;
 
   // Plan 14-03 (ABST-03): self-register the Claude provider exactly once.
   // Tests that pre-register a fake claude with the same id are honored
@@ -292,9 +306,15 @@ async function initRegistry(store) {
 
   // Initialize each enabled provider. We iterate listEnabled() rather than
   // _enabled directly so unregistered ids in the settings block are skipped.
+  // Plan 22-03: pass an `onChange` callback that routes through the
+  // registry's _onProviderChange and includes the provider id, so the
+  // server-side SSE broadcaster knows which provider tab to refresh.
   for (const p of listEnabled()) {
     try {
-      await p.init();
+      const opts = _onProviderChange
+        ? { onChange: () => _onProviderChange(p.id) }
+        : undefined;
+      await p.init(opts);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[providers] init failed for ' + p.id + ': ' + (err && err.message ? err.message : err));

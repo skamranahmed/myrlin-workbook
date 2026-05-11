@@ -5628,6 +5628,7 @@ const GLOBAL_EVENT_TYPES = new Set([
   'group:deleted',
   'workspaces:reordered',
   'workspace:created',
+  'discover:refreshed', // Plan 22-03: fs.watch -> broadcast to all SSE clients
 ]);
 
 /**
@@ -8202,12 +8203,27 @@ function getPtyManager() {
 
 // ─── Exports ───────────────────────────────────────────────
 
+/**
+ * Plan 22-03: invoked by the provider registry when a provider's
+ * filesystem watcher (or fallback poll) detects a change. Invalidates
+ * the cached discover entry for that provider and broadcasts
+ * 'discover:refreshed' so connected SSE clients re-fetch /api/discover.
+ *
+ * @param {string} providerId
+ */
+function onProviderDiscoverChange(providerId) {
+  if (!providerId || typeof providerId !== 'string') return;
+  try { _discoverCache.delete(providerId); } catch (_) {}
+  try { broadcastSSE('discover:refreshed', { provider: providerId }); } catch (_) {}
+}
+
 module.exports = {
   app,
   startServer,
   getPtyManager,
   structuredError,
   extractCustomTitle,
+  onProviderDiscoverChange,
   // Plan 15-01 (DISC-03): exposed for unit tests in
   // test/find-jsonl-refactor.test.js. Production callers do not consume
   // this export; the helper is invoked inline by route handlers above.

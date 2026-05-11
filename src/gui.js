@@ -47,7 +47,24 @@ let server = null;
 // in Phase 14; Phase 18 will revisit when sidebar tabs land and the TUI
 // has more than one provider to display.
 const providerRegistry = require('./providers');
-providerRegistry.initRegistry(store).then(() => {
+// Plan 22-03: register a callback that fires whenever any provider's
+// filesystem watcher detects a change. The server module exposes
+// onProviderDiscoverChange, which clears the relevant discover cache
+// and broadcasts an SSE event so connected clients re-fetch
+// /api/discover. We grab the function lazily because the server module
+// is required below (after registry init kicks off).
+const onProviderChange = (providerId) => {
+  try {
+    const server = require('./web/server');
+    if (server && typeof server.onProviderDiscoverChange === 'function') {
+      server.onProviderDiscoverChange(providerId);
+    }
+  } catch (err) {
+    // Non-fatal: discover stays usable on next manual refresh.
+    console.warn('[providers] onProviderChange dispatch failed: ' + err.message);
+  }
+};
+providerRegistry.initRegistry(store, { onProviderChange }).then(() => {
   bootGuiAfterRegistry();
 }).catch((err) => {
   // Failing to init providers is fatal because Claude must always be

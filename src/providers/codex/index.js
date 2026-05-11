@@ -32,6 +32,9 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const discover = require('./discover');
 const { parseTranscript } = require('./parse');
 const { spawnCommand } = require('./spawn');
@@ -108,22 +111,111 @@ function supportsCost() {
 // Lifecycle hooks (no-ops in Phase 17)
 // ---------------------------------------------------------------------------
 
-/**
- * Provider lifecycle hook. Idempotent. Reserved for warming caches or
- * opening filesystem watchers; no-op in Phase 17 because discovery is
- * synchronous-on-demand and no Codex watcher is wired yet.
- *
- * @returns {Promise<void>}
- */
-async function init() { /* no-op */ }
+// ---------------------------------------------------------------------------
+// Filesystem watcher (Plan 22-03)
+// ---------------------------------------------------------------------------
+
+let _watcher = null;
+let _pollTimer = null;
+let _debounceTimer = null;
+let _onChange = null;
+const DEBOUNCE_MS = 500;
+const POLL_MS = 5 * 60 * 1000; // 5 minutes
+const ROLLOUT_RE = /rollout-[a-f0-9-]+\.jsonl$/i;
 
 /**
- * Provider lifecycle hook. Mirrors init: nothing to tear down in Phase 17.
- * Future watcher additions go here.
+ * Resolve the Codex sessions directory from process.env at call time.
+ * Mirrors the resolution discover.js does so the watcher and discover
+ * always agree on what to watch / scan.
+ *
+ * @returns {string}
+ */
+function _sessionsDir() {
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  return path.join(codexHome, 'sessions');
+}
+
+/**
+ * Fire the registered onChange callback inside a try/catch so a thrower
+ * does not crash the watcher.
+ */
+function _fire() {
+  if (typeof _onChange !== 'function') return;
+  try { _onChange(); }
+  catch (err) { console.warn('[codex/watch] onChange threw: ' + err.message); }
+}
+
+/**
+ * Start the rollout-file watcher + the 5-minute fallback poll. Idempotent:
+ * a second call replaces the registered onChange but does not double-start
+ * the watch handle. Exposed via init(onChange) for normal use and via
+ * _startWatcherForTesting for unit tests.
+ *
+ * fs.watch on Windows is well-known to miss events on some filesystem
+ * operations (atomic renames, network drives, paused notify queues). The
+ * fallback poll catches anything the watch misses. Together they give
+ * a "new Codex session shows up in the sidebar within ~1s" UX.
+ *
+ * @param {() => void} onChange - Callback fired after debounce / on poll.
+ */
+function _startWatcher(onChange) {
+  _onChange = onChange;
+  const sessionsDir = _sessionsDir();
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_watcher) { try { _watcher.close(); } catch (_) {} _watcher = null; }
+  if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null; }
+  if (!fs.existsSync(sessionsDir)) {
+    console.warn('[codex/watch] sessions dir missing: ' + sessionsDir + ' (poll fallback active)');
+  } else {
+    try {
+      _watcher = fs.watch(sessionsDir, { recursive: true }, (_event, filename) => {
+        if (!filename) return;
+        if (!ROLLOUT_RE.test(String(filename))) return;
+        if (_debounceTimer) clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_fire, DEBOUNCE_MS);
+      });
+      _watcher.on('error', (err) => {
+        console.warn('[codex/watch] watcher error: ' + err.message + ' (poll fallback active)');
+      });
+    } catch (err) {
+      console.warn('[codex/watch] could not start watcher: ' + err.message);
+    }
+  }
+  _pollTimer = setInterval(_fire, POLL_MS);
+}
+
+/**
+ * Stop the watcher + fallback poll. Idempotent.
+ */
+function _stopWatcher() {
+  if (_debounceTimer) { clearTimeout(_debounceTimer); _debounceTimer = null; }
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  if (_watcher) { try { _watcher.close(); } catch (_) {} _watcher = null; }
+  _onChange = null;
+}
+
+/**
+ * Provider lifecycle hook. Plan 22-03: optionally starts the watcher when
+ * the registry passes an onChange callback. Plan 14 callers that pass no
+ * arg still get the no-op behavior.
+ *
+ * @param {{onChange?: () => void}} [opts]
+ * @returns {Promise<void>}
+ */
+async function init(opts) {
+  if (opts && typeof opts.onChange === 'function') {
+    _startWatcher(opts.onChange);
+  }
+}
+
+/**
+ * Provider lifecycle hook. Closes the watcher + fallback poll if active.
  *
  * @returns {Promise<void>}
  */
-async function dispose() { /* no-op */ }
+async function dispose() {
+  _stopWatcher();
+}
 
 // ---------------------------------------------------------------------------
 // Provider object (the public contract)
@@ -146,4 +238,8 @@ module.exports = {
   supportsCost: supportsCost,
   isIdleSignal: isIdleSignal,
   getKeyBindings: getKeyBindings,
+  // Test-only: lets the watcher test set its own onChange without
+  // going through the registry. Production code must use init().
+  _startWatcherForTesting: _startWatcher,
+  _stopWatcherForTesting: _stopWatcher,
 };

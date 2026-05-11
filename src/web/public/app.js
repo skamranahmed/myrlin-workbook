@@ -9023,6 +9023,17 @@ class CWMApp {
           this.loadDocs();
         }
         break;
+      case 'discover:refreshed':
+        // Plan 22-03: a provider's filesystem watcher (or fallback poll)
+        // detected a change. Re-fetch /api/discover so the sidebar
+        // Discovered Projects panel shows new Codex Desktop / CLI
+        // sessions without the user clicking Refresh. The throttled
+        // variant avoids burst rebuilds when multiple events fire in
+        // rapid succession.
+        if (typeof this.loadProjects === 'function') {
+          this.loadProjects();
+        }
+        break;
       case 'tunnel:opened':
       case 'tunnel:closed':
         if (this.state.viewMode === 'resources') this.fetchResources();
