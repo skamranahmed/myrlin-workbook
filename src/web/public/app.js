@@ -1505,6 +1505,18 @@ class CWMApp {
         return;
       }
 
+      // Plan 22-05: intercept × clicks on the group chip BEFORE the
+      // workspace-item activation. Otherwise clicking × would also fire
+      // the row click and toggle the accordion.
+      const removeFromGroupBtn = e.target.closest('[data-action="remove-from-group"]');
+      if (removeFromGroupBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        const wsId = removeFromGroupBtn.dataset.workspaceId;
+        if (wsId) this.removeWorkspaceFromGroup(wsId);
+        return;
+      }
+
       const workspaceItem = e.target.closest('.workspace-item');
       if (workspaceItem) {
         const wsId = workspaceItem.dataset.id;
@@ -9048,6 +9060,24 @@ class CWMApp {
     const renderWorkspaceItem = (ws) => {
       const isActive = this.state.activeWorkspace && this.state.activeWorkspace.id === ws.id;
       const color = colorMap[ws.color] || colorMap.mauve;
+      // Plan 22-05: detect group membership so the workspace row shows a
+      // left-edge stripe in the group's color and a chip with the group
+      // name + × remove affordance. group.color can be a token name
+      // ('blue', 'mauve', ...) that maps through colorMap, or a raw color.
+      const groupForWs = Object.values(this.state.workspaceGroups || {})
+        .find(g => Array.isArray(g.workspaceIds) && g.workspaceIds.includes(ws.id)) || null;
+      const groupColor = groupForWs
+        ? (colorMap[groupForWs.color] || groupForWs.color || colorMap.blue)
+        : '';
+      const groupAttrs = groupForWs
+        ? ` data-group-id="${this.escapeHtml(groupForWs.id)}" data-group-color="${this.escapeHtml(groupColor)}"`
+        : '';
+      const groupChipHtml = groupForWs
+        ? `<span class="ws-group-chip" title="In group: ${this.escapeHtml(groupForWs.name)}">
+             <span class="ws-group-chip-name">${this.escapeHtml(groupForWs.name)}</span>
+             <button class="ws-group-chip-remove" data-action="remove-from-group" data-workspace-id="${this.escapeHtml(ws.id)}" title="Remove from group" aria-label="Remove from group">&times;</button>
+           </span>`
+        : '';
       const rawWsSessions = (this.state.allSessions || this.state.sessions).filter(s => s.workspaceId === ws.id);
       const allWsSessions = rawWsSessions.filter(matchesActiveProvider);
       const wsSessions = allWsSessions.filter(s => this.state.showHidden || !this.state.hiddenSessions.has(s.id));
@@ -9200,7 +9230,7 @@ class CWMApp {
 
       return `
         <div class="workspace-accordion${isWsHidden ? ' hidden-item' : ''}" data-id="${ws.id}">
-          <div class="workspace-item${isActive ? ' active' : ''}" data-id="${ws.id}" draggable="true" style="--ws-color: ${color}">
+          <div class="workspace-item${isActive ? ' active' : ''}" data-id="${ws.id}"${groupAttrs} draggable="true" style="--ws-color: ${color};${groupColor ? ' --ws-group-color: ' + groupColor + ';' : ''}">
             <span class="ws-chevron${showBody ? ' open' : ''}">&#9654;</span>
             ${(() => {
               const iconSvg = ws.icon
@@ -9215,6 +9245,7 @@ class CWMApp {
             <div class="workspace-info">
               <div class="workspace-name">${this.escapeHtml(ws.name)}<span class="ws-count-badge">${sessionCount}</span></div>
             </div>
+            ${groupChipHtml}
             <div class="workspace-actions">
               ${this.state.settings.enableWorktreeTasks ? `<button class="btn btn-ghost btn-icon btn-sm ws-new-task-btn" data-ws-id="${ws.id}" title="New Task">+</button>` : ''}
               <button class="btn btn-ghost btn-icon btn-sm ws-more-btn" data-id="${ws.id}" title="More actions">&#8230;</button>

@@ -842,6 +842,7 @@ const standaloneTests = [
   'project-session-resume-provider.test.js', // alpha.5 bug fix: discovered-session right-click routes by provider
   'adhoc-pane-menu.test.js',         // Plan 22-04: ad-hoc pane right-click menu reduced fallback
   'provider-label-pill.test.js',     // Plan 22-02: pane provider pill + sidebar stripes
+  'workspace-group-ux.test.js',      // Plan 22-05: workspace group color stripe + chip
 ];
 
 let standaloneFailed = 0;
