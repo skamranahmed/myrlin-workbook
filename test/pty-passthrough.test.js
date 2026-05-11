@@ -419,6 +419,64 @@ check('Test 6 (PTY-03 safety net): command:"td" bypasses provider, fullCommand s
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// Test 7 (Plan 19-01 PTY-02): WS-plumbed provider hint routes through Codex
+// ──────────────────────────────────────────────────────────────────────
+// Simulates the WS-server -> pty-manager handoff: the client sent
+// ?provider=codex&command=codex on the WS URL; pty-server parsed it,
+// populated spawnOpts.provider and spawnOpts.command, then called
+// ptyManager.spawnSession. The registry-driven sentinel must route the
+// spawn through codexProvider.spawnCommand (descriptor.cmd === 'codex',
+// args === ['resume', <id>]), NOT the inline descriptor builder.
+check('Test 7 (PTY-02): spawnOpts.provider=codex routes through codex provider', () => {
+  const { ptyMgr, store } = buildFixture({ includeClaude: true });
+  const registry = require('../src/providers');
+  // Register a real-shaped codex provider; the Codex spawn module is the
+  // production code that builds the resume descriptor.
+  const { spawnCommand: codexSpawnCommand } = require('../src/providers/codex/spawn');
+  const codexProvider = makeFakeProvider('codex', { /* gsd:provider-literal-allowed */
+    cliBinary: 'codex', /* gsd:provider-literal-allowed */
+    spawnCommand: codexSpawnCommand,
+  });
+  registry.register(codexProvider);
+  registry.setEnabled('codex', true); /* gsd:provider-literal-allowed */
+
+  // Build a session WITHOUT a store-tagged provider; the WS-query hint
+  // should be the deciding signal. This mirrors the ad-hoc spawn path
+  // where discovery has not yet populated the store row.
+  const sessionId = makeSessionWithProvider(store, 'claude', { command: 'claude' });
+
+  let captured = null;
+  const spy = (shell, shellArgs, spawnOpts) => {
+    captured = { shell, shellArgs, spawnOpts };
+    return makeStubPty();
+  };
+
+  // Mirror the post-Plan-19-01 WS-server call: command + provider both set.
+  // The store record is tagged claude (Pitfall 19-B), but the test fixture
+  // session has no resumeSessionId, so codex spawnCommand produces an
+  // arglist of [] (fresh session). The store record DOES tag claude here,
+  // so for this test we want the WS hint to fail-safe: store wins.
+  // Re-create with explicit codex tag:
+  store.updateSession(sessionId, { provider: 'codex' }); /* gsd:provider-literal-allowed */
+
+  ptyMgr.spawnSession(sessionId, {
+    command: 'codex', /* gsd:provider-literal-allowed */
+    provider: 'codex', /* gsd:provider-literal-allowed */
+    resumeSessionId: 'codex-uuid-abc-123',
+    _ptySpawnForTesting: spy,
+  });
+
+  assert.ok(captured, 'pty.spawn must have been invoked');
+  const fullCommand = captured.shellArgs[captured.shellArgs.length - 1];
+  assert.ok(fullCommand.startsWith('codex'),
+    'fullCommand must START with codex (provider path), got: ' + fullCommand);
+  assert.ok(fullCommand.includes('resume'),
+    'fullCommand must contain the resume subcommand, got: ' + fullCommand);
+  assert.ok(fullCommand.includes('codex-uuid-abc-123'),
+    'fullCommand must contain the resume session id, got: ' + fullCommand);
+});
+
+// ──────────────────────────────────────────────────────────────────────
 console.log('  ' + '-'.repeat(42));
 console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');
 console.log('  ' + '-'.repeat(42) + '\n');

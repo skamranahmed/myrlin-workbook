@@ -21,6 +21,13 @@ const isSafeCommand = (v) => v && typeof v === 'string' && v.length <= 200 && !S
 const isSafeModel = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9._:-]+$/.test(v) && v.length <= 100;
 const isSafeSessionId = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9_-]+$/.test(v) && v.length <= 100;
 const isSafeDir = (v) => v && typeof v === 'string' && v.length <= 500 && !/[;&|`$(){}[\]<>!#*?\n\r]/.test(v);
+// Provider id validator (Plan 19-01 PTY-02 plumbing): slug-style ids only,
+// 32-char cap. Same defense-in-depth as sessionId. Rejects shell-special
+// bytes, spaces, quotes, and unusual unicode that could escape downstream
+// validation. The id is consumed only by registry.getProvider() and the
+// pane data-provider attribute on the frontend; even so, the strict regex
+// keeps it shell-safe in case future code interpolates it into a process arg.
+const isSafeProviderId = (v) => v && typeof v === 'string' && /^[a-zA-Z0-9_-]+$/.test(v) && v.length <= 32;
 // Shell names validated against a strict allowlist (no arbitrary binary paths)
 const ALLOWED_SHELL_NAMES = ['cmd.exe', 'powershell.exe', 'pwsh.exe', 'git-bash', 'bash', 'zsh', 'fish', 'sh', 'dash', 'ash'];
 const isSafeShell = (v) => v && typeof v === 'string' && ALLOWED_SHELL_NAMES.includes(v);
@@ -88,6 +95,14 @@ function attachPtyWebSocket(httpServer) {
       if (query.model && isSafeModel(query.model)) spawnOpts.model = query.model;
       if (query.shell && isSafeShell(query.shell)) spawnOpts.shell = query.shell;
       if (query.newSession === 'true') spawnOpts.newSession = true;
+      // Plan 19-01 PTY-02: per-spawn provider hint from the WS URL. This is
+      // a fallback signal used only when the session has no store record yet
+      // (the store record is authoritative when present). The hint flows
+      // through attachClient -> spawnSession -> the registry-driven sentinel
+      // so a frontend that knows it is launching a Codex session can route
+      // the spawn through codexProvider.spawnCommand without depending on
+      // discovery having populated the store first.
+      if (query.provider && isSafeProviderId(query.provider)) spawnOpts.provider = query.provider;
 
       // Attach the client to the PTY session
       ptyManager.attachClient(sessionId, ws, spawnOpts);

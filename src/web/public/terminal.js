@@ -542,6 +542,13 @@ class TerminalPane {
     if (this.spawnOpts.model) wsUrl += '&model=' + encodeURIComponent(this.spawnOpts.model);
     if (this.spawnOpts.shell) wsUrl += '&shell=' + encodeURIComponent(this.spawnOpts.shell);
     if (this.spawnOpts.newSession) wsUrl += '&newSession=true';
+    // Plan 19-01 PTY-02: forward the spawn-time provider hint so the
+    // backend's registry-driven sentinel can route to the correct provider
+    // even when the session has no store record yet. Backend validates via
+    // isSafeProviderId (a-zA-Z0-9_-, 32 char cap) in pty-server.js. When
+    // omitted, the backend falls back to the store-tagged provider or the
+    // v1.1 default.
+    if (this.spawnOpts.provider) wsUrl += '&provider=' + encodeURIComponent(this.spawnOpts.provider);
     this._log('Opening WebSocket: ' + wsUrl.substring(0, 80) + '...');
 
     // Add loading animation to the pane

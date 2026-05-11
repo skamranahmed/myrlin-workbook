@@ -10990,12 +10990,21 @@ class CWMApp {
     paneEl.hidden = false;
 
     // Tag the pane with its provider so CSS selectors (terminal-pane[data-provider="..."])
-    // can render the per-provider accent. The lookup is best-effort: live state first,
-    // then allSessions snapshot, then default for v1.1-shaped sessions lacking the field.
+    // can render the per-provider accent. Resolution order (Plan 19-01 PTY-07):
+    //   1. spawnOpts.provider (explicit caller signal; layout restore + drag-drop)
+    //   2. allSessions / live sessions lookup (best-effort by id)
+    //   3. default (v1.1 back-compat for sessions lacking the field)
+    // The explicit caller signal wins so a restored Codex pane stays tagged
+    // even when discovery is empty at restore time (e.g., Codex toggled off
+    // between save and restore). Without this, the layout would drift back
+    // to the default tag and the next attach would visually mis-render.
     const _sessForProvider = (this.state.allSessions || [])
       .concat(Object.values(this.state.sessions || {}))
       .find(_s => _s && _s.id === sessionId);
-    paneEl.dataset.provider = (_sessForProvider && _sessForProvider.provider) || 'claude'; /* gsd:provider-literal-allowed (Phase 18 default) */
+    const _explicitProvider = spawnOpts && spawnOpts.provider;
+    paneEl.dataset.provider = _explicitProvider
+      || (_sessForProvider && _sessForProvider.provider)
+      || 'claude'; /* gsd:provider-literal-allowed (Phase 18 default) */
 
     // Update pane state
     paneEl.classList.remove('terminal-pane-empty');
