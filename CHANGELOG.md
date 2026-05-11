@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.7] - 2026-05-11
+
+### Fixed
+
+- **Ad-hoc pane right-click menu was nearly empty.** `_buildSessionContextItems` bailed with `return null` when the upstream session id was not in the Myrlin store, erasing the entire shared block (Start/Stop, Model, Naming, Tags, Insights, etc.) from the right-click menu on Codex Desktop panes opened via "Open in Terminal" (Plan 22-04). New `_buildAdHocSessionContextItems` factory returns the universal subset that works without a store record: Naming (Rename Pane + Auto Title), Insights (Summarize + Copy ID + Copy Path), and "Add to <active workspace>" adoption.
+- **"Session doesn't exist" when starting Bypass on an adopted Codex session.** `POST /api/sessions` silently dropped the `provider` field from the request body, so adopted Codex sessions persisted as untagged → defaulted to Claude via the read-side normalizer → `Start (Bypass)` launched `claude --dangerously-skip-permissions` against a Codex UUID. Now the route validates and forwards `provider`. `launchSession` also got provider-aware: Claude uses `--dangerously-skip-permissions`, Codex uses `--dangerously-bypass-approvals-and-sandbox`.
+- **Settings search hid the Providers section when typing "provider".** The static settings registry has no entries containing the word; the renderer early-returned with "No matching settings" before the async `_renderProvidersSection` could run. Now the filter-empty path still kicks the async section.
+
+### Changed
+
+- **Stronger provider differentiation** (Plan 22-02). Pane tint 4% → 8%, top accent 3px → 4px, tint tokens 6% → 10%. New `.pane-provider-pill` in every pane header (green dot + "Codex" / mauve dot + "Claude"). Sidebar `.ws-session-item`, `.project-session-item`, and `.project-accordion` all carry a 3px provider stripe. Theme-safe via `--provider-{id}-accent`.
+- **Visible workspace group membership** (Plan 22-05). Each grouped workspace row shows a 4px left-edge stripe in the group's color and a `.ws-group-chip` with the group name; hovering the chip reveals a × button that calls `removeWorkspaceFromGroup`. Click handler intercepts the × before row activation.
+
+### Tests
+
+- Added `test/adhoc-pane-menu.test.js` (8), `test/provider-label-pill.test.js` (10), `test/workspace-group-ux.test.js` (9). Updated `test/css-tokens.test.js` to accept any tint percentage in [1..99] (the Pitfall 7 guard still enforces var()-only references).
+
+### Deferred to alpha.8
+
+- Codex pane bottom status strip with 6 clickable chips (Plan 22-01).
+- Auto-discovery via `fs.watch` + 5-min fallback poll (Plan 22-03).
+- Cloudflared tunnel + always-on workbook.myrlin.dev (brainstorm pending).
+
 ## [1.2.0-alpha.6] - 2026-05-11
 
 ### Fixed
