@@ -360,23 +360,34 @@ check('Test 5 (PTY-01): Claude descriptor uses --resume when resumeSessionId pro
 // ──────────────────────────────────────────────────────────────────────
 // Test 6: Non-default-command bypass — command:'td' bypasses provider lookup
 // ──────────────────────────────────────────────────────────────────────
+// Plan 19-01 PTY-02 refactor note: under the new sentinel
+// (useProvider = provider.cliBinary === command), the registry IS consulted
+// to fetch the candidate provider's cliBinary. The old "getProviderCallCount
+// MUST be 0" assertion overconstrained the implementation. The contract that
+// matters is unchanged: a command that does NOT match any provider's cliBinary
+// (e.g., 'td', scheduler/templates) MUST fall through to the inline
+// descriptor builder so descriptor.cmd === command. Test 6 now asserts the
+// outcome (descriptor.cmd, fullCommand prefix) without overconstraining the
+// internal lookup path. The registry IS consulted, but provider.spawnCommand
+// is NOT — that's the real bypass guarantee.
 check('Test 6 (PTY-03 safety net): command:"td" bypasses provider, fullCommand starts with td', () => {
   const { ptyMgr, store, registry } = buildFixture({ includeClaude: true });
 
-  // Spy on the registry to confirm it is NEVER consulted on the bypass path.
-  // Wrap getProvider in a spy.
-  const realGetProvider = registry.getProvider;
-  let getProviderCallCount = 0;
-  const trackedIds = [];
-  registry.getProvider = function(id) {
-    getProviderCallCount++;
-    trackedIds.push(id);
-    return realGetProvider.call(registry, id);
+  // Spy on claude provider's spawnCommand to confirm provider.spawnCommand
+  // is NEVER invoked on the bypass path. The registry lookup is allowed
+  // (the new sentinel needs cliBinary), but spawnCommand must not fire.
+  const claude = registry.getProvider('claude');
+  const realSpawnCommand = claude.spawnCommand;
+  let spawnCommandCallCount = 0;
+  claude.spawnCommand = function(init) {
+    spawnCommandCallCount++;
+    return realSpawnCommand.call(claude, init);
   };
 
-  // Create a session that does NOT have a claude tag — but that doesn't matter,
-  // because the bypass branch is BEFORE the provider lookup. The deciding
-  // factor is opts.command !== 'claude'.
+  // Create a session tagged with claude — but the deciding factor for
+  // bypass is `command !== provider.cliBinary`. Since the requested
+  // command is 'td' and claude.cliBinary is 'claude', the sentinel returns
+  // useProvider=false and the inline descriptor builder fires.
   const sessionId = makeSessionWithProvider(store, 'claude', { command: 'td' });
 
   let captured = null;
@@ -390,11 +401,10 @@ check('Test 6 (PTY-03 safety net): command:"td" bypasses provider, fullCommand s
     _ptySpawnForTesting: spy,
   });
 
-  // Restore the real getProvider before any subsequent test runs.
-  registry.getProvider = realGetProvider;
+  // Restore the real spawnCommand before any subsequent test runs.
+  claude.spawnCommand = realSpawnCommand;
 
   assert.ok(captured, 'pty.spawn must have been invoked');
-  const joined = captured.shellArgs.join(' ');
   // The fullCommand should START with 'td' (it's the descriptor.cmd).
   // After shell-wrap, shellArgs is something like ['/c', 'td'] (cmd) or
   // ['-l', '-c', 'td'] (bash). Last token is the joined fullCommand.
@@ -403,9 +413,9 @@ check('Test 6 (PTY-03 safety net): command:"td" bypasses provider, fullCommand s
     'fullCommand must START with td (not claude), got: ' + fullCommand);
   assert.ok(!fullCommand.startsWith('claude'),
     'fullCommand must NOT start with claude on bypass path, got: ' + fullCommand);
-  assert.strictEqual(getProviderCallCount, 0,
-    'registry.getProvider MUST NOT be called on the non-default-command bypass path. ' +
-    'Called ' + getProviderCallCount + ' times with: ' + JSON.stringify(trackedIds));
+  assert.strictEqual(spawnCommandCallCount, 0,
+    'claudeProvider.spawnCommand MUST NOT be called on the non-default-command bypass path. ' +
+    'Called ' + spawnCommandCallCount + ' times.');
 });
 
 // ──────────────────────────────────────────────────────────────────────

@@ -275,7 +275,7 @@ class PtySessionManager {
    *        providers. Plan 14-04 PTY-03 wiring.
    * @returns {PtySession} The PTY session object
    */
-  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [], _ptySpawnForTesting = null, _cwdFromJsonlForTesting = null } = {}) { // gsd:provider-literal-allowed (default-command sentinel paired with useProvider check below)
+  spawnSession(sessionId, { command = 'claude', cwd, cols = 120, rows = 30, bypassPermissions = false, resumeSessionId = null, verbose = false, model = null, agentTeams = false, shell: requestedShell = null, newSession = false, initialPrompt = null, flags = [], provider: optsProvider = null, _ptySpawnForTesting = null, _cwdFromJsonlForTesting = null } = {}) { // gsd:provider-literal-allowed (default-command sentinel paired with useProvider check below)
     // Return existing session if already alive
     const existing = this.sessions.get(sessionId);
     if (existing && existing.alive) {
@@ -314,22 +314,36 @@ class PtySessionManager {
     // frame pops, so they re-fetch the singleton defensively.
     let store = getStore();
     const storeSession = store.getSession(sessionId);
-    const providerId = (storeSession && storeSession.provider) || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged sessions)
+    // Resolution order for the session's provider tag:
+    //   1. store record (authoritative when present; persisted user intent)
+    //   2. opts.provider (explicit caller signal from WS query param)
+    //   3. default (back-compat for v1.1-shaped un-tagged sessions) gsd:provider-literal-allowed
+    // The store record wins when both are set so a frontend-supplied
+    // ?provider= param cannot override an authoritative store tag (Pitfall
+    // 19-B mitigation). When the store record is absent (ad-hoc spawn, no
+    // session row yet), the WS-query value is the next-best signal.
+    const providerId = (storeSession && storeSession.provider)
+      || optsProvider
+      || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged sessions)
 
-    // Non-default-command bypass: callers that pass a non-Claude command
-    // (e.g., scheduler with command: 'td', templates with custom commands)
-    // are NOT routed through the provider. They build their own descriptor
-    // inline. Only the historical default ('claude') goes through the gsd:provider-literal-allowed
-    // provider so we don't silently force-rewrite scheduler/td spawns.
-    const useProvider = (command === 'claude'); // gsd:provider-literal-allowed (default-command sentinel)
-    let provider = null;
-    if (useProvider) {
-      const registry = require('../providers');
-      provider = registry.getProvider(providerId);
-      if (!provider) {
-        console.error('[PTY] Unknown provider ' + providerId + ' for session ' + sessionId);
-        return null;
-      }
+    // Registry-driven sentinel (Plan 19-01 PTY-02 refactor): we use the
+    // provider abstraction when the registered provider's cliBinary matches
+    // the requested command. Scheduler/td/template callers pass arbitrary
+    // commands (e.g., 'td', 'python myscript.py') that never match any
+    // provider's cliBinary, so they fall through to the inline descriptor
+    // builder below. This replaces the previous hardcoded literal compare
+    // (was: command === provider id literal) gsd:provider-literal-allowed
+    // and unblocks Codex spawns (Codex command now routes through
+    // codexProvider.spawnCommand instead of the inline path). gsd:provider-literal-allowed
+    const registry = require('../providers');
+    const candidateProvider = registry.getProvider(providerId);
+    const useProvider = !!(candidateProvider && candidateProvider.cliBinary === command);
+    const provider = useProvider ? candidateProvider : null;
+    if (providerId && !candidateProvider) {
+      // The session is tagged with an unknown/unregistered provider id.
+      // Log and fall through to the inline descriptor builder so the caller
+      // still gets a best-effort spawn rather than a hard null return.
+      console.error('[PTY] Unknown provider ' + providerId + ' for session ' + sessionId);
     }
 
     // ── Block B (Plan 14-04): Build descriptor (provider OR inline) ──
