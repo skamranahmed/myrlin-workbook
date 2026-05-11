@@ -833,6 +833,7 @@ const standaloneTests = [
   'dragdrop-provider.test.js',  // Plan 18-04: drag-drop provider propagation + legacy shim removal (UI-10)
   'layout-provider-persist.test.js', // Plan 19-01: layout pane records persist provider for deterministic restore (PTY-07)
   'pty-codex-spawn.test.js',         // Plan 19-01: Codex spawn dispatch through registry-driven sentinel + per-spawn env scoping (PTY-02, PTY-08)
+  'idle-signal-dispatch.test.js',    // Plan 19-02: frontend idle dispatch through per-provider spec (PTY-04)
 ];
 
 let standaloneFailed = 0;

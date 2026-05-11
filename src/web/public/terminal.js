@@ -258,6 +258,13 @@ class TerminalPane {
     this._activitySample = '';
     this._writeRaf = null;
     this._pasteHandled = false;
+    // Plan 19-02 (PTY-04, PTY-05): per-pane provider context. Both fields are
+    // populated in mount() after the pane DOM exists. _providerId drives idle
+    // detection and Shift+Enter dispatch; defaults to the back-compat provider
+    // id (see line below) if data-provider is missing for any reason (e.g., a
+    // pane created before Phase 18-01).
+    this.paneEl = null;
+    this._providerId = 'claude'; // gsd:provider-literal-allowed (Phase 19 default before mount)
   }
 
   _log(msg) {
@@ -317,6 +324,17 @@ class TerminalPane {
 
       this.term.open(container);
       this._log('xterm opened in ' + this.containerId + ' for session ' + this.sessionId);
+
+      // Plan 19-02 (PTY-04, PTY-05): read this pane's provider tag once at
+      // mount time. data-provider is set by app.js openTerminalInPane (and by
+      // Phase 18-01 on sidebar render sites; the pane attribute is the one
+      // that matters for live behavior). Cached here because the tag does not
+      // change for the lifetime of a pane: opening a different session into
+      // the same slot tears down this TerminalPane and constructs a new one.
+      this.paneEl = container.closest('.terminal-pane');
+      this._providerId =
+        (this.paneEl && this.paneEl.dataset && this.paneEl.dataset.provider) ||
+        'claude'; // gsd:provider-literal-allowed (Phase 19 default when data-provider missing)
 
       this._status('Connecting to session...', 'blue');
 
@@ -1208,9 +1226,13 @@ class TerminalPane {
 
     const lineText = line.translateToString(true).trim();
 
-    // Claude Code prompt patterns: ends with ❯, $, or >
-    // Also match "Human:" which appears in Claude's conversation UI
-    if (/[❯$>]\s*$/.test(lineText) || /^(Human:|Type.*message)/.test(lineText)) {
+    // Plan 19-02 (PTY-04): dispatch idle detection through the active pane's
+    // provider spec. Replaces a hardcoded Claude regex with a per-pane lookup
+    // so a Codex pane fires idle only on Codex prompts (`codex>`) and a Claude
+    // pane fires only on Claude prompts (`❯`, `Human:`, etc.). The spec map
+    // is populated at boot by app.js fetchProviderSpecs(); _isIdleLineForProvider
+    // falls back to the original Claude regex if the map is missing.
+    if (TerminalPane._isIdleLineForProvider(this._providerId, lineText)) {
       this._isWorking = false;
 
       // Update activity to idle when prompt is detected
@@ -1338,6 +1360,40 @@ class TerminalPane {
         }
       }
     }
+  }
+
+  /**
+   * Plan 19-02 (PTY-04): dispatch idle detection through a provider spec.
+   *
+   * Reads window.CWMProviderSpecs (built at boot by app.js fetchProviderSpecs)
+   * and runs the active provider's idle regex array against the given line.
+   * Defensive fallback: if the spec map is missing or the provider has no
+   * idleRegexes, fall back to the original Claude regex pair so existing
+   * Claude flows keep working even when /api/providers is unreachable or
+   * provider-specs.js failed to load.
+   *
+   * Static so it can be exercised by test/idle-signal-dispatch.test.js
+   * without constructing an xterm.js instance.
+   *
+   * @param {string} providerId - The pane's provider id from data-provider.
+   * @param {string} lineText - The trimmed cursor-line text from the buffer.
+   * @returns {boolean} True when the line looks like an idle prompt for the provider.
+   */
+  static _isIdleLineForProvider(providerId, lineText) {
+    const specs = (typeof window !== 'undefined' && window.CWMProviderSpecs) || null;
+    const spec = (specs && specs[providerId]) ||
+      (specs && specs.claude) || // gsd:provider-literal-allowed (Phase 19 fallback to Claude spec)
+      null;
+    if (spec && Array.isArray(spec.idleRegexes)) {
+      for (const re of spec.idleRegexes) {
+        if (re && typeof re.test === 'function' && re.test(lineText)) return true;
+      }
+      return false;
+    }
+    // Spec map missing entirely: fall back to the original Claude regex pair
+    // so panes created before the spec map loads (race condition) still get
+    // idle detection. Mirror of src/providers/claude/index.js isIdleSignal.
+    return /[❯$>]\s*$/.test(lineText) || /^(Human:|Type.*message)/.test(lineText);
   }
 
   dispose() {
