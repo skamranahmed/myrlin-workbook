@@ -837,6 +837,8 @@ const standaloneTests = [
   'keybindings-dispatch.test.js',    // Plan 19-02: Shift+Enter dispatch + backend-frontend parity (PTY-05)
   'idle-signal-parity.test.js',      // Plan 19-02: backend.isIdleSignal vs frontend regex parity (PTY-04 drift gate)
   'bracketed-paste-isolation.test.js', // Plan 19-02: per-pane paste listener scope (PTY-06)
+  'codex-settings-route.test.js',    // Plan 21-01: PUT /api/sessions/:id/provider-settings (Codex menu persistence)
+  'pane-context-menu.test.js',       // Plan 21-01: Codex pane right-click menu structure gate
 ];
 
 let standaloneFailed = 0;

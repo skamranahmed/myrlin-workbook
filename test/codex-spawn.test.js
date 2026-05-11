@@ -225,6 +225,105 @@ test('spawnCommand returns descriptor with all four required fields', () => {
   }
 });
 
+// ─── Phase 21 Plan 21-01: providerSettings -> CLI flag translation ─────────
+
+// Test 9: model -> -m
+test('providerSettings.model produces -m model token pair', () => {
+  const desc = spawnCommand({ providerSettings: { model: 'gpt-5-codex' } });
+  const i = desc.args.indexOf('-m');
+  assert(i !== -1, '-m flag should be present');
+  assertEqual(desc.args[i + 1], 'gpt-5-codex', 'value should follow -m');
+});
+
+// Test 10: sandbox -> -s
+test('providerSettings.sandbox produces -s sandbox token pair', () => {
+  const desc = spawnCommand({ providerSettings: { sandbox: 'workspace-write' } });
+  const i = desc.args.indexOf('-s');
+  assert(i !== -1, '-s flag should be present');
+  assertEqual(desc.args[i + 1], 'workspace-write', 'value should follow -s');
+});
+
+// Test 11: approvalPolicy -> -a
+test('providerSettings.approvalPolicy produces -a policy token pair', () => {
+  const desc = spawnCommand({ providerSettings: { approvalPolicy: 'on-request' } });
+  const i = desc.args.indexOf('-a');
+  assert(i !== -1, '-a flag should be present');
+  assertEqual(desc.args[i + 1], 'on-request', 'value should follow -a');
+});
+
+// Test 12: reasoningEffort -> -c model_reasoning_effort=...
+test('providerSettings.reasoningEffort produces -c key=value', () => {
+  const desc = spawnCommand({ providerSettings: { reasoningEffort: 'high' } });
+  const i = desc.args.indexOf('-c');
+  assert(i !== -1, '-c flag should be present');
+  const val = desc.args[i + 1] || '';
+  assert(val.indexOf('model_reasoning_effort=') === 0, 'value should be key=value form');
+  assert(val.indexOf('high') !== -1, 'value should embed effort');
+});
+
+// Test 13: bypassApprovalsAndSandbox -> --dangerously-bypass-...
+test('providerSettings.bypassApprovalsAndSandbox=true produces bypass flag', () => {
+  const desc = spawnCommand({ providerSettings: { bypassApprovalsAndSandbox: true } });
+  assert(
+    desc.args.includes('--dangerously-bypass-approvals-and-sandbox'),
+    'bypass flag should be present'
+  );
+});
+
+// Test 14: features array -> multiple --enable pairs
+test('providerSettings.features array produces --enable pairs', () => {
+  const desc = spawnCommand({ providerSettings: { features: ['web_search', 'view_image'] } });
+  const enables = desc.args.reduce((acc, tok, i, arr) => {
+    if (tok === '--enable' && i + 1 < arr.length) acc.push(arr[i + 1]);
+    return acc;
+  }, []);
+  assertDeepEqual(enables, ['web_search', 'view_image'], 'two --enable pairs should appear');
+});
+
+// Test 15: unknown enum values are dropped (no throw)
+test('providerSettings with unknown values are dropped silently', () => {
+  const restoreWarn = console.warn;
+  console.warn = () => {}; // swallow during test
+  try {
+    const desc = spawnCommand({ providerSettings: {
+      sandbox: 'neverexists',
+      approvalPolicy: 'totally-bogus',
+      reasoningEffort: 'glacial',
+      model: 'has spaces and ; semicolons',
+      features: ['bad name!', 'good_name'],
+    } });
+    assert(!desc.args.includes('-s'), '-s should not be present for unknown sandbox');
+    assert(!desc.args.includes('-a'), '-a should not be present for unknown approval');
+    assert(!desc.args.includes('-c'), '-c should not be present for unknown effort');
+    assert(!desc.args.includes('-m'), '-m should not be present for unsafe model');
+    const enables = desc.args.reduce((acc, tok, i, arr) => {
+      if (tok === '--enable' && i + 1 < arr.length) acc.push(arr[i + 1]);
+      return acc;
+    }, []);
+    assertDeepEqual(enables, ['good_name'], 'only safe feature name should pass');
+  } finally {
+    console.warn = restoreWarn;
+  }
+});
+
+// Test 16: positional resume <id> stays LAST after flags
+test('resume id stays last after provider-settings flags', () => {
+  const desc = spawnCommand({
+    providerSessionId: 'abc-123',
+    providerSettings: { model: 'gpt-5-codex', sandbox: 'workspace-write' },
+  });
+  assertEqual(desc.args[desc.args.length - 2], 'resume', 'penultimate should be resume keyword');
+  assertEqual(desc.args[desc.args.length - 1], 'abc-123', 'last should be the id');
+});
+
+// Test 17: null/missing providerSettings is a no-op (no extra flags)
+test('null providerSettings produces no extra flags', () => {
+  const desc = spawnCommand({ providerSettings: null });
+  assertDeepEqual(desc.args, [], 'args should be empty when settings is null');
+  const desc2 = spawnCommand({});
+  assertDeepEqual(desc2.args, [], 'args should be empty when settings is omitted');
+});
+
 // ─── Summary + exit ────────────────────────────────────────────────────────
 
 console.log('  ' + '-'.repeat(70));

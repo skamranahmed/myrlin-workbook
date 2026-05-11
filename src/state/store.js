@@ -747,6 +747,66 @@ class Store extends EventEmitter {
     return this.updateSession(id, { status, pid });
   }
 
+  /**
+   * Persist per-session provider settings (Phase 21 Plan 21-01).
+   *
+   * Shape:
+   *   session.providerSettings = { [providerId]: { ...settings } }
+   *
+   * Per-provider merging: the new settings object REPLACES the existing
+   * bundle for that providerId. Other providers' bundles on the same
+   * session are untouched. Caller is responsible for shallow-merging if
+   * a partial update is desired (the route currently sends a full
+   * canonical bundle, so replace-on-write is the right default).
+   *
+   * @param {string} sessionId
+   * @param {string} providerId - Provider id string (registry-issued).
+   * @param {Object} settings - The canonical settings bundle to persist.
+   * @returns {Object|null} Updated session or null if not found.
+   */
+  updateSessionProviderSettings(sessionId, providerId, settings) {
+    const session = this._state.sessions[sessionId];
+    if (!session) return null;
+    if (!session.providerSettings || typeof session.providerSettings !== 'object') {
+      session.providerSettings = {};
+    }
+    session.providerSettings[providerId] = settings;
+    session.lastActive = new Date().toISOString();
+    this.save();
+    this.emit('session:updated', session);
+    return session;
+  }
+
+  /**
+   * Read the effective provider settings for a session, with fallback to
+   * the per-provider defaults in `state.settings.providerDefaults[providerId]`.
+   * Used by the route handler so the UI sees defaults when a session has
+   * no overrides yet.
+   *
+   * @param {string} sessionId
+   * @param {string} providerId
+   * @returns {Object} Settings bundle (may be empty object).
+   */
+  getSessionProviderSettings(sessionId, providerId) {
+    const session = this._state.sessions[sessionId];
+    const fromSession = session
+      && session.providerSettings
+      && typeof session.providerSettings === 'object'
+      && session.providerSettings[providerId]
+      && typeof session.providerSettings[providerId] === 'object'
+      ? session.providerSettings[providerId]
+      : null;
+    if (fromSession) return fromSession;
+    const defaults = this._state.settings
+      && this._state.settings.providerDefaults
+      && typeof this._state.settings.providerDefaults === 'object'
+      && this._state.settings.providerDefaults[providerId]
+      && typeof this._state.settings.providerDefaults[providerId] === 'object'
+      ? this._state.settings.providerDefaults[providerId]
+      : {};
+    return defaults;
+  }
+
   addSessionLog(id, message) {
     const session = this._state.sessions[id];
     if (!session) return;

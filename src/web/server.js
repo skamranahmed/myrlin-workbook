@@ -1504,6 +1504,110 @@ app.delete('/api/sessions/:id', requireAuth, (req, res) => {
 });
 
 /**
+ * PUT /api/sessions/:id/provider-settings
+ *
+ * Phase 21 Plan 21-01: persist per-session provider settings.
+ *
+ * Request body: { settings: { ...providerSpecificFields } }
+ *   For Codex sessions, accepted keys are: model, sandbox, approvalPolicy,
+ *   reasoningEffort, bypassApprovalsAndSandbox, features.
+ *
+ * Validation:
+ *   - 404 if session id is unknown
+ *   - 400 if body.settings is not a plain object
+ *   - 400 if any key is unknown or its value fails the per-key allow-list
+ *   - 400 if a free-form string value contains shell-unsafe characters
+ *
+ * Response: 200 with the canonical persisted bundle.
+ *
+ * Note: pty-manager re-reads providerSettings from the store on every
+ * spawn, so a setting change takes effect the next time the pane is
+ * (re)started. The frontend surfaces a toast hint after a successful PUT.
+ */
+const CODEX_SANDBOX_VALUES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+const CODEX_APPROVAL_VALUES = new Set(['untrusted', 'on-failure', 'on-request', 'never']);
+const CODEX_EFFORT_VALUES = new Set(['minimal', 'low', 'medium', 'high']);
+const CODEX_FEATURE_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const CODEX_MODEL_ID_RE = /^[a-zA-Z0-9._:-]{1,128}$/;
+const CODEX_ALLOWED_KEYS = new Set([
+  'model', 'sandbox', 'approvalPolicy', 'reasoningEffort',
+  'bypassApprovalsAndSandbox', 'features',
+]);
+
+function validateCodexProviderSettings(settings) {
+  if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { ok: false, error: 'settings must be a plain object' };
+  }
+  for (const key of Object.keys(settings)) {
+    if (!CODEX_ALLOWED_KEYS.has(key)) {
+      return { ok: false, error: 'unknown setting key: ' + key };
+    }
+  }
+  if (settings.model !== undefined) {
+    if (typeof settings.model !== 'string' || !CODEX_MODEL_ID_RE.test(settings.model) || SHELL_UNSAFE.test(settings.model)) {
+      return { ok: false, error: 'invalid model id' };
+    }
+  }
+  if (settings.sandbox !== undefined && !CODEX_SANDBOX_VALUES.has(settings.sandbox)) {
+    return { ok: false, error: 'invalid sandbox value' };
+  }
+  if (settings.approvalPolicy !== undefined && !CODEX_APPROVAL_VALUES.has(settings.approvalPolicy)) {
+    return { ok: false, error: 'invalid approvalPolicy value' };
+  }
+  if (settings.reasoningEffort !== undefined && !CODEX_EFFORT_VALUES.has(settings.reasoningEffort)) {
+    return { ok: false, error: 'invalid reasoningEffort value' };
+  }
+  if (settings.bypassApprovalsAndSandbox !== undefined && typeof settings.bypassApprovalsAndSandbox !== 'boolean') {
+    return { ok: false, error: 'bypassApprovalsAndSandbox must be boolean' };
+  }
+  if (settings.features !== undefined) {
+    if (!Array.isArray(settings.features)) {
+      return { ok: false, error: 'features must be an array' };
+    }
+    for (const name of settings.features) {
+      if (typeof name !== 'string' || !CODEX_FEATURE_NAME_RE.test(name) || SHELL_UNSAFE.test(name)) {
+        return { ok: false, error: 'invalid feature name: ' + name };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+app.put('/api/sessions/:id/provider-settings', requireAuth, (req, res) => {
+  const store = getStore();
+  const sessionId = req.params.id;
+  const session = store.getSession(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found.' });
+  }
+  const settings = req.body && req.body.settings;
+  if (settings === undefined || settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+    return res.status(400).json({ error: 'settings must be a plain object' });
+  }
+  const providerId = session.provider || 'claude'; // gsd:provider-literal-allowed (back-compat default; tag for un-tagged legacy sessions)
+  // Per-provider validation. Today only Codex has a settings surface; Claude
+  // gets a 400 until a future plan defines its bundle shape.
+  if (providerId === 'codex') { // gsd:provider-literal-allowed
+    const check = validateCodexProviderSettings(settings);
+    if (!check.ok) {
+      return res.status(400).json({ error: check.error });
+    }
+  } else {
+    return res.status(400).json({ error: 'provider does not accept provider-settings: ' + providerId });
+  }
+  const updated = store.updateSessionProviderSettings(sessionId, providerId, settings);
+  if (!updated) {
+    return res.status(404).json({ error: 'Session not found.' });
+  }
+  return res.json({
+    success: true,
+    sessionId,
+    provider: providerId,
+    settings: updated.providerSettings[providerId],
+  });
+});
+
+/**
  * POST /api/sessions/:id/start
  * Launch the session process and mark it as recently used.
  */

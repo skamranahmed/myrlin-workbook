@@ -11397,6 +11397,188 @@ class CWMApp {
     this._renderContextItems('Open View', items, x, y);
   }
 
+  /**
+   * Build the "Codex settings" submenu (Plan 21-01).
+   *
+   * Pure factory: returns an array of menu items suitable for the existing
+   * _renderContextItems renderer (label/submenu/check/hint/action/danger
+   * shape). Reads the session's current providerSettings from
+   * this.state.allSessions (or this.state.sessions) and uses the values to
+   * mark the active option with a check in each submenu.
+   *
+   * Each leaf action PUTs the new bundle to the server and shows a toast
+   * hinting the user to restart the pane for the change to take effect
+   * (pty-manager only reads providerSettings on spawn). The bypass toggle
+   * routes through showConfirmModal first because it weakens the sandbox.
+   *
+   * Dispatched from showTerminalContextMenu when the pane's
+   * dataset.provider matches the Codex provider id. Pane menus for other
+   * providers skip this branch so a Claude pane never shows a Codex submenu.
+   *
+   * @param {number} slotIdx - Terminal pane slot index.
+   * @param {Object} tp - The TerminalPane instance for this slot.
+   * @returns {Array<Object>} Menu items to splice into the pane context menu.
+   */
+  _buildCodexPaneMenu(slotIdx, tp) { // gsd:provider-literal-allowed (Codex pane menu factory)
+    const sessionId = tp.sessionId;
+    // Look up the session record to read providerSettings.codex. Defensive
+    // because some panes (Codex Desktop project sessions) may not exist in
+    // the live sessions list yet; in that case we render with empty
+    // settings and let the user dial them in.
+    const allSessions = [
+      ...(this.state.sessions || []),
+      ...(this.state.allSessions || []),
+    ];
+    const sess = allSessions.find(s => s && s.id === sessionId) || {};
+    const codexSettings = (sess.providerSettings && sess.providerSettings.codex) /* gsd:provider-literal-allowed */ || {};
+
+    const putSettings = async (partial) => {
+      const next = { ...codexSettings, ...partial };
+      try {
+        await this.api('PUT', '/api/sessions/' + encodeURIComponent(sessionId) + '/provider-settings', { settings: next });
+        // Mutate the cached session so subsequent menu opens reflect the
+        // change without a full refetch. The next saveTerminalLayout or
+        // loadSessions tick will rehydrate from the server.
+        if (!sess.providerSettings) sess.providerSettings = {};
+        sess.providerSettings.codex = next; // gsd:provider-literal-allowed
+        this.showToast('Codex settings updated — restart pane to apply', 'info');
+      } catch (err) {
+        this.showToast(err.message || 'Failed to update Codex settings', 'error');
+      }
+    };
+
+    // Catalog of accepted values per setting. Mirrors backend allow-lists.
+    const MODEL_OPTIONS = [
+      { id: 'gpt-5-codex', label: 'gpt-5-codex' },
+      { id: 'gpt-5', label: 'gpt-5' },
+      { id: 'o3', label: 'o3' },
+    ];
+    const SANDBOX_OPTIONS = [
+      { id: 'read-only', label: 'read-only' },
+      { id: 'workspace-write', label: 'workspace-write' },
+      { id: 'danger-full-access', label: 'danger-full-access (risky)' },
+    ];
+    const APPROVAL_OPTIONS = [
+      { id: 'untrusted', label: 'untrusted (prompt for unknown commands)' },
+      { id: 'on-failure', label: 'on-failure' },
+      { id: 'on-request', label: 'on-request' },
+      { id: 'never', label: 'never (auto-approve everything)' },
+    ];
+    const EFFORT_OPTIONS = [
+      { id: 'minimal', label: 'minimal' },
+      { id: 'low', label: 'low' },
+      { id: 'medium', label: 'medium' },
+      { id: 'high', label: 'high' },
+    ];
+    const FEATURE_OPTIONS = [
+      { id: 'web_search', label: 'Web search' },
+      { id: 'view_image', label: 'View images' },
+      { id: 'plan_tool', label: 'Plan tool' },
+      { id: 'apply_patch_tool', label: 'Apply patch tool' },
+    ];
+
+    const codexItems = [];
+
+    // 1. Model submenu
+    codexItems.push({
+      label: 'Model',
+      icon: '&#129504;',
+      hint: codexSettings.model || 'default',
+      submenu: MODEL_OPTIONS.map(opt => ({
+        label: opt.label,
+        action: () => putSettings({ model: opt.id }),
+        check: codexSettings.model === opt.id,
+      })),
+    });
+
+    // 2. Sandbox submenu
+    codexItems.push({
+      label: 'Sandbox',
+      icon: '&#128274;',
+      hint: codexSettings.sandbox || 'default',
+      submenu: SANDBOX_OPTIONS.map(opt => ({
+        label: opt.label,
+        action: () => putSettings({ sandbox: opt.id }),
+        check: codexSettings.sandbox === opt.id,
+        danger: opt.id === 'danger-full-access',
+      })),
+    });
+
+    // 3. Approval Policy submenu
+    codexItems.push({
+      label: 'Approval Policy',
+      icon: '&#9989;',
+      hint: codexSettings.approvalPolicy || 'default',
+      submenu: APPROVAL_OPTIONS.map(opt => ({
+        label: opt.label,
+        action: () => putSettings({ approvalPolicy: opt.id }),
+        check: codexSettings.approvalPolicy === opt.id,
+        danger: opt.id === 'never',
+      })),
+    });
+
+    // 4. Reasoning Effort submenu
+    codexItems.push({
+      label: 'Reasoning Effort',
+      icon: '&#128173;',
+      hint: codexSettings.reasoningEffort || 'default',
+      submenu: EFFORT_OPTIONS.map(opt => ({
+        label: opt.label,
+        action: () => putSettings({ reasoningEffort: opt.id }),
+        check: codexSettings.reasoningEffort === opt.id,
+      })),
+    });
+
+    // 5. Bypass toggle with confirmation modal
+    const isBypassOn = codexSettings.bypassApprovalsAndSandbox === true;
+    codexItems.push({
+      label: isBypassOn ? 'Bypass: ON (click to disable)' : 'Bypass Approvals & Sandbox',
+      icon: '&#9888;',
+      danger: true,
+      check: isBypassOn,
+      action: async () => {
+        if (isBypassOn) {
+          // Turning OFF a dangerous flag is safe; no confirmation needed.
+          await putSettings({ bypassApprovalsAndSandbox: false });
+          return;
+        }
+        // Turning ON: require explicit confirmation. The bypass flag
+        // disables BOTH the approval workflow AND the sandbox, so the
+        // session can read/write/exec anything the user can. Worth a
+        // second click before flipping.
+        const confirmed = await this.showConfirmModal({
+          title: 'Enable Bypass for Codex?',
+          message: 'This disables BOTH the approval workflow AND the sandbox for this Codex session. The session can read/write/execute anything you can. Continue?',
+          confirmText: 'Enable Bypass',
+          confirmClass: 'btn-danger',
+        });
+        if (confirmed) {
+          await putSettings({ bypassApprovalsAndSandbox: true });
+        }
+      },
+    });
+
+    // 6. Features submenu (multi-select via per-item toggle)
+    const activeFeatures = Array.isArray(codexSettings.features) ? codexSettings.features : [];
+    codexItems.push({
+      label: 'Features',
+      icon: '&#9881;',
+      hint: activeFeatures.length ? activeFeatures.join(', ') : 'none',
+      submenu: FEATURE_OPTIONS.map(opt => ({
+        label: opt.label,
+        action: () => {
+          const next = activeFeatures.includes(opt.id)
+            ? activeFeatures.filter(f => f !== opt.id)
+            : [...activeFeatures, opt.id];
+          putSettings({ features: next });
+        },
+        check: activeFeatures.includes(opt.id),
+      })),
+    });
+
+    return codexItems;
+  }
+
   showTerminalContextMenu(slotIdx, x, y) {
     const tp = this.terminalPanes[slotIdx];
     if (!tp) return;
@@ -11553,6 +11735,21 @@ class CWMApp {
             this.openConflictCenter();
           }
         },
+      });
+    }
+
+    // ── Provider-specific submenu (Plan 21-01) ────────────────
+    // Dispatch by data-provider on the pane element. The Codex pane gets
+    // a "Codex settings" submenu with model/sandbox/approval/effort/bypass/
+    // features; Claude panes get nothing here and fall through unchanged.
+    const paneElForProvider = document.getElementById(`term-pane-${slotIdx}`);
+    const paneProvider = paneElForProvider && paneElForProvider.dataset && paneElForProvider.dataset.provider;
+    if (paneProvider === 'codex') { // gsd:provider-literal-allowed (per-provider dispatch)
+      items.push({ type: 'sep' });
+      items.push({
+        label: 'Codex settings',
+        icon: '&#129504;',
+        submenu: this._buildCodexPaneMenu(slotIdx, tp),
       });
     }
 

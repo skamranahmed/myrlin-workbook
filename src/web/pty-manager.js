@@ -349,6 +349,17 @@ class PtySessionManager {
     // ── Block B (Plan 14-04): Build descriptor (provider OR inline) ──
     let descriptor;
     if (useProvider) {
+      // Phase 21 Plan 21-01: per-session providerSettings drives provider CLI flags.
+      // Read the bundle for THIS provider so a Claude session never receives
+      // a Codex-shaped bundle and vice versa. Missing/non-object yields null;
+      // the provider's spawnCommand treats null as "no extra flags".
+      const providerSettingsBundle = storeSession
+        && storeSession.providerSettings
+        && typeof storeSession.providerSettings === 'object'
+        && storeSession.providerSettings[providerId]
+        && typeof storeSession.providerSettings[providerId] === 'object'
+        ? storeSession.providerSettings[providerId]
+        : null;
       try {
         descriptor = provider.spawnCommand({
           sessionId,
@@ -359,6 +370,7 @@ class PtySessionManager {
           model,
           verbose,
           initialPrompt,
+          providerSettings: providerSettingsBundle,
         });
       } catch (err) {
         console.error('[PTY] Provider ' + providerId + ' spawnCommand failed for ' + sessionId + ': ' + err.message);

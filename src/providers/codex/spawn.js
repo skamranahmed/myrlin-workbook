@@ -1,35 +1,34 @@
 /**
  * Codex provider spawn descriptor builder.
  *
- * Phase 17 Plan 17-02 (CDX-07 spawn half).
+ * Phase 17 Plan 17-02 (CDX-07 spawn half) shipped the minimum surface:
+ * `resume <id>` when providerSessionId is set, fresh-session otherwise.
+ * Phase 21 Plan 21-01 extends this with optional providerSettings so the
+ * frontend right-click menu can drive Codex CLI flags (model, sandbox,
+ * approval policy, reasoning effort, bypass, feature enables).
  *
- * Pure function that builds the SpawnDescriptor pty-manager uses to launch
- * the Codex CLI. Mirrors the shape established by src/providers/claude/spawn.js
- * so the existing pty-manager pass-through plumbing (Plan 14-04) needs no
- * Codex-specific code path.
+ * Pure function. Pty-manager (Plan 14-04) reads the returned descriptor and
+ * owns the actual node-pty.spawn call. No filesystem touches, no env
+ * mutation, no network. Validation is defensive: unsafe values trigger a
+ * console.warn and are dropped silently rather than throwing, so a stale
+ * frontend value never blocks a pane spawn.
  *
- * Phase 17 ships the minimum surface: a `resume <id>` invocation when
- * providerSessionId is set, a fresh-session invocation when it is not. No
- * --model, --verbose, --workdir, or other flags are passed today; Phase 19
- * (Codex Live PTY End-to-End) will add them once the live terminal plumbing
- * exists. Keeping the surface narrow now avoids exposing flags that may be
- * renamed by upstream Codex before they are tested.
+ * Flag translation (providerSettings -> argv):
+ *   model               -> ['-m', model]
+ *   sandbox             -> ['-s', sandbox]
+ *   approvalPolicy      -> ['-a', approvalPolicy]
+ *   reasoningEffort     -> ['-c', 'model_reasoning_effort="<effort>"']
+ *   bypassApprovalsAndSandbox: true
+ *                       -> ['--dangerously-bypass-approvals-and-sandbox']
+ *   features: [name,..] -> ['--enable', name] pairs
  *
- * CODEX_HOME env scoping: process.env.CODEX_HOME is propagated through the
- * descriptor so a user with a non-default $CODEX_HOME survives a Myrlin pane
- * spawn (the spawned `codex` process otherwise inherits the parent's env,
- * which works in the common case, but explicit propagation is the
- * documentation-friendly form: the descriptor advertises which env keys
- * matter). When the parent env does NOT set CODEX_HOME, env.CODEX_HOME is
- * set to undefined which pty-manager treats as DELETE-this-key. Net effect
- * for the unset case is identical to leaving the env alone; the explicit
- * assign documents the contract.
+ * Positional ordering invariant: any `resume <id>` positional pair stays
+ * LAST in args so flags cannot be misparsed as the resume id. This matches
+ * the Codex CLI convention (subcommand positions trail option flags).
  *
- * Validation: the providerSessionId is checked against /^[a-zA-Z0-9_-]+$/
- * before being placed in args. Shell unsafe characters (semicolons,
- * backticks, spaces, etc.) trigger an Error. This matches the pattern in
- * claude/spawn.js verbatim so any input that passes the SHELL_UNSAFE gate
- * for Claude also passes for Codex.
+ * Enum allow-lists are intentionally short and conservative. Drop-unknown
+ * with a console.warn keeps the spawn path resilient against typos and
+ * stale fields from older clients.
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  *
@@ -38,68 +37,161 @@
 
 'use strict';
 
-// The literal 'codex' below is the CLI binary name (the npm-published Codex
-// CLI installs a `codex` executable). This file lives inside src/providers/codex/,
-// which the grep gate (Plan 14-05) skips, so the marker is defensive (extra
-// signal for future readers) rather than required.
 const CODEX_BINARY = 'codex'; // gsd:provider-literal-allowed (Codex provider CLI binary)
 
+// Same shell-safe regex Claude uses for its providerSessionId gate.
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+// Shell-unsafe characters for free-form values (model names, etc.). Mirrors
+// pty-manager.js SHELL_UNSAFE so anything that passes here also passes the
+// outer gate; we keep the local copy so this module is testable standalone.
+const SHELL_UNSAFE_RE = /[;&|`$(){}[\]<>!#*?\n\r\\'"]/;
+
+// Enum allow-lists. Conservative on purpose: only values the Codex CLI
+// accepts today. Unknown values get dropped with a console.warn instead of
+// crashing the spawn so a stale frontend cache never blocks a pane.
+const SANDBOX_VALUES = new Set([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+]);
+
+const APPROVAL_VALUES = new Set([
+  'untrusted',
+  'on-failure',
+  'on-request',
+  'never',
+]);
+
+const EFFORT_VALUES = new Set([
+  'minimal',
+  'low',
+  'medium',
+  'high',
+]);
+
+// Feature name format: short alphanumeric + dash/underscore. Matches Codex
+// CLI --enable token shape (e.g. web_search, view_image).
+const FEATURE_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+
+// Model id format: alphanumeric + dot/dash/underscore/colon. Cap length so
+// argv stays bounded. The colon allows version-suffixed model ids
+// ("gpt-5:2025-09-01"-shape).
+const MODEL_ID_RE = /^[a-zA-Z0-9._:-]{1,128}$/;
+
 /**
- * Validate providerSessionId against the same shell-safe regex Claude uses.
- * UUIDs (with or without hyphens) and slug-style identifiers pass; anything
- * with spaces, quotes, semicolons, backticks, or other shell-special bytes
- * trips the gate.
+ * Validate providerSessionId. Reused by tests.
  *
- * @param {string} id - candidate providerSessionId
- * @returns {boolean} true when id is safe to interpolate into argv tokens
+ * @param {*} id
+ * @returns {boolean}
  */
 function isSafeProviderSessionId(id) {
-  return typeof id === 'string' && /^[a-zA-Z0-9_-]+$/.test(id);
+  return typeof id === 'string' && SAFE_ID_RE.test(id);
+}
+
+/**
+ * Translate an optional providerSettings bundle to Codex CLI argv tokens.
+ * Pure function. Unknown values are dropped with a single console.warn so
+ * one bad field does not abort the spawn.
+ *
+ * @param {Object} [settings] - providerSettings.codex bundle. Optional.
+ * @returns {string[]} Flag tokens ordered model, sandbox, approval, effort,
+ *   bypass, then feature pairs. Caller appends positional args after.
+ */
+function buildFlagsFromSettings(settings) {
+  if (!settings || typeof settings !== 'object') return [];
+  const flags = [];
+
+  if (typeof settings.model === 'string' && settings.model.length > 0) {
+    if (MODEL_ID_RE.test(settings.model) && !SHELL_UNSAFE_RE.test(settings.model)) {
+      flags.push('-m', settings.model);
+    } else {
+      console.warn('[codex/spawn] dropping unsafe/oversized model: ' + settings.model);
+    }
+  }
+
+  if (typeof settings.sandbox === 'string' && settings.sandbox.length > 0) {
+    if (SANDBOX_VALUES.has(settings.sandbox)) {
+      flags.push('-s', settings.sandbox);
+    } else {
+      console.warn('[codex/spawn] dropping unknown sandbox: ' + settings.sandbox);
+    }
+  }
+
+  if (typeof settings.approvalPolicy === 'string' && settings.approvalPolicy.length > 0) {
+    if (APPROVAL_VALUES.has(settings.approvalPolicy)) {
+      flags.push('-a', settings.approvalPolicy);
+    } else {
+      console.warn('[codex/spawn] dropping unknown approvalPolicy: ' + settings.approvalPolicy);
+    }
+  }
+
+  if (typeof settings.reasoningEffort === 'string' && settings.reasoningEffort.length > 0) {
+    if (EFFORT_VALUES.has(settings.reasoningEffort)) {
+      // TOML-safe value formatting: quote the string so the Codex `-c key=val`
+      // parser treats it as a literal even if a future effort name contains
+      // chars TOML would interpret. Today all enum values are bare words and
+      // quoting them is a no-op, but the quotes future-proof the contract.
+      flags.push('-c', 'model_reasoning_effort="' + settings.reasoningEffort + '"');
+    } else {
+      console.warn('[codex/spawn] dropping unknown reasoningEffort: ' + settings.reasoningEffort);
+    }
+  }
+
+  if (settings.bypassApprovalsAndSandbox === true) {
+    flags.push('--dangerously-bypass-approvals-and-sandbox');
+  }
+
+  if (Array.isArray(settings.features)) {
+    for (const name of settings.features) {
+      if (typeof name === 'string' && FEATURE_NAME_RE.test(name) && !SHELL_UNSAFE_RE.test(name)) {
+        flags.push('--enable', name);
+      } else {
+        console.warn('[codex/spawn] dropping unsafe feature name: ' + name);
+      }
+    }
+  }
+
+  return flags;
 }
 
 /**
  * Build a SpawnDescriptor for the Codex CLI.
  *
  * Pure function. Does NOT touch the filesystem, the network, or any state.
- * Does NOT mutate process.env. Throws on invalid input. Returns a descriptor
- * that pty-manager joins, shell-wraps, and runs through node-pty.
+ * Does NOT mutate process.env. Throws on invalid providerSessionId. Unknown
+ * providerSettings values are dropped (warn only) rather than thrown.
  *
- * Phase 17 minimum surface:
- *   - providerSessionId set    -> ['resume', '<id>']
- *   - providerSessionId unset  -> []
+ * argv ordering:
+ *   [<flag tokens from providerSettings...>, 'resume', '<id>']
  *
- * Phase 19 (Codex Live PTY) will extend this with --model, --verbose, and
- * the equivalent of Claude's initialPrompt argument once the live PTY
- * plumbing has shipped and the Codex flag surface is locked.
+ * The positional resume pair stays LAST so flag-shaped resume ids cannot be
+ * misparsed (the Codex CLI takes the subcommand as a trailing position).
  *
- * @param {Object} [init] - spawn input bundle
- * @param {string|null} [init.providerSessionId] - Codex session UUID for `resume`.
- *   Validated against /^[a-zA-Z0-9_-]+$/. Throws on unsafe input.
- * @param {string|null} [init.cwd] - Working directory; passes through.
- *   pty-manager validates and falls back to homedir if missing.
- * @returns {{cmd: string, args: string[], cwd: (string|null), env: Object<string,(string|undefined)>}} SpawnDescriptor.
+ * @param {Object} [init]
+ * @param {string|null} [init.providerSessionId] - Codex session UUID for
+ *   `resume`. Validated against /^[a-zA-Z0-9_-]+$/. Throws on unsafe input.
+ * @param {string|null} [init.cwd] - Working directory; pass-through.
+ * @param {Object} [init.providerSettings] - Optional Codex settings bundle.
+ *   See buildFlagsFromSettings for accepted keys.
+ * @returns {{cmd:string, args:string[], cwd:(string|null), env:Object}}
  * @throws {Error} when providerSessionId fails the safety regex.
  */
-function spawnCommand({ providerSessionId = null, cwd = null } = {}) {
-  // Validate first so we never produce an unsafe argv even partially.
+function spawnCommand({ providerSessionId = null, cwd = null, providerSettings = null } = {}) {
   if (providerSessionId && !isSafeProviderSessionId(providerSessionId)) {
     throw new Error('unsafe providerSessionId: ' + providerSessionId);
   }
 
-  const args = [];
+  // Flags first, positional resume <id> last so flag/value pairs cannot
+  // accidentally swallow the resume id at argv-parse time.
+  const args = buildFlagsFromSettings(providerSettings);
   if (providerSessionId) {
-    // Codex's resume subcommand takes the session UUID as a positional arg.
-    // The exact CLI invocation is:  codex resume <uuid>
-    args.push('resume');
-    args.push(providerSessionId);
+    args.push('resume', providerSessionId);
   }
-  // Phase 17 deliberately stops here. Additional flags belong in Phase 19.
 
   // CODEX_HOME scoping: read process.env at call time so a test that
   // mutates the env in a try/finally sees the change reflected here.
-  // We DO NOT cache the value at module load. The undefined-means-delete
-  // semantic is honored by pty-manager (see pty-manager.js: any env value
-  // that is `=== undefined` is removed from the spawn env via delete).
+  // Undefined-means-delete semantic honored by pty-manager.
   const codexHomeFromEnv = process.env.CODEX_HOME;
   const envOverride = {
     CODEX_HOME: typeof codexHomeFromEnv === 'string' && codexHomeFromEnv.length > 0
@@ -115,4 +207,4 @@ function spawnCommand({ providerSessionId = null, cwd = null } = {}) {
   };
 }
 
-module.exports = { spawnCommand };
+module.exports = { spawnCommand, buildFlagsFromSettings };

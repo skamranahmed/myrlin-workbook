@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.4] - 2026-05-11
+
+### Added
+
+- **Right-click "Codex settings" submenu on Codex panes.** Surfaces all six per-session knobs in one menu: model (gpt-5-codex / gpt-5 / o3), sandbox (read-only / workspace-write / danger-full-access), approval policy (untrusted / on-failure / on-request / never), reasoning effort (minimal / low / medium / high), bypass toggle, and features (web_search, view_image, plan_tool, apply_patch_tool). Claude panes are unaffected — the menu dispatches on `data-provider`.
+- **Per-session provider settings persistence.** New `state.sessions[id].providerSettings.codex` bundle persists each Codex session's knobs. New store helpers `updateSessionProviderSettings()` and `getSessionProviderSettings()` keep the surface narrow.
+- **New API: `PUT /api/sessions/:id/provider-settings`.** Validates against per-key enum allow-lists, rejects shell-unsafe values via the same `SHELL_UNSAFE` regex used elsewhere in `server.js`, persists through `store.updateSessionProviderSettings()`. Returns 404 on unknown session id, 400 on validation failure, 401 without auth.
+- **Spawn wiring.** `codexProvider.spawnCommand` now consumes an optional `providerSettings` field and emits the canonical Codex CLI argv: `-m <model>`, `-s <sandbox>`, `-a <approvalPolicy>`, `-c model_reasoning_effort="<effort>"`, `--dangerously-bypass-approvals-and-sandbox`, `--enable <feature>` pairs. Unknown values are dropped with a `console.warn` (no throw). Positional `resume <id>` stays last so flag-shaped session ids cannot be misparsed. `pty-manager` reads the per-session bundle from the store on every spawn so settings changes take effect on the next pane restart.
+- **Bypass confirmation modal.** Enabling the `--dangerously-bypass-approvals-and-sandbox` flag routes through `showConfirmModal` with a red action button. Turning the flag OFF is a single click (no confirmation needed; weakening the sandbox is dangerous, restoring it is not).
+
+### Tests
+
+- Added `test/codex-settings-route.test.js` (8 tests) — happy-path triple, bypass toggle, features array, unknown key 400, enum-violating value 400, shell-unsafe value 400, unknown session 404, missing auth 401.
+- Added `test/pane-context-menu.test.js` (9 tests) — string-match gate asserting `_buildCodexPaneMenu` exists, dispatches by `dataset.provider`, includes all 6 designed items, and routes bypass through `showConfirmModal`.
+- Extended `test/codex-spawn.test.js` with 9 new tests covering each providerSettings → CLI flag translation, drop-unknown semantics, and the `resume <id>` last-position invariant.
+
 ## [1.2.0-alpha.3] - 2026-05-11
 
 ### Changed
