@@ -10323,9 +10323,16 @@ class CWMApp {
     }
     if (!projectsByProvider || typeof projectsByProvider !== 'object') return [];
     const merged = [];
-    for (const arr of Object.values(projectsByProvider)) {
+    // Defense in depth: stamp each project with its provider id from the
+    // outer object key if the server bucket did not carry one. The server
+    // now sets bucket.provider in groupProviderSessionsForUI, but this loop
+    // also handles older server responses and any future provider whose
+    // route skips the helper.
+    for (const [providerId, arr] of Object.entries(projectsByProvider)) {
       if (Array.isArray(arr)) {
-        for (const p of arr) merged.push(p);
+        for (const p of arr) {
+          merged.push(p && p.provider ? p : { ...p, provider: providerId });
+        }
       }
     }
     merged.sort((a, b) => {

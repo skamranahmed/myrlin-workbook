@@ -1684,6 +1684,7 @@ function groupProviderSessionsForUI(sessions, provider) {
     let bucket = byProject.get(key);
     if (!bucket) {
       bucket = {
+        provider: provider.id, // Frontend render filter reads this on the bucket; without it non-Claude provider buckets default to the Claude id via the fallback at app.js renderProjects and never match the corresponding tab.
         realPath: s.projectPath || '(unknown)',
         encodedName: s.encodedName || null,
         displayName: null,

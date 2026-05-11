@@ -244,6 +244,23 @@ async function main() {
       }
     });
 
+    // ─── Test 3b: bucket-level provider tag (UI-02 render filter) ──────
+    // Regression: the frontend renderProjects filters by p.provider on the
+    // bucket (the project accordion), defaulting to 'claude' when undefined.
+    // groupProviderSessionsForUI MUST set bucket.provider = provider.id so
+    // Codex/Gemini buckets are not silently filtered out of the Codex tab.
+    await test('Each project accordion (bucket) carries provider = provider.id', async () => {
+      _discoverCache.clear();
+      const r = await req('GET', '/api/discover');
+      assertEqual(r.status, 200);
+      for (const [providerId, accordions] of Object.entries(r.body.projects)) {
+        for (const bucket of accordions) {
+          assertEqual(bucket.provider, providerId,
+            'project accordion bucket under projects.' + providerId + '[] must have bucket.provider = ' + providerId + ' (got ' + JSON.stringify(bucket.provider) + ')');
+        }
+      }
+    });
+
     // ─── Test 4: DISC-04 snapshot semantics (mid-loop toggle) ────────────
     await test('DISC-04: registry.listEnabled is snapshotted ONCE per route invocation', async () => {
       _discoverCache.clear();

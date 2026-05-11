@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.2] - 2026-05-11
+
+### Fixed
+
+- **ChatGPT tab in Discovered Projects showed 0 even with Codex sessions on disk.** `groupProviderSessionsForUI()` built project accordion buckets without a `provider` field on the bucket itself (only the inner session records carried `provider`). The frontend's `renderProjects` filter at `app.js` reads `p.provider` on the bucket with a `|| claude-id` fallback, so every non-Claude bucket was misidentified as Claude and filtered out when the ChatGPT tab was selected. Fixed by setting `bucket.provider = provider.id` in the server helper. Frontend `_mergeProjectsByProvider` now also stamps the provider id from the outer response key as a defense-in-depth fallback for older servers or future providers that bypass the helper. Added regression test in `test/discover-route.test.js`. Reported by Arthur.
+
 ## [1.2.0-alpha.1] - 2026-05-11
 
 ### Fixed
