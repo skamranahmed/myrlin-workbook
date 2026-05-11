@@ -13929,7 +13929,14 @@ class CWMApp {
     if (group && group.panes && group.panes.length > 0) {
       group.panes.forEach(p => {
         if (p.sessionId && !this.terminalPanes[p.slot]) {
-          this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', p.spawnOpts || {});
+          // Plan 19-01 PTY-07: merge the persisted provider into spawnOpts so
+          // openTerminalInPane's explicit-provider branch sets paneEl.dataset.provider
+          // correctly even when state.allSessions is still empty. Layouts saved
+          // before this plan landed lack p.provider; the defensive default
+          // inside openTerminalInPane handles that case (lookup-then-claude).
+          const opts = { ...(p.spawnOpts || {}) };
+          if (p.provider && !opts.provider) opts.provider = p.provider;
+          this.openTerminalInPane(p.slot, p.sessionId, p.sessionName || 'Terminal', opts);
           if (p.viewType) {
             setTimeout(() => this.openViewInPane(p.slot, p.viewType, p.viewData || {}), 100);
           }
@@ -14401,10 +14408,18 @@ class CWMApp {
         const paneEl = document.getElementById('term-pane-' + i);
         const viewType = paneEl?.dataset?.viewType || null;
         const viewData = viewType ? JSON.parse(paneEl?.dataset?.viewData || '{}') : {};
+        // Plan 19-01 PTY-07: persist the pane's provider tag explicitly so
+        // layout restore is deterministic even when discovery is empty at
+        // restore time (e.g., Codex toggled off between save and restore).
+        // Without this, openTerminalInPane would fall back to the allSessions
+        // lookup which is empty, and the pane would be re-tagged with the
+        // v1.1 default — visually mis-rendering Codex panes as Claude.
+        const paneProvider = (paneEl && paneEl.dataset && paneEl.dataset.provider) || 'claude'; // gsd:provider-literal-allowed (Phase 18 default)
         group.panes.push({
           slot: i,
           sessionId: tp.sessionId,
           sessionName: tp.sessionName,
+          provider: paneProvider,
           spawnOpts: tp.spawnOpts || {},
           viewType,
           viewData,

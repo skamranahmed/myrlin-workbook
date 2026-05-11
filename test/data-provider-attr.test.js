@@ -145,6 +145,21 @@ check('app.js contains at least 3 template-level data-provider= occurrences', ()
   );
 });
 
+// (7) Plan 19-01 PTY-07: openTerminalInPane honors spawnOpts.provider over
+// the _sessForProvider lookup. Without this, a layout-restore of a Codex
+// pane while state.allSessions is empty would default to claude.
+check('openTerminalInPane honors spawnOpts.provider over the allSessions lookup', () => {
+  // Match the explicit-provider branch (either the named variable form or
+  // an inline spawnOpts.provider check before _sessForProvider).
+  const hasExplicitFirst =
+    /_explicitProvider[\s\S]{0,80}?\|\|[\s\S]{0,80}?_sessForProvider/.test(src) ||
+    /spawnOpts[\s\S]{0,40}?provider[\s\S]{0,180}?_sessForProvider/.test(src);
+  assert.ok(
+    hasExplicitFirst,
+    'openTerminalInPane must prefer spawnOpts.provider over _sessForProvider so layout restore is deterministic'
+  );
+});
+
 console.log('  ' + '─'.repeat(42));
 console.log('  [data-provider-attr] ' + passed + '/' + (passed + failed) + ' tests passed');
 
