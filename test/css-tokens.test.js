@@ -73,25 +73,28 @@ check('--provider-gemini-accent references var(--blue)', () => {
   );
 });
 
-// (2) Tint tokens use color-mix; never rgba.
-check('--provider-claude-tint uses color-mix(in srgb, var(--mauve) 6%, transparent)', () => {
+// (2) Tint tokens use color-mix; never rgba. Plan 22-02 bumped saturation
+// from 6% to 10%; the Pitfall 7 guard below still enforces var()-only
+// references, so the percentage is allowed to drift in [1..99] as long
+// as the color-mix shape and palette token are intact.
+check('--provider-claude-tint uses color-mix(in srgb, var(--mauve) <pct>%, transparent)', () => {
   assert.ok(
-    /--provider-claude-tint:\s*color-mix\(in srgb, var\(--mauve\) 6%, transparent\)/.test(css),
-    '--provider-claude-tint must use color-mix(in srgb, var(--mauve) 6%, transparent)'
+    /--provider-claude-tint:\s*color-mix\(in srgb, var\(--mauve\) \d{1,2}%, transparent\)/.test(css),
+    '--provider-claude-tint must use color-mix(in srgb, var(--mauve) N%, transparent)'
   );
 });
 
-check('--provider-codex-tint uses color-mix(in srgb, var(--green) 6%, transparent)', () => {
+check('--provider-codex-tint uses color-mix(in srgb, var(--green) <pct>%, transparent)', () => {
   assert.ok(
-    /--provider-codex-tint:\s*color-mix\(in srgb, var\(--green\) 6%, transparent\)/.test(css),
-    '--provider-codex-tint must use color-mix(in srgb, var(--green) 6%, transparent)'
+    /--provider-codex-tint:\s*color-mix\(in srgb, var\(--green\) \d{1,2}%, transparent\)/.test(css),
+    '--provider-codex-tint must use color-mix(in srgb, var(--green) N%, transparent)'
   );
 });
 
-check('--provider-gemini-tint uses color-mix(in srgb, var(--blue) 6%, transparent)', () => {
+check('--provider-gemini-tint uses color-mix(in srgb, var(--blue) <pct>%, transparent)', () => {
   assert.ok(
-    /--provider-gemini-tint:\s*color-mix\(in srgb, var\(--blue\) 6%, transparent\)/.test(css),
-    '--provider-gemini-tint must use color-mix(in srgb, var(--blue) 6%, transparent)'
+    /--provider-gemini-tint:\s*color-mix\(in srgb, var\(--blue\) \d{1,2}%, transparent\)/.test(css),
+    '--provider-gemini-tint must use color-mix(in srgb, var(--blue) N%, transparent)'
   );
 });
 

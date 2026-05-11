@@ -11221,6 +11221,20 @@ class CWMApp {
     paneEl.classList.remove('terminal-pane-empty');
     const titleEl = paneEl.querySelector('.terminal-pane-title');
     if (titleEl) titleEl.textContent = sessionName || sessionId;
+    // Plan 22-02: light up the provider pill in the pane header so the
+    // provider is identifiable at a glance. Pill text mirrors the
+    // registered provider's displayName when available; otherwise the
+    // raw provider id is shown title-cased. Dot color is driven by CSS
+    // selector on data-provider, no inline color needed.
+    const pillEl = paneEl.querySelector('.pane-provider-pill');
+    if (pillEl) {
+      const pid = paneEl.dataset.provider;
+      pillEl.dataset.provider = pid;
+      const reg = this._getProviderById ? this._getProviderById(pid) : null;
+      const labelFromRegistry = reg && reg.displayName;
+      pillEl.textContent = labelFromRegistry || (pid ? pid.charAt(0).toUpperCase() + pid.slice(1) : '');
+      pillEl.hidden = !pid;
+    }
     const closeBtn = paneEl.querySelector('.terminal-pane-close');
     if (closeBtn) closeBtn.hidden = false;
     const uploadBtn2 = paneEl.querySelector('.terminal-pane-upload');
@@ -11270,6 +11284,9 @@ class CWMApp {
         if (closeBtn2) closeBtn2.hidden = true;
         const scheduleBtn3 = deadPane.querySelector('.terminal-pane-schedule');
         if (scheduleBtn3) scheduleBtn3.hidden = true;
+        // Plan 22-02: hide the provider pill when the pane goes empty.
+        const pillElDead = deadPane.querySelector('.pane-provider-pill');
+        if (pillElDead) { pillElDead.hidden = true; pillElDead.textContent = ''; pillElDead.removeAttribute('data-provider'); }
       }
       this.updateTerminalGridLayout();
     };
@@ -11944,6 +11961,9 @@ class CWMApp {
     paneEl.removeAttribute('data-provider');
     const titleEl = paneEl.querySelector('.terminal-pane-title');
     if (titleEl) titleEl.textContent = 'Drop a session here';
+    // Plan 22-02: hide and clear the provider pill when the pane empties.
+    const pillElClose = paneEl.querySelector('.pane-provider-pill');
+    if (pillElClose) { pillElClose.hidden = true; pillElClose.textContent = ''; pillElClose.removeAttribute('data-provider'); }
     const closeBtn = paneEl.querySelector('.terminal-pane-close');
     if (closeBtn) closeBtn.hidden = true;
     const uploadBtn3 = paneEl.querySelector('.terminal-pane-upload');

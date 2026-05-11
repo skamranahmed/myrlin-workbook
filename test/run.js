@@ -841,6 +841,7 @@ const standaloneTests = [
   'pane-context-menu.test.js',       // Plan 21-01: Codex pane right-click menu structure gate
   'project-session-resume-provider.test.js', // alpha.5 bug fix: discovered-session right-click routes by provider
   'adhoc-pane-menu.test.js',         // Plan 22-04: ad-hoc pane right-click menu reduced fallback
+  'provider-label-pill.test.js',     // Plan 22-02: pane provider pill + sidebar stripes
 ];
 
 let standaloneFailed = 0;

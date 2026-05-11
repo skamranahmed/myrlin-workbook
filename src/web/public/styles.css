@@ -99,9 +99,9 @@
   --provider-claude-accent: var(--mauve);
   --provider-codex-accent:  var(--green);
   --provider-gemini-accent: var(--blue);
-  --provider-claude-tint:   color-mix(in srgb, var(--mauve) 6%, transparent);
-  --provider-codex-tint:    color-mix(in srgb, var(--green) 6%, transparent);
-  --provider-gemini-tint:   color-mix(in srgb, var(--blue) 6%, transparent);
+  --provider-claude-tint:   color-mix(in srgb, var(--mauve) 10%, transparent);
+  --provider-codex-tint:    color-mix(in srgb, var(--green) 10%, transparent);
+  --provider-gemini-tint:   color-mix(in srgb, var(--blue) 10%, transparent);
 
   font-family: var(--font-sans);
   font-size: 14px;
@@ -10231,26 +10231,80 @@ html {
    (12% saturation) sits BEHIND the xterm canvas; xterm paints opaque
    over its own area so text contrast is never reduced (Pitfall F). */
 .terminal-pane[data-provider="claude"]:not(.terminal-pane-empty) {
-  border-top: 3px solid var(--provider-claude-accent);
+  border-top: 4px solid var(--provider-claude-accent);
   border-bottom: 2px solid var(--provider-claude-accent);
   background:
     linear-gradient(180deg, var(--provider-claude-tint) 0, transparent 64px),
-    color-mix(in srgb, var(--mauve) 4%, var(--bg-primary));
+    color-mix(in srgb, var(--mauve) 8%, var(--bg-primary));
 }
 .terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) {
-  border-top: 3px solid var(--provider-codex-accent);
+  border-top: 4px solid var(--provider-codex-accent);
   border-bottom: 2px solid var(--provider-codex-accent);
   background:
     linear-gradient(180deg, var(--provider-codex-tint) 0, transparent 64px),
-    color-mix(in srgb, var(--green) 4%, var(--bg-primary));
+    color-mix(in srgb, var(--green) 8%, var(--bg-primary));
 }
 
-/* 2px provider stripe on the left edge of the project accordion. */
+/* 3px provider stripe on the left edge of project accordions (Plan 22-02). */
 .project-accordion[data-provider="claude"] {
-  box-shadow: inset 2px 0 0 var(--provider-claude-accent);
+  box-shadow: inset 3px 0 0 var(--provider-claude-accent);
 }
 .project-accordion[data-provider="codex"] {
-  box-shadow: inset 2px 0 0 var(--provider-codex-accent);
+  box-shadow: inset 3px 0 0 var(--provider-codex-accent);
+}
+
+/* Plan 22-02: per-provider stripe on every session item in the sidebar
+   and inside project accordions, plus a pane-header pill. Theme-safe via
+   the existing --provider-*-accent palette tokens. */
+.ws-session-item[data-provider="claude"] {
+  box-shadow: inset 3px 0 0 var(--provider-claude-accent);
+  padding-left: 11px;
+}
+.ws-session-item[data-provider="codex"] {
+  box-shadow: inset 3px 0 0 var(--provider-codex-accent);
+  padding-left: 11px;
+}
+.project-session-item[data-provider="claude"] {
+  box-shadow: inset 3px 0 0 var(--provider-claude-accent);
+  padding-left: 11px;
+}
+.project-session-item[data-provider="codex"] {
+  box-shadow: inset 3px 0 0 var(--provider-codex-accent);
+  padding-left: 11px;
+}
+
+/* Pane header provider label pill (Plan 22-02). Hidden via [hidden]
+   when the pane is empty. Sits left of the title; uses --surface-2 for
+   the background and the matching --provider-*-accent for the dot. */
+.pane-provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  margin-right: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+.pane-provider-pill[data-provider="claude"]::before,
+.pane-provider-pill[data-provider="codex"]::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pane-provider-pill[data-provider="claude"]::before {
+  background: var(--provider-claude-accent);
+}
+.pane-provider-pill[data-provider="codex"]::before {
+  background: var(--provider-codex-accent);
 }
 
 
