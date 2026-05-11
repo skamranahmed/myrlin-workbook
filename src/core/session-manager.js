@@ -57,8 +57,22 @@ function launchSession(sessionId) {
   }
 
   try {
-    const baseCommand = session.command || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
-    const bypassFlag = session.bypassPermissions ? ' --dangerously-skip-permissions' : '';
+    const baseCommand = session.command || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default)
+    // alpha.7: provider-aware bypass flag. Claude uses
+    //   --dangerously-skip-permissions; Codex uses
+    //   --dangerously-bypass-approvals-and-sandbox. Passing the Claude
+    // flag to the Codex CLI produces "unknown argument" errors that
+    // silently flash by in the spawned console window and leave the
+    // user wondering why the session "didn't start."
+    let bypassFlag = '';
+    if (session.bypassPermissions) {
+      const providerId = session.provider || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged legacy sessions)
+      if (providerId === 'codex') { // gsd:provider-literal-allowed
+        bypassFlag = ' --dangerously-bypass-approvals-and-sandbox';
+      } else {
+        bypassFlag = ' --dangerously-skip-permissions';
+      }
+    }
     const command = baseCommand + bypassFlag;
     const workingDir = expandHome(session.workingDir) || process.cwd();
 

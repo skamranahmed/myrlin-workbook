@@ -1358,7 +1358,7 @@ app.get('/api/sessions', requireAuth, (req, res) => {
  * Body: { name, workspaceId, workingDir?, topic?, command?, resumeSessionId? }
  */
 app.post('/api/sessions', requireAuth, (req, res) => {
-  const { name, workspaceId, workingDir, topic, command, resumeSessionId } = req.body || {};
+  const { name, workspaceId, workingDir, topic, command, resumeSessionId, provider } = req.body || {};
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
     return res.status(400).json({ error: 'Session name is required.' });
@@ -1385,6 +1385,21 @@ app.post('/api/sessions', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Invalid resume session ID.' });
   }
 
+  // alpha.7: validate + propagate `provider` from the request body. Without
+  // this, a Codex Desktop session adopted via "Add to Project" lost its
+  // provider tag and silently defaulted via the read-side normalizer.
+  // Downstream actions (Start, Start (Bypass), Restart) then launched
+  // the wrong CLI against a non-matching session UUID, producing
+  // confusing errors. Validation regex matches the registry's allowed
+  // id shape.
+  let safeProvider = null;
+  if (provider !== undefined && provider !== null) {
+    if (typeof provider !== 'string' || !/^[a-z][a-z0-9_-]{0,32}$/.test(provider)) {
+      return res.status(400).json({ error: 'Invalid provider id.' });
+    }
+    safeProvider = provider;
+  }
+
   const store = getStore();
   const session = store.createSession({
     name: name.trim(),
@@ -1397,6 +1412,15 @@ app.post('/api/sessions', requireAuth, (req, res) => {
 
   if (!session) {
     return res.status(404).json({ error: 'Workspace not found. Cannot create session.' });
+  }
+
+  // Apply provider tag through updateSession so the session is persisted
+  // with the correct provider. The two-step (create then update) keeps
+  // createSession's signature stable; a future schema bump can fold the
+  // field into the constructor.
+  if (safeProvider) {
+    store.updateSession(session.id, { provider: safeProvider });
+    session.provider = safeProvider;
   }
 
   return res.status(201).json({ session });
