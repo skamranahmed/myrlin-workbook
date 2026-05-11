@@ -300,11 +300,21 @@ function readSessionMetaFromFile(filePath) {
     if (!envelope || envelope.type !== 'session_meta') return null;
 
     const payload = envelope.payload || {};
+    // Codex Desktop spawns subagent threads (explorer/Pascal/Linnaeus/etc.)
+    // as their own rollout files with payload.source.subagent.thread_spawn set.
+    // These are internal agent fan-outs from a parent user thread; the user
+    // never opened them directly and they pollute the discovered list. Filter
+    // them out so the sidebar shows only top-level user conversations. The
+    // subagent rollouts remain on disk and parseTranscript still reads them
+    // when a parent thread's transcript references them.
+    const src = payload.source;
+    const isSubagent = src && typeof src === 'object' && src.subagent != null;
     return {
       cwd: typeof payload.cwd === 'string' ? payload.cwd : null,
       startedAt: typeof payload.timestamp === 'string' ? payload.timestamp : null,
       title: null, // session_meta does not carry the human title; that lives in event_msg.thread_name_updated or session_index
       cliVersion: typeof payload.cli_version === 'string' ? payload.cli_version : null,
+      isSubagent,
     };
   } catch (_) {
     return null;
@@ -383,6 +393,12 @@ async function discover(opts) {
       // every file, so per-file work is even.
       const meta = readSessionMetaFromFile(rolloutPath);
 
+      // Skip subagent-spawned threads (explorer/specialist agents Codex Desktop
+      // forks off a parent user thread). They share the same on-disk format but
+      // were never user-initiated; surfacing them in the sidebar duplicates and
+      // confuses the conversation list.
+      if (meta && meta.isSubagent) continue;
+
       const indexUpdated = new Date(entry.updated_at);
       const mtime = stat.mtime;
       const lastActive = !isNaN(indexUpdated.getTime()) && mtime < indexUpdated ? indexUpdated : mtime;
@@ -422,6 +438,8 @@ async function discover(opts) {
       if (!stat.isFile()) continue;
 
       const meta = readSessionMetaFromFile(filePath);
+      // Skip subagent-spawned threads (see comment in fast-path block above).
+      if (meta && meta.isSubagent) continue;
       // If we get here, the index either had no usable entry for this id OR
       // pointed at a missing file. Either way, walk-derived data is truth.
       byId.set(id, {

@@ -326,6 +326,41 @@ console.log('  ' + '-'.repeat(70));
     });
   }
 
+  // ─── Test 9: subagent-spawned threads are filtered out ──────────────────
+  {
+    const tmp = makeCodexHome();
+    const dayDir = path.join(tmp, 'sessions', '2026', '05', '11');
+    fs.mkdirSync(dayDir, { recursive: true });
+    const userId = '019eaaaa-1111-7000-8000-aaaaaaaaaaaa';
+    const subAId = '019eaaaa-2222-7000-8000-bbbbbbbbbbbb';
+    const subBId = '019eaaaa-3333-7000-8000-cccccccccccc';
+    // Top-level user thread (source: 'vscode')
+    fs.writeFileSync(path.join(dayDir, 'rollout-2026-05-11T00-00-00-' + userId + '.jsonl'),
+      JSON.stringify({type:'session_meta', timestamp:'2026-05-11T00:00:00Z', payload:{id:userId, timestamp:'2026-05-11T00:00:00Z', cwd:'/anon/user', source:'vscode', cli_version:'0.125.0', originator:'Codex Desktop'}}) + '\n');
+    // Two explorer-role subagent spawns from the user thread
+    fs.writeFileSync(path.join(dayDir, 'rollout-2026-05-11T00-00-01-' + subAId + '.jsonl'),
+      JSON.stringify({type:'session_meta', timestamp:'2026-05-11T00:00:01Z', payload:{id:subAId, timestamp:'2026-05-11T00:00:01Z', cwd:'/anon/user', source:{subagent:{thread_spawn:{parent_thread_id:userId, depth:1, agent_role:'explorer', agent_nickname:'Pascal'}}}, cli_version:'0.125.0', originator:'Codex Desktop'}}) + '\n');
+    fs.writeFileSync(path.join(dayDir, 'rollout-2026-05-11T00-00-02-' + subBId + '.jsonl'),
+      JSON.stringify({type:'session_meta', timestamp:'2026-05-11T00:00:02Z', payload:{id:subBId, timestamp:'2026-05-11T00:00:02Z', cwd:'/anon/user', source:{subagent:{thread_spawn:{parent_thread_id:userId, depth:1, agent_role:'explorer', agent_nickname:'Linnaeus'}}}, cli_version:'0.125.0', originator:'Codex Desktop'}}) + '\n');
+    stageSessionIndex(tmp, [
+      { id: userId, thread_name: 'Real user thread', updated_at: '2026-05-11T00:00:00.000Z' },
+      { id: subAId, thread_name: 'Pascal explorer', updated_at: '2026-05-11T00:00:01.000Z' },
+      { id: subBId, thread_name: 'Linnaeus explorer', updated_at: '2026-05-11T00:00:02.000Z' },
+    ]);
+    await withCodexHome(tmp, async () => {
+      console.debug = () => {};
+      const results = await discover();
+      console.debug = realDebug;
+      test('discover filters out subagent-spawned threads (Pascal/Linnaeus/etc.)', () => {
+        assertEqual(results.length, 1, 'expected only 1 user-initiated thread, got ' + results.length + ' (subagent filter failed)');
+        assertEqual(results[0].providerSessionId, userId, 'remaining thread should be the user-initiated one');
+        const ids = results.map(r => r.providerSessionId);
+        assert(!ids.includes(subAId), 'subagent A (Pascal) should be filtered out');
+        assert(!ids.includes(subBId), 'subagent B (Linnaeus) should be filtered out');
+      });
+    });
+  }
+
   // ─── Summary + exit ─────────────────────────────────────────────────────
   console.log('  ' + '-'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');

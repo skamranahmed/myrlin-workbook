@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.1] - 2026-05-11
+
+### Fixed
+
+- **Codex discovery showed subagent threads as conversations.** Codex Desktop spawns explorer-role subagents (Pascal, Linnaeus, Copernicus, etc.) from a parent user thread; each subagent gets its own rollout file with `payload.source.subagent.thread_spawn` set. The discover module was treating these as user conversations and surfacing them in the sidebar, inflating the list (e.g., 34 entries for a user with only 5 actual conversations). Now filtered at session_meta read time in both the fast-path and walk-fallback. Subagent rollouts remain on disk and remain parseable when a parent thread's transcript references them. Added regression test `test/codex-discover.test.js` Test 9. Reported by Arthur.
+
 ## [1.2.0-alpha.0] - 2026-05-11
 
 > **Alpha release.** First publishable cut of v1.2 Multi-Provider Chat Discovery. Ships under the `alpha` npm dist-tag; install with `npm i myrlin-workbook@alpha`. Existing users on `latest` (v0.9.36) are unaffected. Production-ready stable v1.2 follows after dogfooding.
