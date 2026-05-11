@@ -2928,9 +2928,18 @@ class CWMApp {
    * @param {string} sessionId - The session to build items for
    * @returns {Array|null} Array of menu items, or null if session not found
    */
-  _buildSessionContextItems(sessionId) {
+  _buildSessionContextItems(sessionId, tp = null) {
     const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
-    if (!session) return null;
+    if (!session) {
+      // Plan 22-04: ad-hoc fallback. Some panes (Codex Desktop sessions
+      // opened via right-click, drag-dropped Claude sessions, etc.) have no
+      // Myrlin store record. Build a reduced item list using the pane's
+      // spawnOpts so the right-click is still useful. Items that require
+      // server-side state we don't have (Start/Stop/Restart by id, Tags,
+      // Spinoff Tasks, Move-to-workspace) are skipped on purpose.
+      if (!tp) return null;
+      return this._buildAdHocSessionContextItems(sessionId, tp);
+    }
 
     const isRunning = session.status === 'running' || session.status === 'idle';
     const isBypassed = !!session.bypassPermissions;
@@ -3076,6 +3085,91 @@ class CWMApp {
 
     // Remove from workspace (actually deletes the session record)
     items.push({ label: 'Remove from Project', icon: '&#10005;', danger: true, action: () => this.removeSessionFromWorkspace(sessionId) });
+
+    return items;
+  }
+
+  /**
+   * Build a reduced item list for an ad-hoc pane (no Myrlin store record).
+   *
+   * Plan 22-04: right-click on a Codex Desktop pane opened via "Open in
+   * Terminal" used to show almost nothing because _buildSessionContextItems
+   * bailed early when no store record existed. This factory returns the
+   * universal subset that works without server-side state: naming
+   * affordances, insights (copy ID, copy path, summarize), an "Add to
+   * active workspace" adopter, and Open in File Manager. Provider-specific
+   * settings (Codex's model/sandbox/etc.) live in _buildCodexPaneMenu and
+   * are added separately by the pane right-click dispatcher.
+   *
+   * @param {string} sessionId - Upstream CLI session UUID (Codex rollout
+   *   id, Claude session id, etc.).
+   * @param {Object} tp - TerminalPane instance for the pane.
+   * @returns {Array<Object>} Menu items in the standard {label, icon,
+   *   action, submenu?} shape used by _renderContextItems.
+   */
+  _buildAdHocSessionContextItems(sessionId, tp) {
+    const items = [];
+    const provider = (tp.spawnOpts && tp.spawnOpts.provider) || 'claude'; // gsd:provider-literal-allowed (back-compat default)
+    const cwd = (tp.spawnOpts && tp.spawnOpts.cwd) || null;
+    const slotIdx = this.terminalPanes.findIndex(p => p === tp);
+
+    items.push({
+      label: 'Naming', icon: '&#9998;',
+      submenu: [
+        { label: 'Rename Pane', action: () => {
+          if (slotIdx < 0) return;
+          const titleEl = document.querySelector('#term-pane-' + slotIdx + ' .terminal-pane-title');
+          if (titleEl) this.startTerminalPaneRename(titleEl, slotIdx, sessionId, false);
+        }},
+        { label: 'Auto Title', action: () => this.autoTitleProjectSession(sessionId) },
+      ],
+    });
+
+    const insightsItems = [
+      { label: 'Summarize', action: () => this.summarizeSession(sessionId, sessionId) },
+      { label: 'Copy Session ID', action: () => {
+        navigator.clipboard.writeText(sessionId);
+        this.showToast('Session ID copied', 'success');
+      }},
+    ];
+    if (cwd) {
+      insightsItems.push({ label: 'Copy Path', action: () => {
+        navigator.clipboard.writeText(cwd);
+        this.showToast('Path copied', 'success');
+      }});
+    }
+    items.push({ label: 'Insights', icon: '&#128220;', submenu: insightsItems });
+
+    if (this.state.activeWorkspace) {
+      items.push({
+        label: 'Add to ' + this.state.activeWorkspace.name, icon: '&#43;', action: async () => {
+          const cliBinary = this.getProviderCliBinary(provider);
+          const customTitle = this.getProjectSessionTitle(sessionId);
+          let friendlyName = customTitle;
+          if (!friendlyName) {
+            const folder = cwd ? (cwd.split(/[\\/]/).pop() || sessionId) : sessionId;
+            const shortId = sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId;
+            friendlyName = folder + ' (' + shortId + ')';
+          }
+          try {
+            await this.api('POST', '/api/sessions', {
+              name: friendlyName,
+              workspaceId: this.state.activeWorkspace.id,
+              workingDir: cwd || '',
+              topic: 'Adopted from ad-hoc pane',
+              command: cliBinary,
+              provider,
+              resumeSessionId: sessionId,
+            });
+            if (typeof this.loadSessions === 'function') await this.loadSessions();
+            if (typeof this.renderWorkspaces === 'function') this.renderWorkspaces();
+            this.showToast('Added to ' + this.state.activeWorkspace.name, 'success');
+          } catch (err) {
+            this.showToast(err.message || 'Failed to add', 'error');
+          }
+        },
+      });
+    }
 
     return items;
   }
@@ -11733,7 +11827,10 @@ class CWMApp {
     }
 
     // ── Shared session management items ───────────────────────
-    const sessionItems = this._buildSessionContextItems(tp.sessionId);
+    // Plan 22-04: pass tp so the function can build an ad-hoc subset when
+    // no store record exists for tp.sessionId (Codex Desktop right-click,
+    // drag-dropped sessions, etc.).
+    const sessionItems = this._buildSessionContextItems(tp.sessionId, tp);
     if (sessionItems) {
       items.push({ type: 'sep' });
       items.push(...sessionItems);

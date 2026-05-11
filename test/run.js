@@ -840,6 +840,7 @@ const standaloneTests = [
   'codex-settings-route.test.js',    // Plan 21-01: PUT /api/sessions/:id/provider-settings (Codex menu persistence)
   'pane-context-menu.test.js',       // Plan 21-01: Codex pane right-click menu structure gate
   'project-session-resume-provider.test.js', // alpha.5 bug fix: discovered-session right-click routes by provider
+  'adhoc-pane-menu.test.js',         // Plan 22-04: ad-hoc pane right-click menu reduced fallback
 ];
 
 let standaloneFailed = 0;
