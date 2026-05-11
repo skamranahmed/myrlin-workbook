@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.8] - 2026-05-11
+
+### Added
+
+- **Codex bottom status strip on every Codex pane** (Plan 22-01). 26px chip row absolutely positioned along the bottom edge of `data-provider="codex"` panes showing `model · sandbox · approval · effort · [BYPASS]? · [features N]?`. Each chip is clickable — opens the matching submenu from `_buildCodexPaneMenu` anchored to the chip rect. Bypass chip only renders when bypass is ON (red, `letter-spacing` 0.08em, impossible to miss). `/api/discover` now returns `adHocProviderSettings` so the strip hydrates immediately for discovered Codex Desktop sessions without a Myrlin store record.
+- **Auto-discovery for Codex sessions** (Plan 22-03). New `fs.watch` on `$CODEX_HOME/sessions` with 500ms debounce + 5-minute fallback poll. The provider's `init({onChange})` wires through the registry; server invalidates `_discoverCache` and broadcasts SSE `discover:refreshed`. Frontend re-fetches `/api/discover` on the event. New Codex CLI / Codex Desktop sessions appear in the sidebar within ~1 second of being created. Subagent filter from alpha.1 still in effect.
+- **`scripts/setup-cloudflared.ps1`** — idempotent installer/refresher for the `workbook.myrlin.dev` tunnel config. Reads the current `~/.cloudflared/config.yml`, patches the workbook hostname's upstream port (currently 3457 on this PC, was 3456), validates ingress, and prompts for a service restart.
+- **`scripts/setup-power-never-sleep.ps1`** — applies "never sleep / never turn off display" on AC and disables hibernate so the tunnel stays reachable.
+- **`docs/OPERATIONS.md`** — runbook for the three auto-restart layers, Cloudflare assets, log locations, Service Token rotation, port-mismatch recovery, and failure scenarios.
+
 ## [1.2.0-alpha.7] - 2026-05-11
 
 ### Fixed
