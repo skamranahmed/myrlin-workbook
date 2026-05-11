@@ -402,18 +402,22 @@ class TerminalPane {
           return false;
         }
 
-        // Shift+Enter: send ESC+CR — Anthropic's documented "newline in input"
-        // sequence. Plain \n didn't work because Ink-based TUIs (Claude Code)
-        // treat both \n and \r as submit; \x1b\r is interpreted as "newline,
-        // not submit". Matches the keybinding recipe shipped by /terminal-setup.
+        // Shift+Enter: dispatch through this pane's provider spec.
+        // Plan 19-02 (PTY-05) refactor. Previously hardcoded to '\x1b\r'
+        // which is Claude/Ink-correct but wrong for non-Ink TUIs.
+        // _getShiftEnterSequence reads window.CWMProviderSpecs and returns
+        // the provider-specific sequence (Claude -> '\x1b\r', Codex -> '\r').
+        // Defaults to '\x1b\r' if the spec map is missing so the long-
+        // standing Claude behavior is the safe fallback.
         // preventDefault is required: returning false only stops xterm from
         // handling the key but does NOT prevent the browser from inserting a
         // newline into the hidden textarea, which then fires onData with \r
-        // and submits — same pattern as the Ctrl+V handler above.
+        // and submits, same pattern as the Ctrl+V handler above.
         if (e.key === 'Enter' && e.shiftKey) {
           e.preventDefault();
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'input', data: '\x1b\r' }));
+            const data = this._getShiftEnterSequence();
+            this.ws.send(JSON.stringify({ type: 'input', data }));
           }
           return false;
         }
@@ -1360,6 +1364,35 @@ class TerminalPane {
         }
       }
     }
+  }
+
+  /**
+   * Plan 19-02 (PTY-05): resolve the Shift+Enter byte sequence for this
+   * pane's provider.
+   *
+   * Reads window.CWMProviderSpecs[providerId].shiftEnter. Claude returns
+   * '\x1b\r' (Ink-correct: ESC+CR is "newline in input"); Codex returns
+   * '\r' (plain CR; Codex CLI is Rust-based and does not need Ink's
+   * workaround).
+   *
+   * Defensive fallback to '\x1b\r' (Claude's value) so the long-standing
+   * behavior is preserved when the spec map is missing (e.g., boot race
+   * condition or /api/providers unreachable on first paint).
+   *
+   * Instance method (not static) because it consults this._providerId
+   * cached at mount time.
+   *
+   * @returns {string} The byte sequence to send for Shift+Enter.
+   */
+  _getShiftEnterSequence() {
+    const specs = (typeof window !== 'undefined' && window.CWMProviderSpecs) || null;
+    const spec = (specs && specs[this._providerId]) ||
+      (specs && specs.claude) || // gsd:provider-literal-allowed (Phase 19 fallback)
+      null;
+    if (spec && typeof spec.shiftEnter === 'string') return spec.shiftEnter;
+    // Defensive default: Claude's Ink-correct ESC+CR. Preserves pre-19-02
+    // behavior when the spec map is unavailable.
+    return '\x1b\r';
   }
 
   /**

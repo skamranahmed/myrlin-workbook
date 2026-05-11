@@ -69,14 +69,26 @@ function isIdleSignal(line) {
 }
 
 /**
- * Per-provider key bindings. Claude Code's PTY treats Shift+Enter as a
- * literal newline (so multi-line prompts can be composed) and otherwise
- * uses the standard xterm bindings. Phase 19 may extend this for Codex.
+ * Per-provider key bindings.
+ *
+ * Claude Code's renderer is Ink-based: plain \r and \n are interpreted as
+ * "submit the prompt", which means a naive Shift+Enter that sends \r would
+ * submit instead of inserting a newline in the input. The Anthropic-
+ * documented sequence for "newline in input" is ESC+CR (\x1b\r); that is
+ * what /terminal-setup wires for Claude users and what terminal.js has
+ * shipped to the PTY since v0.9.33.
+ *
+ * Plan 19-02 (PTY-05) reconciles this value with the live frontend behavior:
+ * previously this function returned '\r' (incorrect for Ink), while
+ * terminal.js sent '\x1b\r' hardcoded inline. The frontend now dispatches
+ * through provider-specs.js which mirrors this value, and a parity test
+ * (test/keybindings-dispatch.test.js) asserts agreement between this
+ * function and the frontend spec.
  *
  * @returns {{shiftEnter:string}}
  */
 function getKeyBindings() {
-  return { shiftEnter: '\r' };
+  return { shiftEnter: '\x1b\r' };
 }
 
 /**
