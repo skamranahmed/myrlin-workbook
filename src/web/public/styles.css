@@ -10245,30 +10245,16 @@ html {
     color-mix(in srgb, var(--green) 8%, var(--bg-primary));
 }
 
-/* 3px provider stripe on the left edge of project accordions (Plan 22-02). */
-.project-accordion[data-provider="claude"] {
-  box-shadow: inset 3px 0 0 var(--provider-claude-accent);
-}
-.project-accordion[data-provider="codex"] {
-  box-shadow: inset 3px 0 0 var(--provider-codex-accent);
-}
-
-/* Plan 22-02: per-provider stripe on every session item in the sidebar
-   and inside project accordions, plus a pane-header pill. Theme-safe via
-   the existing --provider-*-accent palette tokens. */
+/* alpha.7 follow-up: per-provider stripes on the workspace sidebar
+   session items only. User asked to drop the per-provider markers from
+   the Discovered Projects section (project accordions and their session
+   items) — that section already conveys provider via tab filtering, so
+   the stripes there were noise. Theme-safe via --provider-*-accent. */
 .ws-session-item[data-provider="claude"] {
   box-shadow: inset 3px 0 0 var(--provider-claude-accent);
   padding-left: 11px;
 }
 .ws-session-item[data-provider="codex"] {
-  box-shadow: inset 3px 0 0 var(--provider-codex-accent);
-  padding-left: 11px;
-}
-.project-session-item[data-provider="claude"] {
-  box-shadow: inset 3px 0 0 var(--provider-claude-accent);
-  padding-left: 11px;
-}
-.project-session-item[data-provider="codex"] {
   box-shadow: inset 3px 0 0 var(--provider-codex-accent);
   padding-left: 11px;
 }

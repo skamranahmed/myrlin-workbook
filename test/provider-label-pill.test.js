@@ -63,18 +63,10 @@ check('Sidebar .ws-session-item carries provider stripe', () => {
     'codex ws-session-item must reference --provider-codex-accent'
   );
 });
-check('.project-session-item carries provider stripe', () => {
-  assert.ok(
-    /\.project-session-item\[data-provider="codex"\][\s\S]*?--provider-codex-accent/.test(css),
-    'codex project-session-item must reference --provider-codex-accent'
-  );
-});
-check('.project-accordion still carries provider stripe', () => {
-  assert.ok(
-    /\.project-accordion\[data-provider="codex"\][\s\S]*?--provider-codex-accent/.test(css),
-    'project-accordion codex must reference --provider-codex-accent'
-  );
-});
+// Note: post-alpha.7 the project-session-item and project-accordion
+// provider stripes were removed per user feedback (Discovered Projects
+// already filters by provider tab so the stripe was redundant noise).
+// Only the workspace sidebar's .ws-session-item carries the stripe now.
 check('Pane top accent bumped to 4px', () => {
   // Both claude and codex should be `border-top: 4px solid var(--provider-*-accent)`.
   assert.ok(

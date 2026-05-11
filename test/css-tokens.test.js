@@ -126,19 +126,11 @@ check('terminal-pane[data-provider="codex"]:not(.terminal-pane-empty) selector e
   );
 });
 
-check('project-accordion[data-provider="claude"] selector exists', () => {
-  assert.ok(
-    css.includes('.project-accordion[data-provider="claude"]'),
-    'project-accordion claude selector must be present so the stripe renders'
-  );
-});
-
-check('project-accordion[data-provider="codex"] selector exists', () => {
-  assert.ok(
-    css.includes('.project-accordion[data-provider="codex"]'),
-    'project-accordion codex selector must be present so the stripe renders'
-  );
-});
+// Note: project-accordion + project-session-item provider stripes were
+// removed post-alpha.7 per user feedback (the Discovered Projects
+// section already conveys provider via tab filtering; the stripes were
+// noise). The remaining provider-stripe surface is .ws-session-item in
+// the workspace sidebar, which is covered by test/provider-label-pill.test.js.
 
 // (5) Sanity: the terminal-pane background gradient fades to transparent within
 // the pane chrome (Pitfall F: gradient must not bleed onto the xterm canvas and
