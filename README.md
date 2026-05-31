@@ -29,9 +29,12 @@ Open-source workspace manager for AI coding CLIs. <b>Now multi-provider</b> (v1.
 ### Try it now
 
 ```bash
-npx myrlin-workbook          # Opens browser, discovers your real Claude sessions
+npx myrlin-workbook          # Stable (Claude only). Add @alpha for v1.2 multi-provider.
+npx myrlin-workbook@alpha    # v1.2 alpha: Claude + ChatGPT Codex (off by default)
 npx myrlin-workbook --demo   # Opens browser with sample data (no real sessions needed)
 ```
+
+> **On the old version?** `npx myrlin-workbook` (and `@latest`) installs the stable line. All v1.2 multi-provider work ships under the `@alpha` tag until 1.2 goes stable. Use `npx myrlin-workbook@alpha` for the latest features.
 
 ### Install from source
 
@@ -60,6 +63,22 @@ CWM_PASSWORD=mypassword npx myrlin-workbook
 Password lookup order: `CWM_PASSWORD` env var > `~/.myrlin/config.json` > `./state/config.json` > auto-generate.
 
 On startup, the console prints a clickable URL with a one-time token (e.g., `http://127.0.0.1:3456?token=<random>`). Click it to auto-login — the token is single-use and expires after 60 seconds, so it's safe even if it appears in terminal logs. The token is stripped from the URL bar immediately after login.
+
+### Access from other devices on your LAN
+
+By default the GUI binds to `127.0.0.1` (localhost only). To reach it from your phone, tablet, or another computer on the same network, bind to your machine's LAN IP with `CWM_HOST`:
+
+```bash
+# Find your LAN IP first (ipconfig on Windows, ifconfig/ip addr on macOS/Linux),
+# then bind to it:
+CWM_HOST=192.168.1.121 npx myrlin-workbook@alpha    # then open http://192.168.1.121:3456 from any LAN device
+```
+
+Override the port with `PORT` if 3456 is taken (e.g. `PORT=3457 CWM_HOST=192.168.1.121 npx myrlin-workbook@alpha`).
+
+To avoid retyping the env var every launch, either export it in your shell profile (`export CWM_HOST=192.168.1.121`) or do a global install (`npm install -g myrlin-workbook@alpha`) and run the `myrlin` command.
+
+> **Security:** binding to a LAN IP exposes the login page to everyone on that network. The password/token auth above is the only gate, so set a strong password before doing this.
 
 ### Prerequisites
 
