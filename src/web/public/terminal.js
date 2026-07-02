@@ -258,6 +258,12 @@ class TerminalPane {
     this._activitySample = '';
     this._writeRaf = null;
     this._pasteHandled = false;
+    // Resize dedup: the last cols/rows actually sent to the server. Redundant
+    // resize messages force ConPTY viewport repaints that pollute every
+    // client's stream and the shared scrollback, so resize is only sent when
+    // dimensions really changed (see _sendResizeIfChanged).
+    this._lastSentCols = null;
+    this._lastSentRows = null;
     // Plan 19-02 (PTY-04, PTY-05): per-pane provider context. Both fields are
     // populated in mount() after the pane DOM exists. _providerId drives idle
     // detection and Shift+Enter dispatch; defaults to the back-compat provider
@@ -363,14 +369,14 @@ class TerminalPane {
           this.connect();
 
           // Safety refit after 200ms - catches edge cases where the grid
-          // is still settling (e.g., CSS transitions, slow layout)
+          // is still settling (e.g., CSS transitions, slow layout).
+          // Deduplicated: only notifies the server when dims really changed,
+          // so the common already-settled case sends nothing.
           setTimeout(() => {
             if (this.fitAddon) {
               try {
                 this.fitAddon.fit();
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                  this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
-                }
+                this._sendResizeIfChanged(false);
               } catch (_) {}
             }
           }, 200);
@@ -596,7 +602,10 @@ class TerminalPane {
       this._reconnectAttempts = 0;
       this._log('WebSocket OPEN');
       this._status('Connected. Starting session...', 'green');
-      this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
+      // Forced send: this server-side connection is brand new and has no
+      // stored viewport for this client yet, so the initial resize must go
+      // out even when dims match the previous connection's last send.
+      this._sendResizeIfChanged(true);
     };
 
     // ── Write batching: accumulate WebSocket data and flush to xterm
@@ -630,6 +639,18 @@ class TerminalPane {
             // for accurate session restoration on restart.
             this.spawnOpts.resumeSessionId = msg.resumeSessionId;
             this._log('Backfilled resumeSessionId: ' + msg.resumeSessionId);
+            return;
+          } else if (msg.type === 'reset') {
+            // Server-initiated full resync: a complete scrollback replay
+            // follows (attach/reconnect or lagged-client recovery). Drop any
+            // buffered partial writes and clear the screen so the replay
+            // cannot interleave with or duplicate stale frames. Must be safe
+            // mid-stream: everything here is idempotent.
+            if (this._writeRaf) { cancelAnimationFrame(this._writeRaf); this._writeRaf = null; }
+            if (this._bgFlushTimer) { clearTimeout(this._bgFlushTimer); this._bgFlushTimer = null; }
+            this._writeBuf = '';
+            this._activitySample = '';
+            if (this.term) this.term.reset();
             return;
           } else if (msg.type === 'error') {
             this._flushWriteBuffer();
@@ -736,15 +757,57 @@ class TerminalPane {
    */
   safeFit() {
     if (!this.fitAddon || !this.term) return;
+    // Bail when this pane's terminal element is detached from the document,
+    // e.g. cached inside a DocumentFragment during a tab-group switch. The
+    // ResizeObserver watches the slot container by id, so a DIFFERENT
+    // session mounted into the same slot in another tab group can otherwise
+    // fire this cached pane's observer; the container rect check below would
+    // pass (the container is visible, just hosting someone else) and a fit
+    // against the detached element would send bogus dims to this pane's PTY.
+    if (!this.term.element || !this.term.element.isConnected) return;
     const container = document.getElementById(this.containerId);
     if (!container) return;
     const rect = container.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     try { this.fitAddon.fit(); } catch (_) { return; }
-    // Notify server of new dimensions
+    // Notify the server only when dimensions actually changed. ConPTY
+    // repaints the whole viewport on every applied resize, so redundant
+    // resize messages pollute the stream of every connected client.
+    this._sendResizeIfChanged(false);
+  }
+
+  /**
+   * Send the terminal's current dimensions to the server, deduplicated
+   * against the last values sent on this pane.
+   *
+   * @param {boolean} force - Send even when dims match the last sent values.
+   *   Used on WebSocket open: the fresh server-side connection has no stored
+   *   viewport for this client yet, so the initial resize must always go out.
+   */
+  _sendResizeIfChanged(force) {
+    if (!this.term || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const cols = this.term.cols;
+    const rows = this.term.rows;
+    if (!force && cols === this._lastSentCols && rows === this._lastSentRows) return;
+    this._lastSentCols = cols;
+    this._lastSentRows = rows;
+    this.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+  }
+
+  /**
+   * Claim size ownership of the shared PTY for this client without writing
+   * anything to stdin, then re-assert this pane's geometry. Called by the
+   * app layer whenever this pane becomes the one the user is looking at
+   * (pane focus, browser tab becoming visible, window focus, tab-group
+   * restore). An old server that does not know the 'activate' type parses
+   * and ignores it, so this degrades gracefully across a mixed-version
+   * deploy window.
+   */
+  activate() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'resize', cols: this.term.cols, rows: this.term.rows }));
+      try { this.ws.send(JSON.stringify({ type: 'activate' })); } catch (_) {}
     }
+    this.safeFit();
   }
 
   /**
