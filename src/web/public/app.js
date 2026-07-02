@@ -93,6 +93,14 @@ class CWMApp {
   /** Maximum number of terminal pane slots in the grid */
   static MAX_PANES = 6;
 
+  // ── Completion-notification gating constants (notification-storm fix) ──
+  /** Per-session dedupe window: a session can toast/ding at most once per
+   *  this window, unless genuine new activity resets its entry first. */
+  static SESSION_NOTIFY_DEDUPE_MS = 60000;
+  /** Global minimum gap between audible chimes across ALL panes/sessions,
+   *  so several sessions finishing together produce one ding, not a burst. */
+  static CHIME_COOLDOWN_MS = 5000;
+
   constructor() {
     // ─── State ─────────────────────────────────────────────────
     this.state = {
@@ -175,6 +183,20 @@ class CWMApp {
 
     // ─── Global Search state ─────────────────────────────────
     this._searchDebounceTimer = null;
+
+    // ─── Completion-notification gating state (notification-storm fix) ──
+    // sessionId -> timestamp (ms) of the last completion notification for
+    // that session. Entries are refreshed when the user focuses the pane
+    // (viewing acknowledges the prompt) and cleared when genuine new
+    // activity is detected, so each work -> idle transition produces at
+    // most one toast/sound per SESSION_NOTIFY_DEDUPE_MS.
+    this._sessionNotifyState = new Map();
+    // Timestamp of the last audible chime, for the global sound cooldown.
+    this._lastChimeAt = 0;
+    // Lazily-created shared AudioContext for notification chimes. Reused
+    // across chimes because browsers cap concurrent AudioContexts and the
+    // previous one-context-per-ding implementation never closed them.
+    this._audioCtx = null;
 
     // ─── Conflict Detection state ────────────────────────────
     this._conflictCheckInterval = null;
@@ -1133,6 +1155,12 @@ class CWMApp {
     // The 'terminal-activity' event bubbles from the terminal container.
     document.addEventListener('terminal-activity', (e) => {
       const { sessionId, activity } = e.detail;
+      // Genuine new work (anything but idle) re-enables ONE completion
+      // notification for this session: clearing the dedupe entry lets the
+      // next work -> idle transition toast again (see onTerminalIdle).
+      if (activity && activity.type !== 'idle') {
+        this._sessionNotifyState.delete(sessionId);
+      }
       // Find which slot has this session
       for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
@@ -1149,7 +1177,9 @@ class CWMApp {
       const { sessionId, needsInput } = e.detail;
       for (let i = 0; i < CWMApp.MAX_PANES; i++) {
         if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
-          const paneEl = document.getElementById(`terminal-pane-${i}`);
+          // Pane elements are id'd term-pane-N (was terminal-pane-N, a
+          // selector that matched nothing, so the badge never rendered).
+          const paneEl = document.getElementById(`term-pane-${i}`);
           if (paneEl) {
             const header = paneEl.querySelector('.terminal-pane-header');
             if (header) header.dataset.needsInput = needsInput ? 'true' : 'false';
@@ -12959,9 +12989,26 @@ class CWMApp {
     // Respect completion notifications setting
     if (!this.getSetting('completionNotifications')) return;
 
+    // Per-session dedupe: skip if this session already notified recently.
+    // The entry is cleared by the terminal-activity listener when genuine
+    // new work starts and refreshed by setActiveTerminalPane when the user
+    // views the pane, so each work -> idle transition notifies at most once.
+    const lastNotifiedAt = this._sessionNotifyState.get(sessionId);
+    if (lastNotifiedAt && Date.now() - lastNotifiedAt < CWMApp.SESSION_NOTIFY_DEDUPE_MS) return;
+
     // Don't notify for the currently focused/active pane
     const activeIdx = this.terminalPanes.findIndex(tp => tp && tp.sessionId === sessionId);
     if (activeIdx === this._activeTerminalSlot) return;
+
+    // Record the notification BEFORE emitting any indicator so re-entrant
+    // idle events from other panes of the same session dedupe correctly.
+    this._sessionNotifyState.set(sessionId, Date.now());
+
+    // Toast + sound are for panes the user cannot currently see. A pane in
+    // the ACTIVE group while the window has focus is already on screen, so
+    // only passive indicators run for it (border flash below; the tab dot
+    // and title flash self-suppress for active-group/focused states).
+    const paneVisibleAndSeen = activeIdx !== -1 && document.hasFocus();
 
     // Flash the pane border green
     const paneEls = document.querySelectorAll('.terminal-pane');
@@ -12970,12 +13017,15 @@ class CWMApp {
       setTimeout(() => paneEls[activeIdx].classList.remove('terminal-pane-done'), 4000);
     }
 
-    // Play a subtle notification sound using Web Audio API
-    this._playNotificationSound();
-
-    // Show toast
     const name = sessionName || sessionId.substring(0, 12);
-    this.showToast(`${name} is ready for input`, 'success');
+
+    if (!paneVisibleAndSeen) {
+      // Play a subtle notification sound using Web Audio API
+      this._playNotificationSound();
+
+      // Show toast
+      this.showToast(`${name} is ready for input`, 'success');
+    }
 
     // If the pane is in a non-active tab group, highlight the tab
     this._highlightTabGroupForSession(sessionId);
@@ -13024,10 +13074,28 @@ class CWMApp {
   /**
    * Play a short two-tone chime via the Web Audio API.
    * Volume is kept low (0.08) to be noticeable but not jarring.
+   * Guarded by a global cooldown (CHIME_COOLDOWN_MS) so several sessions
+   * finishing close together produce one ding instead of a dinging storm.
    */
   _playNotificationSound() {
+    const now = Date.now();
+    if (now - this._lastChimeAt < CWMApp.CHIME_COOLDOWN_MS) return;
+    this._lastChimeAt = now;
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      // Reuse ONE lazily-created AudioContext instead of allocating a new
+      // one per chime. Browsers cap concurrent contexts (Chrome ~6) and the
+      // old per-call contexts were never closed, so a notification storm
+      // leaked contexts until audio broke. Reuse is chosen over per-call
+      // close() because a shared context has zero startup latency and no
+      // teardown race with the 0.3s tone tail.
+      if (!this._audioCtx) {
+        this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = this._audioCtx;
+      // Autoplay policy can suspend a context created outside a user
+      // gesture; resume() is async but safe to fire-and-forget here, and
+      // is a no-op when the context is already running.
+      if (ctx.state === 'suspended' && typeof ctx.resume === 'function') ctx.resume();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -13101,6 +13169,19 @@ class CWMApp {
       // pane means the user works here now, so this client's viewport wins
       // over any other device that resized the same session.
       if (typeof tp.activate === 'function') tp.activate();
+
+      // Acknowledge on focus: viewing a pane consumes its pending
+      // needs-attention state. Refresh the dedupe entry and mark the pane's
+      // idle cycle as already notified so a later tab switch or repaint
+      // cannot re-toast a prompt the user has already seen.
+      this._sessionNotifyState.set(tp.sessionId, Date.now());
+      tp._idleNotified = true;
+      tp._lastIdleFiredAt = Date.now();
+
+      // Clear the amber "Needs input" badge; the user is looking at it now.
+      tp._needsInput = false;
+      const headerEl = pane ? pane.querySelector('.terminal-pane-header') : null;
+      if (headerEl) headerEl.dataset.needsInput = 'false';
     }
 
     // If Tasks > td tab is visible and not manually pinned, update to this pane's project
@@ -15347,6 +15428,14 @@ class CWMApp {
         });
       }
     }
+
+    // Re-point the active-slot suppression at a pane that actually exists
+    // in the NEW group (runs after both the cached and fresh branches).
+    // Without this, onTerminalIdle compared incoming idle events against
+    // the PREVIOUS group's slot index, so every pane in the restored group
+    // looked "inactive" and could toast even while fully on screen.
+    const firstFilledSlot = this.terminalPanes.findIndex(p => p);
+    this._activeTerminalSlot = firstFilledSlot !== -1 ? firstFilledSlot : null;
 
     // Always reset grid layout for the new group's pane count.
     // Without this, switching to an empty tab group keeps the

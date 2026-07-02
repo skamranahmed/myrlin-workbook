@@ -218,6 +218,24 @@ class TerminalPane {
     }
   }
 
+  // ── Idle-notification gating constants (notification-storm fix) ──
+  // Minimum ANSI-stripped, trimmed characters a flushed chunk must contain
+  // to count as "meaningful output" that re-arms idle detection. Cosmetic
+  // repaints (cursor moves, focus reports, spinner ticks) strip down to
+  // almost nothing and must not re-arm the notifier.
+  static MIN_REARM_CHARS = 24;
+  // A pane will not dispatch terminal-idle more than once per this window,
+  // even if a full-screen repaint (SIGWINCH after a grid resize) re-arms it.
+  static IDLE_REFIRE_COOLDOWN_MS = 30000;
+  // After a WebSocket (re)connect, mute idle detection for this long so the
+  // server's scrollback replay burst cannot fire a "ready for input" toast.
+  static REPLAY_SUPPRESS_MS = 3000;
+  // Matches CSI escape sequences. Same pattern _detectActivity and
+  // _analyzeForAutoTrust already use for ANSI stripping; hoisted to a named
+  // constant so the re-arm gate shares it. Only used with .replace (safe
+  // for a /g regex; lastIndex is not carried across replace calls).
+  static ANSI_ESCAPE_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
   constructor(containerId, sessionId, sessionName, spawnOpts) {
     this.containerId = containerId;
     this.sessionId = sessionId;
@@ -236,6 +254,13 @@ class TerminalPane {
     this._idleNotified = false; // true once terminal-idle has fired; prevents re-notification on trivial PTY output
     this._lastOutputTime = 0;
     this._idleCheckTimer = null;
+    // Notification-storm gating (see MIN_REARM_CHARS and friends above):
+    // _suppressIdleUntil: while Date.now() is below this, idle checks are
+    //   muted so scrollback replay bursts (mount AND reconnect) never notify.
+    // _lastIdleFiredAt: timestamp of the last terminal-idle dispatch, used
+    //   for the per-pane refire cooldown (IDLE_REFIRE_COOLDOWN_MS).
+    this._suppressIdleUntil = 0;
+    this._lastIdleFiredAt = 0;
     // Activity detection: real-time parsing of Claude Code output patterns
     this._currentActivity = null; // { type: 'thinking'|'reading'|'writing'|'running'|'searching'|'idle', detail: '...' }
     this._activityBuffer = '';    // Rolling buffer for pattern matching (last ~500 chars)
@@ -600,6 +625,11 @@ class TerminalPane {
 
       this.connected = true;
       this._reconnectAttempts = 0;
+      // Mute idle notifications during the scrollback replay burst the
+      // server sends right after (re)connect. Without this window, every
+      // pane sitting at a prompt fires "ready for input" ~2s after a tab
+      // switch or page load replays its buffer (notification-storm bug).
+      this._suppressIdleUntil = Date.now() + TerminalPane.REPLAY_SUPPRESS_MS;
       this._log('WebSocket OPEN');
       this._status('Connected. Starting session...', 'green');
       // Forced send: this server-side connection is brand new and has no
@@ -1158,8 +1188,10 @@ class TerminalPane {
     // Single xterm write for the entire frame's data
     this.term.write(buf);
 
-    // Track completion (debounced internally)
-    this._trackActivityForCompletion();
+    // Track completion (debounced internally). The flushed chunk is passed
+    // so the tracker can decide whether this burst is meaningful output or
+    // just a cosmetic repaint (see _trackActivityForCompletion).
+    this._trackActivityForCompletion(buf);
 
     // Debounce activity detection to at most once per 200ms.
     // Skip for unfocused terminals to avoid wasting CPU on regex
@@ -1248,11 +1280,14 @@ class TerminalPane {
      ═══════════════════════════════════════════════════════════ */
 
   /**
-   * Called after every terminal write. Marks the pane as working and
+   * Called after every terminal write flush. Marks the pane as working and
    * schedules a debounced idle check - if no output arrives for 2s
    * after the last burst, we inspect the buffer for a prompt.
+   * @param {string} chunk - The flushed output chunk. Used to decide whether
+   *   this burst is meaningful enough to re-arm idle detection; the debounced
+   *   idle check itself is (re)scheduled on every flush regardless.
    */
-  _trackActivityForCompletion() {
+  _trackActivityForCompletion(chunk) {
     this._lastOutputTime = Date.now();
     // Clear "needs input" indicator when new output arrives (agent moved past the prompt)
     if (this._needsInput) {
@@ -1265,9 +1300,17 @@ class TerminalPane {
         }
       }, 5000);
     }
-    if (!this._isWorking) {
+    // Edge-triggered re-arm: only MEANINGFUL output counts as new work.
+    // Cosmetic repaints (Ink border redraw, focus-report echo, spinner
+    // ticks, cursor repositioning) strip to fewer than MIN_REARM_CHARS
+    // visible characters and must NOT reset _idleNotified. Before this
+    // gate, ANY byte re-armed the notifier, so every repaint followed by
+    // 2s of quiet re-fired "ready for input" (the notification storm).
+    const cleanChunk = (typeof chunk === 'string' ? chunk : '')
+      .replace(TerminalPane.ANSI_ESCAPE_RE, '');
+    if (cleanChunk.trim().length >= TerminalPane.MIN_REARM_CHARS && !this._isWorking) {
       this._isWorking = true;
-      // New work started after being idle -- allow the next idle event to fire
+      // New work started after being idle - allow the next idle event to fire
       this._idleNotified = false;
     }
     // Debounced idle check - if no output for 2 seconds after burst, check for prompt
@@ -1284,6 +1327,14 @@ class TerminalPane {
    */
   _checkForCompletion() {
     if (!this._isWorking || !this.term) return;
+
+    // Replay-suppression window: output arriving right after a WebSocket
+    // (re)connect is scrollback replay, not new work. Disarm and bail so a
+    // replayed prompt line cannot notify on mount, reconnect, or tab switch.
+    if (Date.now() < this._suppressIdleUntil) {
+      this._isWorking = false;
+      return;
+    }
 
     // Read the last line of the terminal buffer at the cursor position
     const buffer = this.term.buffer.active;
@@ -1318,7 +1369,14 @@ class TerminalPane {
       // timer and land here again while the prompt is still showing. Without
       // this guard, the notification dot gets re-added after the user clears it.
       if (this._idleNotified) return;
+
+      // Per-pane refire cooldown: even a legitimate-looking re-arm (e.g. a
+      // full-screen SIGWINCH repaint after a grid resize passes the
+      // MIN_REARM_CHARS gate) cannot ping the user more than once per
+      // IDLE_REFIRE_COOLDOWN_MS for the same pane.
+      if (Date.now() - this._lastIdleFiredAt < TerminalPane.IDLE_REFIRE_COOLDOWN_MS) return;
       this._idleNotified = true;
+      this._lastIdleFiredAt = Date.now();
 
       // Dispatch custom event for the app to handle
       const container = document.getElementById(this.containerId);

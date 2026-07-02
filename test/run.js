@@ -912,6 +912,7 @@ const standaloneTests = [
   'settings-nav-rail.test.js',       // alpha.9: left-side category rail for settings panel
   'pty-resize-ownership.test.js',    // fix/terminal-sync: viewport ownership, no-op resize suppression, lag resync, reset-before-replay
   'codex-artifact-path.test.js',     // session-lifecycle: codex findArtifactPath/findArtifactByWorkingDir parity (cost 500 fix)
+  'idle-notification-gating.test.js', // notification-storm fix: edge-triggered re-arm, replay suppression, refire cooldown, focus ack
 ];
 
 let standaloneFailed = 0;
