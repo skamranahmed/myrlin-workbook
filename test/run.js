@@ -854,6 +854,7 @@ const standaloneTests = [
   'codex-status-strip.test.js',      // Plan 22-01: Codex bottom status strip + chip click handlers
   'codex-discover-watcher.test.js',  // Plan 22-03: fs.watch debounce + 5-min fallback poll
   'settings-nav-rail.test.js',       // alpha.9: left-side category rail for settings panel
+  'phantom-tokens.test.js',          // ui-token-repair: every consumed var(--x) must be defined (phantom-token gate)
 ];
 
 let standaloneFailed = 0;

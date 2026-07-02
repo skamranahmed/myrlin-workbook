@@ -294,12 +294,12 @@ class TerminalPane {
 
     if (typeof Terminal === 'undefined') {
       console.error('[Terminal] xterm.js not loaded');
-      container.innerHTML = '<div style="padding:16px;color:#f38ba8;font-size:13px;">Error: xterm.js not loaded</div>';
+      container.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Error: xterm.js not loaded</div>';
       return;
     }
     if (typeof FitAddon === 'undefined') {
       console.error('[Terminal] FitAddon not loaded');
-      container.innerHTML = '<div style="padding:16px;color:#f38ba8;font-size:13px;">Error: FitAddon not loaded</div>';
+      container.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Error: FitAddon not loaded</div>';
       return;
     }
 
@@ -510,7 +510,7 @@ class TerminalPane {
 
     } catch (err) {
       console.error('[Terminal] Init failed:', err);
-      container.innerHTML = '<div style="padding:16px;color:#f38ba8;font-size:13px;">Terminal init failed: ' + err.message + '</div>';
+      container.innerHTML = '<div style="padding:16px;color:var(--red);font-size:13px;">Terminal init failed: ' + err.message + '</div>';
     }
   }
 

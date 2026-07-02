@@ -173,6 +173,11 @@ async function main() {
       stubB.search = async () => { bCalls++; return { results: [], timedOut: false, searchedFiles: 0 }; };
       registry.register(stubA); registry.register(stubB);
       registry.setEnabled(stubA.id, true); registry.setEnabled(stubB.id, true);
+      // Hermetic: disable the real provider so the dispatcher only hits stubs.
+      // A real-corpus scan can blow past the time budget on multi-GB transcript
+      // dirs (sync reads block the event loop, so the hard-timeout timer never
+      // fires) and hang the whole suite.
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity; restored in finally)
       try {
         const r = await req('GET', '/api/search?q=hello&limit=10');
         assertEqual(r.status, 200);
@@ -181,6 +186,7 @@ async function main() {
       } finally {
         registry.setEnabled(stubA.id, false);
         registry.setEnabled(stubB.id, false);
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
       }
     });
 
@@ -359,19 +365,27 @@ async function main() {
     // not allocate any worker_threads.Worker; the only Worker in the
     // process is the cost-worker (one), which already exists from boot.
     await test('SRCH-06: search call does not spawn additional worker_threads.Worker', async () => {
-      const handlesBefore = process._getActiveHandles ? process._getActiveHandles().length : 0;
-      await req('GET', '/api/search?q=any&limit=10');
-      await req('GET', '/api/search?q=any&limit=10');
-      const handlesAfter = process._getActiveHandles ? process._getActiveHandles().length : 0;
-      // Allow some delta (transient timers, sockets) but no large additions
-      // that would indicate per-provider worker spawn. Practical check:
-      // delta < 10 across two searches; the search path should not allocate
-      // more than a handful of transient handles.
-      assert(Math.abs(handlesAfter - handlesBefore) < 10, 'no excessive handle growth across two searches');
-      // Reference worker_threads to keep the import live (so a future
-      // refactor that introduces a worker can be caught by extending this
-      // test with a Worker-constructor spy).
-      void worker_threads;
+      // Hermetic: disable the real provider so these searches cannot scan the
+      // machine's transcript corpus (multi-GB corpora blow past the budget and
+      // hang the suite). An empty enabled set still exercises the dispatch path.
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity; restored in finally)
+      try {
+        const handlesBefore = process._getActiveHandles ? process._getActiveHandles().length : 0;
+        await req('GET', '/api/search?q=any&limit=10');
+        await req('GET', '/api/search?q=any&limit=10');
+        const handlesAfter = process._getActiveHandles ? process._getActiveHandles().length : 0;
+        // Allow some delta (transient timers, sockets) but no large additions
+        // that would indicate per-provider worker spawn. Practical check:
+        // delta < 10 across two searches; the search path should not allocate
+        // more than a handful of transient handles.
+        assert(Math.abs(handlesAfter - handlesBefore) < 10, 'no excessive handle growth across two searches');
+        // Reference worker_threads to keep the import live (so a future
+        // refactor that introduces a worker can be caught by extending this
+        // test with a Worker-constructor spy).
+        void worker_threads;
+      } finally {
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
+      }
     });
 
     // ── Test 9: legacy alias timedOut === partial ──
@@ -414,13 +428,19 @@ async function main() {
 
     // ── Test 11: input validation preserved ──
     await test('Input validation: q < 2 chars or missing returns 400 with error message', async () => {
-      const r1 = await req('GET', '/api/search?q=a');
-      assertEqual(r1.status, 400);
-      assert(r1.body && typeof r1.body.error === 'string', 'error message present');
-      const r2 = await req('GET', '/api/search');
-      assertEqual(r2.status, 400);
-      const r3 = await req('GET', '/api/search?q=ok');
-      assertEqual(r3.status, 200, '2-char query should pass');
+      // Hermetic: the 2-char success probe must not scan the real corpus either.
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity; restored in finally)
+      try {
+        const r1 = await req('GET', '/api/search?q=a');
+        assertEqual(r1.status, 400);
+        assert(r1.body && typeof r1.body.error === 'string', 'error message present');
+        const r2 = await req('GET', '/api/search');
+        assertEqual(r2.status, 400);
+        const r3 = await req('GET', '/api/search?q=ok');
+        assertEqual(r3.status, 200, '2-char query should pass');
+      } finally {
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
+      }
     });
 
   } finally {
