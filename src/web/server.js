@@ -367,6 +367,27 @@ setupDeviceRoutes(app, {
   getSSEClients: () => sseClients,
 });
 
+// ─── Credential Switcher Routes (Claude account swap) ────────
+// Design: docs/plans/2026-07-02-credential-switcher-design.md. The manager
+// owns the snapshot store, rotation write-back watcher, and the PC apply
+// transaction; the watcher is started in startServer() and stopped on
+// shutdown. broadcast is a lazy closure: broadcastSSE is a hoisted function
+// declaration, so runtime calls resolve even though it is defined below.
+const { createCredentialManager } = require('./credential-manager');
+const credentialMacBridge = require('./mac-bridge');
+const { setupCredentialRoutes } = require('./credential-routes');
+const credentialManager = createCredentialManager({
+  settingsProvider: () => (getStore().settings || {}).credentialSwitcher || {},
+});
+setupCredentialRoutes(app, {
+  requireAuth,
+  getStore: () => getStore(),
+  broadcast: (type, data) => broadcastSSE(type, data),
+  structuredError,
+  manager: credentialManager,
+  macBridge: credentialMacBridge,
+});
+
 // ─── Public Server Info (no auth required) ─────────────────
 // Public endpoint for mobile connection testing (no auth)
 
@@ -5715,6 +5736,8 @@ const GLOBAL_EVENT_TYPES = new Set([
   'workspaces:reordered',
   'workspace:created',
   'discover:refreshed', // Plan 22-03: fs.watch -> broadcast to all SSE clients
+  'credentials:changed', // credential switcher: apply/capture/rename/delete
+  'credentials:usage',   // credential switcher: usage refresh results
 ]);
 
 /**
@@ -8360,6 +8383,15 @@ function startServer(port = 3456, host = '127.0.0.1') {
   _scheduler.start();
   mountScheduleRoutes(app, { requireAuth, scheduler: _scheduler, store: getStore() });
 
+  // Credential rotation write-back watcher (design Decision 3): keeps the
+  // account snapshots in sync with the live token file as the CLI rotates
+  // tokens. Crash-proof by construction; a start failure only logs.
+  try {
+    credentialManager.startCredentialWatcher();
+  } catch (err) {
+    console.warn('[Credentials] watcher failed to start:', err.message);
+  }
+
   // Cleanup tunnels, scheduler, and PTY sessions on shutdown
   const cleanup = () => {
     if (_scheduler) {
@@ -8368,6 +8400,7 @@ function startServer(port = 3456, host = '127.0.0.1') {
     if (_ptyManager) {
       try { _ptyManager.destroyAll(); } catch (_) {}
     }
+    try { credentialManager.stopCredentialWatcher(); } catch (_) {}
     for (const [, t] of _tunnels) {
       try { if (t.process) t.process.kill(); } catch {}
     }

@@ -917,6 +917,8 @@ const standaloneTests = [
   'mobile-ux-fixes.test.js',         // fix/mobile-ux: mobile tab scroll, More sheet, settings sheet, long-press + tab touch paths
   'phantom-tokens.test.js',          // ui-token-repair: every consumed var(--x) must be defined (phantom-token gate)
   'smooth-scroll.test.js',           // issue #41: xterm smoothScrollDuration capability gate, setting/reduced-motion resolution, mobile engine guard
+  'credential-manager.test.js',      // credential switcher T1: snapshot store, rotation write-back, corrected token-state model, apply transaction
+  'credential-routes.test.js',       // credential switcher T1: /api/credentials routes, SSE broadcasts, token-material leak gate
 ];
 
 let standaloneFailed = 0;
