@@ -301,6 +301,62 @@ test('updates settings', () => {
 });
 
 // ──────────────────────────────────────────────────────
+suite('Store - Provider Session Titles');
+
+test('sets and gets a title override (trimmed)', () => {
+  const store = freshStore();
+  const stored = store.setProviderSessionTitle('prov-a', 'uuid-1', '  My Custom Name  ');
+  assertEqual(stored, 'My Custom Name');
+  assertEqual(store.getProviderSessionTitle('prov-a', 'uuid-1'), 'My Custom Name');
+  store.destroy();
+});
+
+test('returns null for unknown provider/uuid pairs', () => {
+  const store = freshStore();
+  assertEqual(store.getProviderSessionTitle('prov-a', 'nope'), null);
+  assertEqual(store.getProviderSessionTitle(null, 'uuid-1'), null);
+  assertEqual(store.getProviderSessionTitle('prov-a', null), null);
+  store.destroy();
+});
+
+test('empty title deletes the override and prunes the empty bucket', () => {
+  const store = freshStore();
+  store.setProviderSessionTitle('prov-a', 'uuid-1', 'Name');
+  const result = store.setProviderSessionTitle('prov-a', 'uuid-1', '');
+  assertEqual(result, null);
+  assertEqual(store.getProviderSessionTitle('prov-a', 'uuid-1'), null);
+  // Bucket pruned so state does not accumulate empty provider shells
+  assertEqual(store.state.providerSessionTitles['prov-a'], undefined);
+  store.destroy();
+});
+
+test('title overrides persist across save/load', () => {
+  cleanState();
+  const { Store: ST1 } = require('../src/state/store');
+  const store1 = new ST1().init();
+  store1.setProviderSessionTitle('prov-a', 'uuid-persist', 'Survives Reload');
+  store1.destroy();
+  delete require.cache[require.resolve('../src/state/store')];
+  const { Store: ST2 } = require('../src/state/store');
+  const store2 = new ST2().init();
+  assertEqual(store2.getProviderSessionTitle('prov-a', 'uuid-persist'), 'Survives Reload');
+  store2.destroy();
+  cleanState();
+});
+
+test('emits providerSessionTitles:updated on set and delete', () => {
+  const store = freshStore();
+  const events = [];
+  store.on('providerSessionTitles:updated', (e) => events.push(e));
+  store.setProviderSessionTitle('prov-a', 'uuid-evt', 'Hello');
+  store.setProviderSessionTitle('prov-a', 'uuid-evt', '');
+  assertEqual(events.length, 2);
+  assertEqual(events[0].deleted, false);
+  assertEqual(events[1].deleted, true);
+  store.destroy();
+});
+
+// ──────────────────────────────────────────────────────
 suite('Store - Events');
 
 test('emits workspace:created event', () => {
@@ -854,6 +910,7 @@ const standaloneTests = [
   'codex-status-strip.test.js',      // Plan 22-01: Codex bottom status strip + chip click handlers
   'codex-discover-watcher.test.js',  // Plan 22-03: fs.watch debounce + 5-min fallback poll
   'settings-nav-rail.test.js',       // alpha.9: left-side category rail for settings panel
+  'codex-artifact-path.test.js',     // session-lifecycle: codex findArtifactPath/findArtifactByWorkingDir parity (cost 500 fix)
 ];
 
 let standaloneFailed = 0;

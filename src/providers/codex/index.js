@@ -218,6 +218,114 @@ async function dispose() {
 }
 
 // ---------------------------------------------------------------------------
+// Transcript artifact resolution (parity with claudeProvider)
+// ---------------------------------------------------------------------------
+//
+// These two methods bring Codex to parity with claudeProvider.findArtifactPath
+// / findArtifactByWorkingDir. Their absence caused a production 500: GET
+// /api/cost/batch calls provider.findArtifactPath(resumeSessionId) for every
+// session, and a codex-tagged store session threw
+// "provider.findArtifactPath is not a function", 500ing the whole batch so
+// cost badges broke for EVERY session (Claude included). Both are synchronous
+// and null-on-miss to match the exact call signature the server route handlers
+// use (they treat the result as a path string / null, not a Promise).
+//
+// The scan reuses discover.js's internal helpers so there is one source of
+// truth for the on-disk layout (sessions/ date-bucketed + archived_sessions/
+// flat). No duplicated walk logic.
+
+const {
+  getCodexHome: _discGetCodexHome,
+  walkSessionsTree: _discWalkSessionsTree,
+  walkArchivedSessions: _discWalkArchivedSessions,
+  extractIdFromFilename: _discExtractId,
+  readSessionMetaFromFile: _discReadMeta,
+} = discover._internal;
+
+/**
+ * Enumerate every rollout file under sessions/ then archived_sessions/.
+ * Ordering matters for findArtifactPath: a live thread is preferred over an
+ * archived copy of the same id (sessions/ paths come first). Each sub-walk is
+ * wrapped so one failing root never denies the other.
+ *
+ * @param {string} codexHome
+ * @returns {string[]} Absolute rollout paths (sessions/ first, then archived).
+ */
+function _allRolloutFiles(codexHome) {
+  const files = [];
+  try { files.push.apply(files, _discWalkSessionsTree(codexHome)); } catch (_) { /* ignore */ }
+  try { files.push.apply(files, _discWalkArchivedSessions(codexHome)); } catch (_) { /* ignore */ }
+  return files;
+}
+
+/**
+ * Locate the on-disk rollout transcript for a Codex session UUID.
+ *
+ * Scans BOTH $CODEX_HOME/sessions/ (date-bucketed) and
+ * $CODEX_HOME/archived_sessions/ (flat) for a file whose filename embeds the
+ * given UUID (rollout-<ISO>-<uuid>.jsonl). Sync + null-on-miss to match
+ * claudeProvider.findArtifactPath exactly.
+ *
+ * @param {string} providerSessionId - Codex session UUID.
+ * @returns {string|null} Absolute path to the rollout .jsonl, or null.
+ */
+function findArtifactPath(providerSessionId) {
+  if (!providerSessionId || typeof providerSessionId !== 'string') return null;
+  const codexHome = _discGetCodexHome();
+  if (!fs.existsSync(codexHome)) return null;
+  const target = providerSessionId.toLowerCase();
+  const files = _allRolloutFiles(codexHome);
+  for (const filePath of files) {
+    const id = _discExtractId(path.basename(filePath));
+    if (id === target) return filePath;
+  }
+  return null;
+}
+
+/**
+ * Resolve the most-recent Codex rollout transcript whose recorded cwd matches
+ * a working directory. Fallback used when a session has no resumeSessionId
+ * yet (discovered/imported sessions).
+ *
+ * Mirrors claudeProvider.findArtifactByWorkingDir's return shape EXACTLY:
+ * {jsonlPath, claudeSessionId}. The `claudeSessionId` key is the
+ * cross-provider contract server.js reads (result.jsonlPath +
+ * result.claudeSessionId) at the workingDir fallback and the backfill loop;
+ * here it carries the Codex UUID, not a Claude-specific value. Renaming the
+ * key would break the shared caller, so the legacy name is intentional.
+ *
+ * Reads each rollout's session_meta cwd (payload.cwd), normalizes for
+ * case-insensitive comparison, and returns the newest match by mtime. Returns
+ * null when nothing matches. Never throws.
+ *
+ * @param {string} workingDir - The session's working directory.
+ * @returns {{jsonlPath: string, claudeSessionId: string}|null}
+ */
+function findArtifactByWorkingDir(workingDir) {
+  if (!workingDir || typeof workingDir !== 'string') return null;
+  const codexHome = _discGetCodexHome();
+  if (!fs.existsSync(codexHome)) return null;
+  const normalizedWorkDir = workingDir.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
+  const files = _allRolloutFiles(codexHome);
+  let best = null; // { jsonlPath, claudeSessionId, mtimeMs }
+  for (const filePath of files) {
+    const id = _discExtractId(path.basename(filePath));
+    if (!id) continue;
+    const meta = _discReadMeta(filePath);
+    if (!meta || typeof meta.cwd !== 'string' || meta.cwd.length === 0) continue;
+    const normalizedCwd = meta.cwd.replace(/[/\\]/g, path.sep).replace(/[/\\]$/, '').toLowerCase();
+    if (normalizedCwd !== normalizedWorkDir) continue;
+    let mtimeMs = 0;
+    try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch (_) { continue; }
+    if (!best || mtimeMs > best.mtimeMs) {
+      best = { jsonlPath: filePath, claudeSessionId: id, mtimeMs: mtimeMs };
+    }
+  }
+  if (!best) return null;
+  return { jsonlPath: best.jsonlPath, claudeSessionId: best.claudeSessionId };
+}
+
+// ---------------------------------------------------------------------------
 // Provider object (the public contract)
 // ---------------------------------------------------------------------------
 
@@ -238,6 +346,11 @@ module.exports = {
   supportsCost: supportsCost,
   isIdleSignal: isIdleSignal,
   getKeyBindings: getKeyBindings,
+  // Transcript artifact resolution: parity with claudeProvider so
+  // server.js route handlers (cost batch, cost single, backfill) dispatch
+  // through provider.findArtifactPath / findArtifactByWorkingDir uniformly.
+  findArtifactPath: findArtifactPath,
+  findArtifactByWorkingDir: findArtifactByWorkingDir,
   // Test-only: lets the watcher test set its own onChange without
   // going through the registry. Production code must use init().
   _startWatcherForTesting: _startWatcher,

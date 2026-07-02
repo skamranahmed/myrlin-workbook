@@ -241,6 +241,77 @@ function walkSessionsTreeManual(sessionsRoot) {
 }
 
 /**
+ * Absolute path to $CODEX_HOME/archived_sessions.
+ *
+ * Codex moves ended threads here as flat `rollout-*.jsonl` files (same
+ * on-disk envelope format as sessions/). These are invisible to both
+ * session_index.jsonl and the sessions/ walk, so discovery + search must
+ * scan this directory explicitly. Optional on disk; callers guard with
+ * fs.existsSync.
+ *
+ * @param {string} codexHome
+ * @returns {string} Absolute path to the archived_sessions directory.
+ */
+function getArchivedSessionsDir(codexHome) {
+  return path.join(codexHome, 'archived_sessions');
+}
+
+/**
+ * Collect absolute paths of every `rollout-*.jsonl` under an arbitrary root.
+ * Handles the flat archived layout AND any date-bucketed nesting via a
+ * recursive readdir, with a flat-then-manual fallback for older Node or
+ * filesystems that reject the recursive option. Returns [] when the root is
+ * missing or unreadable (never throws).
+ *
+ * Factored out so both the sessions/ walk (via walkSessionsTree) and the
+ * archived_sessions/ scan share one rollout-matching predicate.
+ *
+ * @param {string} root - Directory to scan.
+ * @returns {string[]} Absolute paths of matching rollout files.
+ */
+function collectRolloutFilesUnder(root) {
+  const out = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { recursive: true, withFileTypes: true });
+  } catch (_) {
+    // Recursive option unavailable OR root missing: try a flat readdir so the
+    // common (flat) archived layout still resolves; give up quietly otherwise.
+    try {
+      for (const f of fs.readdirSync(root)) {
+        const lower = f.toLowerCase();
+        if (lower.startsWith('rollout-') && lower.endsWith('.jsonl')) {
+          out.push(path.join(root, f));
+        }
+      }
+    } catch (_) { /* missing/unreadable; return [] */ }
+    return out;
+  }
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    const lower = e.name.toLowerCase();
+    if (!lower.startsWith('rollout-') || !lower.endsWith('.jsonl')) continue;
+    const parent = e.parentPath || e.path || root;
+    out.push(path.join(parent, e.name));
+  }
+  return out;
+}
+
+/**
+ * Enumerate archived rollout files under $CODEX_HOME/archived_sessions.
+ * Guarded: returns [] when the directory does not exist. Tags nothing here;
+ * the caller decides how to mark the archived flag on the resulting sessions.
+ *
+ * @param {string} codexHome
+ * @returns {string[]} Absolute paths of archived rollout files.
+ */
+function walkArchivedSessions(codexHome) {
+  const root = getArchivedSessionsDir(codexHome);
+  if (!fs.existsSync(root)) return [];
+  return collectRolloutFilesUnder(root);
+}
+
+/**
  * Extract providerSessionId from a rollout filename.
  *
  * Pattern: `rollout-<ISO-8601-with-dashes>-<UUID>.jsonl`. The trailing UUID
@@ -361,15 +432,20 @@ async function discover(opts) {
   const codexHome = getCodexHome();
   if (!fs.existsSync(codexHome)) return [];
   const sessionsRoot = path.join(codexHome, 'sessions');
-  if (!fs.existsSync(sessionsRoot)) return [];
+  // archived_sessions/ holds ended threads and is independent of sessions/.
+  // Discovery must surface both, so we only bail when NEITHER exists (a
+  // CODEX_HOME with only archived threads is still fully discoverable).
+  const hasSessions = fs.existsSync(sessionsRoot);
+  const hasArchived = fs.existsSync(getArchivedSessionsDir(codexHome));
+  if (!hasSessions && !hasArchived) return [];
 
   /** @type {Map<string, object>} providerSessionId -> ProviderSession */
   const byId = new Map();
   /** @type {Set<string>} ids whose index entry pointed at a missing file */
   const staleIds = new Set();
 
-  // ─── Fast-path: session_index.jsonl ────────────────────────────────────
-  const index = readSessionIndex();
+  // ─── Fast-path: session_index.jsonl (only meaningful when sessions/ exists) ─
+  const index = hasSessions ? readSessionIndex() : null;
   if (Array.isArray(index)) {
     for (const entry of index) {
       const rolloutPath = resolveIndexEntryToPath(codexHome, entry);
@@ -418,7 +494,7 @@ async function discover(opts) {
 
   // ─── Walk-fallback: index missing OR has stale entries ─────────────────
   const indexUnusable = !Array.isArray(index) || index.length === 0;
-  const walkNeeded = indexUnusable || staleIds.size > 0;
+  const walkNeeded = hasSessions && (indexUnusable || staleIds.size > 0);
   if (walkNeeded) {
     const files = walkSessionsTree(codexHome);
     for (const filePath of files) {
@@ -477,6 +553,45 @@ async function discover(opts) {
     }
   }
 
+  // ─── Archived-sessions scan (always runs when the directory exists) ─────
+  // $CODEX_HOME/archived_sessions/ holds ended threads that neither the
+  // session_index.jsonl fast-path nor the sessions/ walk can see. We surface
+  // them tagged `archived: true` so the UI can distinguish them, and so the
+  // product rule "no tracked session is ever lost" holds: an archived thread
+  // is still discoverable, resumable, and searchable. A live sessions/ entry
+  // for the same id wins (archived is only a fallback for ids not already
+  // present).
+  if (hasArchived) {
+    const archivedFiles = walkArchivedSessions(codexHome);
+    for (const filePath of archivedFiles) {
+      const filename = path.basename(filePath);
+      const id = extractIdFromFilename(filename);
+      if (!id) continue;
+      if (byId.has(id)) continue; // live sessions/ record already present; keep it
+      let stat;
+      try {
+        stat = fs.statSync(filePath);
+      } catch (_) {
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      const meta = readSessionMetaFromFile(filePath);
+      // Skip subagent-spawned threads (same filter as the live paths).
+      if (meta && meta.isSubagent) continue;
+      byId.set(id, {
+        provider: 'codex', // gsd:provider-literal-allowed
+        providerSessionId: id,
+        projectPath: meta ? meta.cwd : null,
+        encodedName: null,
+        title: null,
+        lastActive: stat.mtime,
+        sizeBytes: stat.size,
+        cliVersion: meta ? meta.cliVersion : null,
+        archived: true,
+      });
+    }
+  }
+
   const out = Array.from(byId.values());
   out.sort((a, b) => b.lastActive.getTime() - a.lastActive.getTime());
   return out;
@@ -497,4 +612,11 @@ module.exports._internal = {
   walkSessionsTree: walkSessionsTree,
   extractIdFromFilename: extractIdFromFilename,
   readSessionMetaFromFile: readSessionMetaFromFile,
+  // Plan (session-lifecycle): archived_sessions support + shared rollout
+  // collection. Exposed so codexProvider.findArtifactPath /
+  // findArtifactByWorkingDir reuse the exact scan logic instead of
+  // duplicating it, and so archived-discovery tests can assert directly.
+  getArchivedSessionsDir: getArchivedSessionsDir,
+  collectRolloutFilesUnder: collectRolloutFilesUnder,
+  walkArchivedSessions: walkArchivedSessions,
 };

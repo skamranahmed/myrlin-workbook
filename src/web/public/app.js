@@ -1720,9 +1720,12 @@ class CWMApp {
             // Phase 18-04 (UI-10): forward the provider tag from the drag
             // payload so the new session record retains provider identity.
             const psProvider = ps.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
+            // Resolve the CLI binary from the dragged session's provider so a
+            // dropped Codex session persists as codex resume, not a fresh
+            // Claude session (removes the old hardcoded CLI literal).
             await this.api('POST', '/api/sessions', {
               name: friendlyName, workspaceId: targetWsId, workingDir: ps.projectPath,
-              topic: 'Resumed session', command: 'claude', resumeSessionId: claudeSessionId, provider: psProvider, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+              topic: 'Resumed session', command: this.getProviderCliBinary(psProvider), resumeSessionId: claudeSessionId, provider: psProvider,
             });
             this.showToast(`Session "${friendlyName}" added`, 'success');
             await this.loadSessions();
@@ -1741,9 +1744,12 @@ class CWMApp {
             const project = JSON.parse(projectJson);
             // Phase 18-04 (UI-10): forward the provider tag from the drag payload.
             const projProvider = project.provider || 'claude'; // gsd:provider-literal-allowed (Phase 18 drag-drop default; v1.1-shaped data lacks provider)
+            // Resolve the CLI binary from the dragged project's provider so a
+            // Codex-tagged project spawns codex when its session starts
+            // (removes the old hardcoded CLI literal).
             await this.api('POST', '/api/sessions', {
               name: project.name, workspaceId: targetWsId, workingDir: project.path,
-              topic: '', command: 'claude', provider: projProvider, // gsd:provider-literal-allowed (v1.1 frontend default; refactor deferred to Phase 18)
+              topic: '', command: this.getProviderCliBinary(projProvider), provider: projProvider,
             });
             this.showToast(`Session "${project.name}" created`, 'success');
             await this.loadSessions();
@@ -3734,17 +3740,61 @@ class CWMApp {
   }
 
   /**
-   * Sync a title across both localStorage project titles and any linked workspace sessions.
-   * Call this whenever a title is set from ANY source.
-   * @param {string} claudeSessionId - The Claude session UUID
-   * @param {string} title - The new title
+   * Resolve the provider id that owns an upstream (CLI-native) session UUID.
+   * Checks, in order: a linked store session's provider tag, then any open
+   * terminal pane tracking that UUID (spawnOpts.provider first, then the
+   * pane element's data-provider set by openTerminalInPane). Returns null
+   * when nothing matches; callers must treat null as "unknown", never
+   * substitute a hardcoded provider literal.
+   *
+   * @param {string} upstreamId - Provider-native session UUID.
+   * @returns {string|null} Provider id, or null when unresolvable.
    */
-  syncSessionTitle(claudeSessionId, title) {
+  _resolveProviderForUpstreamId(upstreamId) {
+    if (!upstreamId) return null;
+    // 1. Linked store session carries an authoritative provider tag.
+    const all = this.state.allSessions || this.state.sessions || [];
+    const linked = all.find(s => s.resumeSessionId === upstreamId && s.provider);
+    if (linked) return linked.provider;
+    // 2. An open pane tracking this UUID (ad-hoc panes use the upstream UUID
+    //    as their pane sessionId; store panes carry it in spawnOpts).
+    for (let i = 0; i < (this.terminalPanes || []).length; i++) {
+      const tp = this.terminalPanes[i];
+      if (!tp) continue;
+      const matches = tp.sessionId === upstreamId ||
+        (tp.spawnOpts && tp.spawnOpts.resumeSessionId === upstreamId);
+      if (!matches) continue;
+      if (tp.spawnOpts && tp.spawnOpts.provider) return tp.spawnOpts.provider;
+      const paneEl = document.getElementById(`term-pane-${i}`);
+      if (paneEl && paneEl.dataset && paneEl.dataset.provider) return paneEl.dataset.provider;
+    }
+    return null;
+  }
+
+  /**
+   * Sync a title across localStorage project titles, any linked workspace
+   * sessions, AND the server-side title override store. The server write
+   * (PUT /api/session-titles/:provider/:uuid) is what makes a rename
+   * searchable and cross-device; localStorage remains as an offline cache.
+   * @param {string} claudeSessionId - The upstream session UUID
+   * @param {string} title - The new title
+   * @param {string} [provider] - Optional provider id when the caller knows
+   *   it (e.g. pane rename); resolved from linked sessions/panes otherwise.
+   */
+  syncSessionTitle(claudeSessionId, title, provider) {
     if (!claudeSessionId || !title) return;
-    // 1. Update localStorage project titles
+    // 1. Update localStorage project titles (offline/device-local cache)
     const titles = JSON.parse(localStorage.getItem('cwm_projectSessionTitles') || '{}');
     titles[claudeSessionId] = title;
     localStorage.setItem('cwm_projectSessionTitles', JSON.stringify(titles));
+    // 1b. Persist the override server-side (fire-and-forget) so the rename is
+    // searchable and shared across devices. Provider comes from the caller or
+    // is resolved from linked sessions / open panes; when it cannot be
+    // resolved we skip the server write rather than guess with a literal.
+    const providerId = provider || this._resolveProviderForUpstreamId(claudeSessionId);
+    if (providerId) {
+      this.api('PUT', `/api/session-titles/${encodeURIComponent(providerId)}/${encodeURIComponent(claudeSessionId)}`, { title }).catch(() => {});
+    }
     // 2. Update any workspace sessions that link to this Claude UUID
     const allSessions = this.state.allSessions || [];
     for (const s of allSessions) {
@@ -10789,8 +10839,12 @@ class CWMApp {
         const tooltip = effectiveTitle
           ? `${effectiveTitle}\n\nSession: ${sessName}`
           : sessName;
+        // Archived sessions (e.g. Codex archived_sessions/) get a muted
+        // label so ended threads are visually distinct but still openable.
+        const archivedBadge = s.archived ? '<span class="project-session-archived">archived</span>' : '';
         return `<div class="project-session-item" draggable="true" data-session-name="${this.escapeHtml(sessName)}" data-project-path="${this.escapeHtml(p.realPath || '')}" data-project-encoded="${this.escapeHtml(encoded)}" data-provider="${projProvider}" title="${this.escapeHtml(tooltip)}">
           <span class="project-session-name">${this.escapeHtml(displayName)}</span>
+          ${archivedBadge}
           ${sessSize ? `<span class="project-session-size">${sessSize}</span>` : ''}
           ${sessTime ? `<span class="project-session-time">${sessTime}</span>` : ''}
         </div>`;
@@ -10930,7 +10984,7 @@ class CWMApp {
             const typeBadge = r.type === 'workspace' ? 'project' : r.type === 'project' ? 'discovered' : 'session';
 
             return `
-              <div class="ai-find-card" data-type="${this.escapeHtml(r.type)}" data-id="${this.escapeHtml(r.id)}" data-path="${this.escapeHtml(r.path || '')}" data-workspace-id="${this.escapeHtml(r.workspaceId || '')}">
+              <div class="ai-find-card" data-type="${this.escapeHtml(r.type)}" data-id="${this.escapeHtml(r.id)}" data-path="${this.escapeHtml(r.path || '')}" data-workspace-id="${this.escapeHtml(r.workspaceId || '')}" data-provider="${this.escapeHtml(r.provider || '')}">
                 <div class="ai-find-card-header">
                   <span class="ai-find-card-name">${this.escapeHtml(r.name || r.id)}</span>
                   <span class="ai-find-card-badge">${typeBadge}</span>
@@ -11014,6 +11068,10 @@ class CWMApp {
     const id = card.dataset.id;
     const cardPath = card.dataset.path;
     const wsId = card.dataset.workspaceId;
+    // Provider id carried by the result (server enrichMatch sets it for both
+    // store sessions and discovered projects). Empty string means unknown;
+    // getProviderCliBinary applies its own back-compat default.
+    const cardProvider = card.dataset.provider || null;
 
     // Mark this card as opened
     card.classList.add('ai-find-card-opened');
@@ -11027,28 +11085,62 @@ class CWMApp {
     this.setViewMode('terminal');
 
     if (type === 'session') {
-      // Resume existing session.
-      // Plan 19-02: AI find-session cards currently only surface Claude
-      // sessions (multi-provider find is deferred to v1.3). Resolve cliBinary
-      // through the helper anyway so the back-compat default lives in one
-      // place and a future find-session payload that includes a provider id
-      // lights up without further frontend edits.
+      // Resume existing STORE session. `id` here is the Myrlin store UUID,
+      // NOT the upstream transcript UUID; passing it as resumeSessionId made
+      // the CLI fail with "No conversation found with session ID". The store
+      // spawn path resolves the real resumeSessionId server-side from the
+      // session record, so we intentionally do not pass one.
       this.openTerminalInPane(emptySlot, id, id, {
         cwd: cardPath,
-        resumeSessionId: id,
-        command: this.getProviderCliBinary(null),
+        command: this.getProviderCliBinary(cardProvider),
+        provider: cardProvider || undefined,
       });
       this.showToast('Opening session in terminal', 'info');
     } else {
-      // Workspace or discovered project: open a new session in the project directory.
-      // Plan 19-02: same v1.1 back-compat default routed through the helper.
+      // Workspace or discovered project: open a new session in the project
+      // directory, spawning the CLI that matches the result's provider.
       const name = card.querySelector('.ai-find-card-name')?.textContent || 'new-session';
       this.openTerminalInPane(emptySlot, null, name, {
         cwd: cardPath,
-        command: this.getProviderCliBinary(null),
+        command: this.getProviderCliBinary(cardProvider),
+        provider: cardProvider || undefined,
       });
       this.showToast(`Opening ${name} in terminal`, 'info');
     }
+  }
+
+  /**
+   * Open a global-search result in an empty terminal pane by resuming the
+   * upstream conversation. Previously the search-result click handler called
+   * this method but it was never defined, making every result a dead click.
+   * Mirrors how _openFindResult opens discovered sessions: find an empty
+   * slot, switch to terminal view, spawn the provider's CLI with resume.
+   *
+   * @param {string} sessionId - Upstream resume UUID from the search result
+   *   (r.sessionId; the transcript's own id, not a Myrlin store id).
+   * @param {string} projectPath - The conversation's working directory.
+   * @param {string|null} provider - Provider id from the result element's
+   *   data-provider attribute; getProviderCliBinary applies the back-compat
+   *   default when null/empty.
+   * @returns {void}
+   */
+  openConversationResult(sessionId, projectPath, provider) {
+    if (!sessionId) return;
+    const emptySlot = this.terminalPanes.findIndex(p => p === null);
+    if (emptySlot === -1) {
+      this.showToast('All terminal panes full. Close one first.', 'warning');
+      return;
+    }
+    this.setViewMode('terminal');
+    // Prefer a stored custom title for the pane label; fall back to the UUID.
+    const displayName = this.getProjectSessionTitle(sessionId) || sessionId;
+    this.openTerminalInPane(emptySlot, sessionId, displayName, {
+      cwd: projectPath || '',
+      resumeSessionId: sessionId,
+      command: this.getProviderCliBinary(provider),
+      provider: provider || undefined,
+    });
+    this.showToast('Opening session in terminal', 'info');
   }
 
   /** Close the find conversation overlay and clean up listeners. */
@@ -11334,6 +11426,34 @@ class CWMApp {
             const tp = this.terminalPanes[slotIdx];
             if (!tp) { e.preventDefault(); return; } // empty pane - not draggable
             e.dataTransfer.setData('cwm/terminal-swap', String(slotIdx));
+            // Additionally advertise the pane as a droppable session so the
+            // sidebar's workspace/folder drop targets (which accept
+            // 'cwm/session' and 'cwm/project-session') light up. Pane-to-pane
+            // swap is unaffected: the pane drop handler checks
+            // 'cwm/terminal-swap' FIRST and returns before reading these.
+            const isStoreSession = tp.sessionId &&
+              (this.state.allSessions || this.state.sessions || []).some(s => s.id === tp.sessionId);
+            if (isStoreSession) {
+              // Store-managed pane: the sidebar's cwm/session drop branch
+              // calls moveSessionToWorkspace(sessionId, targetWsId) unchanged.
+              e.dataTransfer.setData('cwm/session', tp.sessionId);
+            } else {
+              // Ad-hoc pane (discovered/right-click opened): mirror the
+              // project-session drag payload shape EXACTLY as parsed by the
+              // sidebar drop branch (sessionName = upstream resume UUID,
+              // projectPath, displayName, provider). projectEncoded is not
+              // read by that branch and panes have none, so it is omitted.
+              const resumeUuid = (tp.spawnOpts && tp.spawnOpts.resumeSessionId) || tp.sessionId || '';
+              const paneCwd = (tp.spawnOpts && tp.spawnOpts.cwd) || '';
+              const paneProvider = (tp.spawnOpts && tp.spawnOpts.provider) ||
+                (pane.dataset && pane.dataset.provider) || '';
+              e.dataTransfer.setData('cwm/project-session', JSON.stringify({
+                sessionName: resumeUuid,
+                projectPath: paneCwd,
+                displayName: tp.sessionName || resumeUuid,
+                provider: paneProvider || undefined,
+              }));
+            }
             e.dataTransfer.effectAllowed = 'move';
             pane.classList.add('terminal-pane-dragging');
           });
@@ -17752,13 +17872,16 @@ class CWMApp {
 
       this.els.searchResults.innerHTML = html;
 
-      // Bind click events on results to navigate to the session
+      // Bind click events on results to navigate to the session. The
+      // renderer sets data-provider on every result (SRCH-05) so the open
+      // path can spawn the matching CLI (codex results resume with codex).
       this.els.searchResults.querySelectorAll('.search-result').forEach(el => {
         el.addEventListener('click', () => {
           const sessionId = el.dataset.sessionId;
           const projectPath = el.dataset.projectPath;
+          const resultProvider = el.dataset.provider || null;
           if (sessionId) {
-            this.openConversationResult(sessionId, projectPath);
+            this.openConversationResult(sessionId, projectPath, resultProvider);
             this.closeGlobalSearch();
           }
         });

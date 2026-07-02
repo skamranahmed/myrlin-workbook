@@ -56,6 +56,14 @@ const DEFAULT_STATE = {
   // CLI's session UUID instead. pty-manager.spawnSession looks here when
   // no store record exists. Phase 21 Plan 21-01 alpha.6 fix.
   providerSessionSettings: {}, // { [providerId]: { [uuid]: { ...settings } } }
+  // Ad-hoc per-(provider, providerSessionId) human title overrides.
+  // A rename applied in the UI to a discovered session (or any session
+  // resumed by an upstream CLI UUID) is stored here so the custom name is
+  // (a) searchable server-side, (b) merged into discovery + search read
+  // paths, and (c) shared across devices (localStorage was device-local).
+  // Mirrors the providerSessionSettings slot exactly; keyed by the same
+  // (providerId, upstream UUID) pair. Empty title deletes the override.
+  providerSessionTitles: {}, // { [providerId]: { [uuid]: title } }
   settings: {
     autoRecover: true,
     notificationLevel: 'all', // 'all' | 'errors' | 'none'
@@ -424,6 +432,9 @@ class Store extends EventEmitter {
         pairedDevices: parsed.pairedDevices || [],
         providerSessionSettings: parsed.providerSessionSettings && typeof parsed.providerSessionSettings === 'object' && !Array.isArray(parsed.providerSessionSettings)
           ? parsed.providerSessionSettings
+          : {},
+        providerSessionTitles: parsed.providerSessionTitles && typeof parsed.providerSessionTitles === 'object' && !Array.isArray(parsed.providerSessionTitles)
+          ? parsed.providerSessionTitles
           : {},
       };
     } catch (_) {
@@ -1070,6 +1081,72 @@ class Store extends EventEmitter {
     this.save();
     this.emit('providerSessionSettings:updated', { providerId, upstreamSessionId });
     return settings;
+  }
+
+  /**
+   * Read the human title override for an upstream session UUID, if one was
+   * set. Returns null when absent so read-time merges can fall back to the
+   * transcript-extracted title. Mirrors getProviderSessionSettings.
+   *
+   * @param {string} providerId - Registry-issued provider id.
+   * @param {string} upstreamSessionId - Provider-native session UUID.
+   * @returns {string|null} The stored title, or null when none is set.
+   */
+  getProviderSessionTitle(providerId, upstreamSessionId) {
+    if (!providerId || !upstreamSessionId) return null;
+    const root = this._state.providerSessionTitles;
+    if (!root || typeof root !== 'object') return null;
+    const byProvider = root[providerId];
+    if (!byProvider || typeof byProvider !== 'object') return null;
+    const title = byProvider[upstreamSessionId];
+    return typeof title === 'string' && title.length > 0 ? title : null;
+  }
+
+  /**
+   * Persist (or delete) a human title override for an upstream session UUID.
+   * Used by PUT /api/session-titles/:providerId/:uuid and by any rename path
+   * that wants the custom name to survive across devices + become searchable.
+   *
+   * Behavior:
+   *   - A non-empty string title sets the override for the pair.
+   *   - An empty/null title DELETES the override (the only deletion path;
+   *     the product rule is "no tracked session is ever lost" so we never
+   *     drop a title implicitly, only via an explicit empty value here).
+   *   - Nested objects are initialized lazily; empty provider buckets are
+   *     pruned on delete so state does not accumulate empty shells.
+   *   - Saves immediately (rename is user intent; durability matters).
+   *
+   * @param {string} providerId - Registry-issued provider id.
+   * @param {string} upstreamSessionId - Provider-native session UUID.
+   * @param {string|null} title - New title, or empty/null to delete.
+   * @returns {string|null} The stored title, or null after a delete.
+   */
+  setProviderSessionTitle(providerId, upstreamSessionId, title) {
+    if (!providerId || !upstreamSessionId) return null;
+    if (!this._state.providerSessionTitles || typeof this._state.providerSessionTitles !== 'object') {
+      this._state.providerSessionTitles = {};
+    }
+    const trimmed = typeof title === 'string' ? title.trim() : '';
+    if (trimmed.length === 0) {
+      // Explicit deletion path. Prune the pair and any now-empty bucket.
+      const byProvider = this._state.providerSessionTitles[providerId];
+      if (byProvider && typeof byProvider === 'object' && byProvider[upstreamSessionId] !== undefined) {
+        delete byProvider[upstreamSessionId];
+        if (Object.keys(byProvider).length === 0) {
+          delete this._state.providerSessionTitles[providerId];
+        }
+        this.save();
+        this.emit('providerSessionTitles:updated', { providerId, upstreamSessionId, deleted: true });
+      }
+      return null;
+    }
+    if (!this._state.providerSessionTitles[providerId] || typeof this._state.providerSessionTitles[providerId] !== 'object') {
+      this._state.providerSessionTitles[providerId] = {};
+    }
+    this._state.providerSessionTitles[providerId][upstreamSessionId] = trimmed;
+    this.save();
+    this.emit('providerSessionTitles:updated', { providerId, upstreamSessionId, deleted: false });
+    return trimmed;
   }
 
   /**
