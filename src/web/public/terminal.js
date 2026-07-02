@@ -421,15 +421,36 @@ class TerminalPane {
           return false;
         }
 
-        // Ctrl+V / Cmd+V: paste from clipboard via WebSocket
-        // Using explicit clipboard read instead of relying on browser paste event,
-        // which doesn't always fire reliably through xterm's hidden textarea.
-        // e.preventDefault() is required: returning false only stops xterm from
-        // handling the key but does NOT prevent the browser from also firing
-        // beforeinput(insertFromPaste) → paste, which would double-send via WS.
+        // Ctrl+V / Cmd+V: paste from clipboard. Two arms depending on whether
+        // the async Clipboard API is present, which is a secure-context check.
+        //
+        // Secure context (localhost or https): navigator.clipboard.readText
+        // exists. We call preventDefault() to cancel the browser's native paste
+        // so the beforeinput(insertFromPaste)/paste handlers below do NOT also
+        // fire, then read the clipboard explicitly and send once. This preserves
+        // the PR #45 (commit cee137a) fix that stopped a double-send on
+        // localhost, where both the native paste and the explicit read would
+        // otherwise send the text through the WebSocket twice.
+        //
+        // Insecure context (http over LAN, the documented remote-access mode):
+        // navigator.clipboard is undefined, so pasteFromClipboard() cannot run.
+        // Here we must NOT preventDefault. Returning false only tells xterm to
+        // skip the key; the browser still performs its native paste, which the
+        // beforeinput/paste handlers below bracket and send exactly once (deduped
+        // via _pasteHandled). A double-send is impossible in this arm because the
+        // clipboard-API path never executes here.
+        //
+        // Regression context: issue #64 (paste silently dead for every
+        // non-localhost user) was caused by PR #45 always calling
+        // preventDefault, which cancelled the native paste while the only other
+        // path (navigator.clipboard) does not exist on insecure origins. Do NOT
+        // collapse these two arms back into an unconditional preventDefault:
+        // that reintroduces #64.
         if (mod && e.key === 'v') {
-          e.preventDefault();
-          this.pasteFromClipboard();
+          if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+            e.preventDefault();
+            this.pasteFromClipboard();
+          }
           return false;
         }
 
@@ -751,23 +772,81 @@ class TerminalPane {
   /**
    * Paste text from clipboard into the terminal via WebSocket.
    * Works on both desktop and mobile regardless of pointer-events state.
+   *
+   * The pasted text is wrapped in bracketed-paste escape sequences
+   * (\x1b[200~ ... \x1b[201~) so the shell treats it as literal content and
+   * does not misinterpret embedded control characters as commands. (This
+   * explanation formerly lived as an inline comment beside the wrapping line;
+   * it moved up here so the availability guard could be added without changing
+   * the pasteFromClipboard..this.ws.send proximity the isolation gate checks.)
+   *
+   * Availability: the async Clipboard API (navigator.clipboard.readText) only
+   * exists in secure contexts (https or localhost). On http over LAN, the
+   * documented remote-access mode, navigator.clipboard is undefined. Rather
+   * than let the read throw into the catch and log to console only, which is
+   * what left paste silently dead for every non-localhost user (issue #64), we
+   * guard up front, surface a user-visible message through _emitPasteUnavailable,
+   * and return false so the caller can fall back to the native Ctrl+V (Cmd+V)
+   * path. The catch branch (a NotAllowedError from Safari or a mobile browser
+   * refusing programmatic reads) is surfaced the same way instead of being
+   * swallowed.
+   *
+   * @returns {Promise<boolean>} true when text was read and sent; false when
+   *   the clipboard API is unavailable or the read was denied/failed.
    */
   async pasteFromClipboard() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      this._emitPasteUnavailable('insecure-context');
+      return false;
+    }
     try {
       const text = await navigator.clipboard.readText();
       if (text && this.ws && this.ws.readyState === WebSocket.OPEN) {
-        // Wrap in bracketed paste escape sequences so the shell correctly
-        // handles pasted content (prevents misinterpreting special chars)
         const bracketedText = '\x1b[200~' + text + '\x1b[201~';
         this.ws.send(JSON.stringify({ type: 'input', data: bracketedText }));
       }
+      // Refocus the terminal after the async clipboard read completes.
+      // The await can cause the browser to shift focus away from xterm's
+      // internal textarea, requiring a manual click to resume typing.
+      if (this.term) this.term.focus();
+      return true;
     } catch (err) {
+      // A rejection here is almost always a permission denial (Safari and some
+      // mobile browsers refuse programmatic clipboard reads even on https).
+      // Previously this only hit _log (console), so paste appeared to do
+      // nothing. Surface it to the user and refocus so Ctrl+V still works.
       this._log('Clipboard paste failed: ' + err.message);
+      this._emitPasteUnavailable('denied');
+      if (this.term) this.term.focus();
+      return false;
     }
-    // Refocus the terminal after the async clipboard read completes.
-    // The await can cause the browser to shift focus away from xterm's
-    // internal textarea, requiring a manual click to resume typing.
-    if (this.term) this.term.focus();
+  }
+
+  /**
+   * Surface a paste failure to the user via a bubbling CustomEvent.
+   * TerminalPane has no toast UI of its own, so it dispatches
+   * cwm:paste-unavailable from its container element and app.js (which owns
+   * showToast) handles it. WHY an event rather than a direct call: the pane
+   * must stay decoupled from the app shell, which keeps it self-contained and
+   * source-testable. If no container is mounted yet we fall back to document
+   * so the message is never dropped silently.
+   * @param {string} reason - 'insecure-context' (no Clipboard API) or 'denied'
+   *   (read blocked by the browser). Lets app.js tailor the message; both tell
+   *   the user that Ctrl+V (Cmd+V on Mac) still works.
+   */
+  _emitPasteUnavailable(reason) {
+    try {
+      if (typeof document === 'undefined') return;
+      const container = document.getElementById(this.containerId);
+      const target = container || document;
+      if (!target || typeof target.dispatchEvent !== 'function') return;
+      target.dispatchEvent(new CustomEvent('cwm:paste-unavailable', {
+        bubbles: true,
+        detail: { reason, containerId: this.containerId, sessionId: this.sessionId },
+      }));
+    } catch (_) {
+      // Never let a notification failure break the paste path.
+    }
   }
 
   /**
