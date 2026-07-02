@@ -9,6 +9,14 @@
     "myrlin-tui": "./src/index.js",
     "cwm": "./src/index.js"
   },
+  "files": [
+    "src/",
+    "scripts/postinstall.js",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "DEMO_GUIDE.md"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "demo": "node src/demo.js",
