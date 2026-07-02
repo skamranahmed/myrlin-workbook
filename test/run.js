@@ -913,6 +913,7 @@ const standaloneTests = [
   'pty-resize-ownership.test.js',    // fix/terminal-sync: viewport ownership, no-op resize suppression, lag resync, reset-before-replay
   'codex-artifact-path.test.js',     // session-lifecycle: codex findArtifactPath/findArtifactByWorkingDir parity (cost 500 fix)
   'idle-notification-gating.test.js', // notification-storm fix: edge-triggered re-arm, replay suppression, refire cooldown, focus ack
+  'mobile-ux-fixes.test.js',         // fix/mobile-ux: mobile tab scroll, More sheet, settings sheet, long-press + tab touch paths
 ];
 
 let standaloneFailed = 0;

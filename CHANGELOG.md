@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -18,23 +18,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Sidebar workspace drops silently converted Codex sessions to Claude.** The `cwm/project-session` and `cwm/project` drop branches hardcoded `command: 'claude'` while forwarding `provider: psProvider`; both now resolve the CLI via `getProviderCliBinary(<provider>)`, removing the hardcoded literal entirely.
 - **Dragging a terminal pane into a sidebar workspace/folder never worked.** Pane headers only advertised `cwm/terminal-swap`, a type no sidebar drop target accepts. The pane-header dragstart now ALSO sets `cwm/session` (store-managed panes, so `moveSessionToWorkspace` works unchanged) or a `cwm/project-session` JSON payload (ad-hoc panes, matching the exact `{sessionName, projectPath, displayName, provider}` shape the drop branch parses). Pane-to-pane swap is unaffected because the pane drop handler checks `cwm/terminal-swap` first.
 
-### Added
-
-- **Archived Codex sessions are discoverable and searchable.** `$CODEX_HOME/archived_sessions/` holds ended threads in the same rollout JSONL format but was invisible to discovery and content search. Codex `discover()` now scans it (guarded by `existsSync`, live `sessions/` entry wins on id collision, works even when only `archived_sessions/` exists) tagging results `archived: true`; codex search includes archived rollouts and tags their results; the discovered-projects sidebar shows a muted `archived` pill on those rows. Why: no tracked session is ever lost, including threads Codex has archived.
-- **Server-side session title overrides: renames are now searchable and cross-device.** New store slot `providerSessionTitles` (`{[providerId]: {[uuid]: title}}`, mirroring the `providerSessionSettings` pattern) with `get/setProviderSessionTitle` (empty title is the explicit delete path). New `PUT /api/session-titles/:providerId/:uuid` route (provider id validated against the registry, uuid via `sanitizeSessionId`, 200-char cap). Read-time merges apply the override in `groupProviderSessionsForUI` (sidebar + `/api/discover` + find-session metadata) and on `GET /api/search` results keyed by `(provider, sessionId)`. The search dispatcher also emits synthetic `Matched by name` results for store session names/topics and title overrides that match the query, so custom names find their sessions even when the transcript text does not match. `syncSessionTitle` in the frontend keeps localStorage as an offline cache and fire-and-forgets the PUT, resolving the provider from linked sessions or open panes (never a hardcoded literal; skips the write when unresolvable).
-
 - **Notification storm: "ready for input" toasts and dings fired on every tab switch and output burst**, even for panes the user had already viewed. Four compounding root causes, each now fixed:
   - *Level-triggered idle detection* (`terminal.js`). Any output byte (Ink border repaint, focus-report echo, SIGWINCH redraw, spinner tick, scrollback replay) reset the once-per-cycle `_idleNotified` guard, so every cosmetic repaint followed by 2s of quiet re-fired the notification. Re-arm is now edge-triggered: the flushed chunk is ANSI-stripped and must contain at least `MIN_REARM_CHARS` (24) visible characters to count as new work. The 2s debounced idle check still runs on every flush.
   - *Scrollback replay notified on mount, reconnect, and tab switch* (`terminal.js`). The server replays up to 100KB of buffer on attach; that replay flowed through the detector and made every prompt-parked pane toast ~2s after a page load or group switch. `ws.onopen` now arms a `REPLAY_SUPPRESS_MS` (3s) window during which `_checkForCompletion` disarms and stays silent. A per-pane `IDLE_REFIRE_COOLDOWN_MS` (30s) at the dispatch site additionally caps how often a single pane can fire `terminal-idle`.
   - *No acknowledgement on focus + stale active-slot suppression* (`app.js`). Clicking or viewing a pane never consumed its pending needs-attention state, and `switchTerminalGroup` never updated `_activeTerminalSlot`, so the "don't notify the active pane" comparison used the previous group's slot index. `setActiveTerminalPane` now acknowledges on focus (refreshes the per-session dedupe entry, marks the pane's idle cycle notified, clears the amber "Needs input" badge), `switchTerminalGroup` re-points `_activeTerminalSlot` at the restored group's first filled slot, and `onTerminalIdle` gained a per-session dedupe (`SESSION_NOTIFY_DEDUPE_MS`, 60s, reset by genuine new activity) plus suppression of toast+sound for panes visible in the active group while the window has focus (passive indicators, border flash, tab dot, title flash, still run where applicable).
   - *Unthrottled chime that leaked AudioContexts* (`app.js`). `_playNotificationSound` created a new `AudioContext` per ding and never closed it; browsers cap concurrent contexts, so a storm eventually broke tab audio. It now has a global `CHIME_COOLDOWN_MS` (5s) and reuses one lazily-created context (with a `resume()` for autoplay-policy suspensions).
 - **Amber "Needs input" badge never rendered.** The `terminal-needs-input` listener looked up `terminal-pane-${i}` but pane elements are id'd `term-pane-${i}`, so the badge dataset flag was set on a null element. Fixed the selector; the badge now appears when auto-trust declines to answer a prompt and is cleared when the user focuses the pane.
+- **Workspace tab bar is now touch-scrollable** (P0-1). `.terminal-group-tab` carried `touch-action: none` (a DragDropTouch accommodation), and since the tabs fill the strip, a finger dragging across them could never pan the strip's `overflow-x: auto`. Tabs, the strip, and folder headers now use `touch-action: pan-x`; press-hold drag-to-reorder still works because a stationary 350ms hold never starts a native pan. The strip also preserves `scrollLeft` across `renderTerminalGroupTabs()` innerHTML re-renders and scrolls the active tab into view after every render and tab switch (desktop benefits too; it previously snapped to the start on every switch).
+- **Terminal tab group right-click menu never opened.** The tab `contextmenu` handler passed an items array to `showContextMenu(sessionId, x, y)`, whose session lookup always failed, so the menu silently no-oped. Tab items now build through a shared `_buildTerminalTabContextItems()` and route through `_renderContextItems` (floating menu on desktop, action sheet on mobile).
+- **Long-press gesture collisions** (P1-2). The pane's 600ms context long-press no longer fires when the touch lands on the xterm surface on mobile (terminal.js arms text selection at 400ms on the same hold; the pane menu stays reachable from the pane header and tab strip). The workspace, session, and discovered-project lists clear their 500ms long-press timers on `dragstart` so DragDropTouch drags (armed at 350ms) no longer pop a context sheet mid-drag.
+
+### Added
+
+- **Archived Codex sessions are discoverable and searchable.** `$CODEX_HOME/archived_sessions/` holds ended threads in the same rollout JSONL format but was invisible to discovery and content search. Codex `discover()` now scans it (guarded by `existsSync`, live `sessions/` entry wins on id collision, works even when only `archived_sessions/` exists) tagging results `archived: true`; codex search includes archived rollouts and tags their results; the discovered-projects sidebar shows a muted `archived` pill on those rows. Why: no tracked session is ever lost, including threads Codex has archived.
+- **Server-side session title overrides: renames are now searchable and cross-device.** New store slot `providerSessionTitles` (`{[providerId]: {[uuid]: title}}`, mirroring the `providerSessionSettings` pattern) with `get/setProviderSessionTitle` (empty title is the explicit delete path). New `PUT /api/session-titles/:providerId/:uuid` route (provider id validated against the registry, uuid via `sanitizeSessionId`, 200-char cap). Read-time merges apply the override in `groupProviderSessionsForUI` (sidebar + `/api/discover` + find-session metadata) and on `GET /api/search` results keyed by `(provider, sessionId)`. The search dispatcher also emits synthetic `Matched by name` results for store session names/topics and title overrides that match the query, so custom names find their sessions even when the transcript text does not match. `syncSessionTitle` in the frontend keeps localStorage as an offline cache and fire-and-forgets the PUT, resolving the provider from linked sessions or open panes (never a hardcoded literal; skips the write when unresolvable).
+- **Mobile More sheet exposes everything the hidden header had** (P0-2/P0-3). `.header-right` is display:none on phones, which orphaned Settings, themes, pairing, the session manager, and the conflict indicator; Tasks/Recent/Resources had no bottom-bar tab. The More sheet now includes: Tasks, Recent, Resources (via `setViewMode`), Settings, Theme (submenu built from the existing theme dropdown, check on the active theme), Pair Device, Sessions (session manager), and Conflicts with a live count (only when nonzero). All entries reuse the exact functions the header buttons call.
+- **Settings panel is a full-screen sheet on phones** (P1-1). The 520px popover with a 152px nav rail left ~210px of content at 390px width. On mobile the panel is now 100dvh edge-to-edge and the category rail becomes a horizontal, scrollable chip strip above the body.
+- **Tab group touch management** (P1-3). Delegated 500ms long-press on the tab strip opens the same context items as desktop right-click as an action sheet. Rename routes to the prompt modal on touch (inline editing of an 80px field under a virtual keyboard is unusable). The close x is visible at 0.5 opacity on mobile and tabs get a 40px min-height touch target. The long-press timer clears on `dragstart` since tabs are draggable.
+- **"Move to Tab..." in the terminal pane context menu** (P1-4). Submenu of all other tab groups calling the existing `moveTerminalToGroup`. Previously drag-only, which had no touch path; works on desktop and mobile.
+- **Tab strip polish** (P2). Trailing-edge fade mask plus `scroll-snap-type: x proximity` on the strip (snap-align on tabs) scoped to mobile; a `matchMedia('(max-width: 768px)')` change listener rebuilds both tab strips when crossing the breakpoint (rotation/resize); the mobile terminal-tab close button gets a 12px-inset invisible hit-area extension.
 
 ### Tests
 
 - Added `test/pty-resize-ownership.test.js` (7): reset-marker-before-replay ordering, sole-attach viewport apply before replay, no-op resize suppression, ownership transfer on input, `activate` claiming ownership without stdin writes plus unknown-type tolerance, viewport restore on owner disconnect, and lagged-client reset+resync without duplicated chunks.
 - Added `test/idle-notification-gating.test.js` (19 checks): behavioral sandbox tests for the edge-triggered re-arm, replay-suppression window, refire cooldown, and once-per-cycle dispatch in `terminal.js`, plus source-presence gates for the `app.js` half (dedupe map, focus acknowledgement, active-slot re-point, chime cooldown, shared AudioContext).
 - **`test/search-dispatch.test.js` made hermetic.** Three of its tests left the real provider enabled, so `/api/search` scanned the machine's actual transcript corpus; on a multi-GB corpus the synchronous reads block the event loop (the hard-timeout race timer never fires) and the whole suite hangs indefinitely. Those tests now disable the real provider around their requests (restored in `finally`), exercising the dispatch path with stubs only.
+- **Regression gate `test/mobile-ux-fixes.test.js`**: 18 string-match checks over styles.css, styles-mobile.css, and app.js locking every fix above (no-jsdom source-harvest pattern, registered in test/run.js).
+
 
 ## [1.2.0-alpha.9] - 2026-05-11
 
@@ -50,24 +60,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Codex bottom status strip on every Codex pane** (Plan 22-01). 26px chip row absolutely positioned along the bottom edge of `data-provider="codex"` panes showing `model · sandbox · approval · effort · [BYPASS]? · [features N]?`. Each chip is clickable — opens the matching submenu from `_buildCodexPaneMenu` anchored to the chip rect. Bypass chip only renders when bypass is ON (red, `letter-spacing` 0.08em, impossible to miss). `/api/discover` now returns `adHocProviderSettings` so the strip hydrates immediately for discovered Codex Desktop sessions without a Myrlin store record.
+- **Codex bottom status strip on every Codex pane** (Plan 22-01). 26px chip row absolutely positioned along the bottom edge of `data-provider="codex"` panes showing `model Â· sandbox Â· approval Â· effort Â· [BYPASS]? Â· [features N]?`. Each chip is clickable â€” opens the matching submenu from `_buildCodexPaneMenu` anchored to the chip rect. Bypass chip only renders when bypass is ON (red, `letter-spacing` 0.08em, impossible to miss). `/api/discover` now returns `adHocProviderSettings` so the strip hydrates immediately for discovered Codex Desktop sessions without a Myrlin store record.
 - **Auto-discovery for Codex sessions** (Plan 22-03). New `fs.watch` on `$CODEX_HOME/sessions` with 500ms debounce + 5-minute fallback poll. The provider's `init({onChange})` wires through the registry; server invalidates `_discoverCache` and broadcasts SSE `discover:refreshed`. Frontend re-fetches `/api/discover` on the event. New Codex CLI / Codex Desktop sessions appear in the sidebar within ~1 second of being created. Subagent filter from alpha.1 still in effect.
-- **`scripts/setup-cloudflared.ps1`** — idempotent installer/refresher for the `workbook.myrlin.dev` tunnel config. Reads the current `~/.cloudflared/config.yml`, patches the workbook hostname's upstream port (currently 3457 on this PC, was 3456), validates ingress, and prompts for a service restart.
-- **`scripts/setup-power-never-sleep.ps1`** — applies "never sleep / never turn off display" on AC and disables hibernate so the tunnel stays reachable.
-- **`docs/OPERATIONS.md`** — runbook for the three auto-restart layers, Cloudflare assets, log locations, Service Token rotation, port-mismatch recovery, and failure scenarios.
+- **`scripts/setup-cloudflared.ps1`** â€” idempotent installer/refresher for the `workbook.myrlin.dev` tunnel config. Reads the current `~/.cloudflared/config.yml`, patches the workbook hostname's upstream port (currently 3457 on this PC, was 3456), validates ingress, and prompts for a service restart.
+- **`scripts/setup-power-never-sleep.ps1`** â€” applies "never sleep / never turn off display" on AC and disables hibernate so the tunnel stays reachable.
+- **`docs/OPERATIONS.md`** â€” runbook for the three auto-restart layers, Cloudflare assets, log locations, Service Token rotation, port-mismatch recovery, and failure scenarios.
 
 ## [1.2.0-alpha.7] - 2026-05-11
 
 ### Fixed
 
 - **Ad-hoc pane right-click menu was nearly empty.** `_buildSessionContextItems` bailed with `return null` when the upstream session id was not in the Myrlin store, erasing the entire shared block (Start/Stop, Model, Naming, Tags, Insights, etc.) from the right-click menu on Codex Desktop panes opened via "Open in Terminal" (Plan 22-04). New `_buildAdHocSessionContextItems` factory returns the universal subset that works without a store record: Naming (Rename Pane + Auto Title), Insights (Summarize + Copy ID + Copy Path), and "Add to <active workspace>" adoption.
-- **"Session doesn't exist" when starting Bypass on an adopted Codex session.** `POST /api/sessions` silently dropped the `provider` field from the request body, so adopted Codex sessions persisted as untagged → defaulted to Claude via the read-side normalizer → `Start (Bypass)` launched `claude --dangerously-skip-permissions` against a Codex UUID. Now the route validates and forwards `provider`. `launchSession` also got provider-aware: Claude uses `--dangerously-skip-permissions`, Codex uses `--dangerously-bypass-approvals-and-sandbox`.
+- **"Session doesn't exist" when starting Bypass on an adopted Codex session.** `POST /api/sessions` silently dropped the `provider` field from the request body, so adopted Codex sessions persisted as untagged â†’ defaulted to Claude via the read-side normalizer â†’ `Start (Bypass)` launched `claude --dangerously-skip-permissions` against a Codex UUID. Now the route validates and forwards `provider`. `launchSession` also got provider-aware: Claude uses `--dangerously-skip-permissions`, Codex uses `--dangerously-bypass-approvals-and-sandbox`.
 - **Settings search hid the Providers section when typing "provider".** The static settings registry has no entries containing the word; the renderer early-returned with "No matching settings" before the async `_renderProvidersSection` could run. Now the filter-empty path still kicks the async section.
 
 ### Changed
 
-- **Stronger provider differentiation** (Plan 22-02). Pane tint 4% → 8%, top accent 3px → 4px, tint tokens 6% → 10%. New `.pane-provider-pill` in every pane header (green dot + "Codex" / mauve dot + "Claude"). Sidebar `.ws-session-item`, `.project-session-item`, and `.project-accordion` all carry a 3px provider stripe. Theme-safe via `--provider-{id}-accent`.
-- **Visible workspace group membership** (Plan 22-05). Each grouped workspace row shows a 4px left-edge stripe in the group's color and a `.ws-group-chip` with the group name; hovering the chip reveals a × button that calls `removeWorkspaceFromGroup`. Click handler intercepts the × before row activation.
+- **Stronger provider differentiation** (Plan 22-02). Pane tint 4% â†’ 8%, top accent 3px â†’ 4px, tint tokens 6% â†’ 10%. New `.pane-provider-pill` in every pane header (green dot + "Codex" / mauve dot + "Claude"). Sidebar `.ws-session-item`, `.project-session-item`, and `.project-accordion` all carry a 3px provider stripe. Theme-safe via `--provider-{id}-accent`.
+- **Visible workspace group membership** (Plan 22-05). Each grouped workspace row shows a 4px left-edge stripe in the group's color and a `.ws-group-chip` with the group name; hovering the chip reveals a Ã— button that calls `removeWorkspaceFromGroup`. Click handler intercepts the Ã— before row activation.
 
 ### Tests
 
@@ -103,14 +113,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **True boot-time auto-start (Windows).** `scripts/setup-autostart.ps1` now registers `Myrlin-Workbook` as a Scheduled Task with `AtStartup` trigger + S4U logon, so the workbook starts the moment the machine boots — no user login needed. Three-strike Task Scheduler restart-on-failure policy covers the rare case where the supervisor itself dies. To install: `powershell -ExecutionPolicy Bypass -File scripts/setup-autostart.ps1`. Cleans up the legacy `CWM-GUI-AutoStart` task on upgrade.
+- **True boot-time auto-start (Windows).** `scripts/setup-autostart.ps1` now registers `Myrlin-Workbook` as a Scheduled Task with `AtStartup` trigger + S4U logon, so the workbook starts the moment the machine boots â€” no user login needed. Three-strike Task Scheduler restart-on-failure policy covers the rare case where the supervisor itself dies. To install: `powershell -ExecutionPolicy Bypass -File scripts/setup-autostart.ps1`. Cleans up the legacy `CWM-GUI-AutoStart` task on upgrade.
 - **Supervisor never gives up (default).** `CWM_MAX_RESTARTS` default raised from `20` to `Infinity` so an unattended autostart session never throws up its hands. Set `CWM_MAX_RESTARTS=20` for debug runs that want to fail loud. Added exponential back-off after 5 consecutive fast-fails (capped at 60s) so a wedged port or bad config doesn't burn CPU.
 
 ## [1.2.0-alpha.4] - 2026-05-11
 
 ### Added
 
-- **Right-click "Codex settings" submenu on Codex panes.** Surfaces all six per-session knobs in one menu: model (gpt-5-codex / gpt-5 / o3), sandbox (read-only / workspace-write / danger-full-access), approval policy (untrusted / on-failure / on-request / never), reasoning effort (minimal / low / medium / high), bypass toggle, and features (web_search, view_image, plan_tool, apply_patch_tool). Claude panes are unaffected — the menu dispatches on `data-provider`.
+- **Right-click "Codex settings" submenu on Codex panes.** Surfaces all six per-session knobs in one menu: model (gpt-5-codex / gpt-5 / o3), sandbox (read-only / workspace-write / danger-full-access), approval policy (untrusted / on-failure / on-request / never), reasoning effort (minimal / low / medium / high), bypass toggle, and features (web_search, view_image, plan_tool, apply_patch_tool). Claude panes are unaffected â€” the menu dispatches on `data-provider`.
 - **Per-session provider settings persistence.** New `state.sessions[id].providerSettings.codex` bundle persists each Codex session's knobs. New store helpers `updateSessionProviderSettings()` and `getSessionProviderSettings()` keep the surface narrow.
 - **New API: `PUT /api/sessions/:id/provider-settings`.** Validates against per-key enum allow-lists, rejects shell-unsafe values via the same `SHELL_UNSAFE` regex used elsewhere in `server.js`, persists through `store.updateSessionProviderSettings()`. Returns 404 on unknown session id, 400 on validation failure, 401 without auth.
 - **Spawn wiring.** `codexProvider.spawnCommand` now consumes an optional `providerSettings` field and emits the canonical Codex CLI argv: `-m <model>`, `-s <sandbox>`, `-a <approvalPolicy>`, `-c model_reasoning_effort="<effort>"`, `--dangerously-bypass-approvals-and-sandbox`, `--enable <feature>` pairs. Unknown values are dropped with a `console.warn` (no throw). Positional `resume <id>` stays last so flag-shaped session ids cannot be misparsed. `pty-manager` reads the per-session bundle from the store on every spawn so settings changes take effect on the next pane restart.
@@ -118,9 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Tests
 
-- Added `test/codex-settings-route.test.js` (8 tests) — happy-path triple, bypass toggle, features array, unknown key 400, enum-violating value 400, shell-unsafe value 400, unknown session 404, missing auth 401.
-- Added `test/pane-context-menu.test.js` (9 tests) — string-match gate asserting `_buildCodexPaneMenu` exists, dispatches by `dataset.provider`, includes all 6 designed items, and routes bypass through `showConfirmModal`.
-- Extended `test/codex-spawn.test.js` with 9 new tests covering each providerSettings → CLI flag translation, drop-unknown semantics, and the `resume <id>` last-position invariant.
+- Added `test/codex-settings-route.test.js` (8 tests) â€” happy-path triple, bypass toggle, features array, unknown key 400, enum-violating value 400, shell-unsafe value 400, unknown session 404, missing auth 401.
+- Added `test/pane-context-menu.test.js` (9 tests) â€” string-match gate asserting `_buildCodexPaneMenu` exists, dispatches by `dataset.provider`, includes all 6 designed items, and routes bypass through `showConfirmModal`.
+- Extended `test/codex-spawn.test.js` with 9 new tests covering each providerSettings â†’ CLI flag translation, drop-unknown semantics, and the `resume <id>` last-position invariant.
 
 ## [1.2.0-alpha.3] - 2026-05-11
 
@@ -151,19 +161,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - **Multi-provider session support.** Myrlin now manages sessions from multiple AI coding CLIs through a clean `Provider` abstraction at `src/providers/`. Ships Claude Code (existing) + ChatGPT Codex (new). Gemini and others drop in via the same interface in v1.3.
-- **ChatGPT Codex provider.** Discovers Codex sessions from `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` (default `~/.codex`), parses the RolloutLine envelope schema (`session_meta`, `turn_context`, `event_msg`, `response_item`, `compacted`), supports pre-0.45 bare-JSON fallback, runs `codex resume <id>` as a full PTY pane. Off by default; enable via Settings → Providers.
+- **ChatGPT Codex provider.** Discovers Codex sessions from `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` (default `~/.codex`), parses the RolloutLine envelope schema (`session_meta`, `turn_context`, `event_msg`, `response_item`, `compacted`), supports pre-0.45 bare-JSON fallback, runs `codex resume <id>` as a full PTY pane. Off by default; enable via Settings â†’ Providers.
 - **Sidebar provider tabs.** New tab strip in the sidebar header filters discovered sessions by provider (All / Claude / ChatGPT). Tab state persists in localStorage; switching preserves scroll position; badges show per-provider session counts and update live via SSE.
 - **Per-provider visual identity.** Each session item, project accordion, and terminal pane carries a `data-provider` attribute. CSS tokens `--provider-claude-accent` (mauve), `--provider-codex-accent` (green), `--provider-gemini-accent` (blue, reserved) cascade through all 13 themes automatically via the existing Catppuccin palette.
-- **Settings → Providers section.** One tile per registered provider with toggle switch, accent swatch, and CLI availability check. Disabling a provider with running PTYs shows a confirmation modal warning that sessions will continue but cannot be restarted.
+- **Settings â†’ Providers section.** One tile per registered provider with toggle switch, accent swatch, and CLI availability check. Disabling a provider with running PTYs shows a confirmation modal warning that sessions will continue but cannot be restarted.
 - **Per-provider PTY behaviors.** Idle detection, Shift+Enter key bindings, and bracketed paste are all dispatched per-pane based on the active session's provider. No cross-contamination between Claude and Codex panes.
 - **API additions (additive only, no breaking changes):**
-  - `GET /api/providers` — returns `[{id, displayName, accentToken, enabled, available, supportsCost, cliBinary}]`
-  - `PUT /api/providers/:id/enabled` — toggles a provider; calls `provider.init()` or `provider.dispose()` with 5s timeouts
-  - `GET /api/discover` — now returns `{projects: {claude: [...], codex: [...]}}` keyed by provider id; `?legacy=1` retains v1.1 array shape for one release
-  - `GET /api/search` — `Promise.allSettled` dispatcher across enabled providers; each result carries `provider` field; response includes `partial: true` + `timedOutProviders: [...]` on timeout
+  - `GET /api/providers` â€” returns `[{id, displayName, accentToken, enabled, available, supportsCost, cliBinary}]`
+  - `PUT /api/providers/:id/enabled` â€” toggles a provider; calls `provider.init()` or `provider.dispose()` with 5s timeouts
+  - `GET /api/discover` â€” now returns `{projects: {claude: [...], codex: [...]}}` keyed by provider id; `?legacy=1` retains v1.1 array shape for one release
+  - `GET /api/search` â€” `Promise.allSettled` dispatcher across enabled providers; each result carries `provider` field; response includes `partial: true` + `timedOutProviders: [...]` on timeout
   - All `GET /api/sessions` and `GET /api/workspaces/:id` records now carry a `provider` field (defaults to `'claude'` for backward compat)
-- **State migration v1 → v2.** Schema bump with layered defense: explicit `migrateStateV1toV2()` + read-side defensive `provider: 'claude'` default. `_migrateBackupFiles()` runs unconditionally on init. Idempotent on re-launch; refuses to start with clear error on corrupt fixture.
-- **Cost tracking discipline.** `Provider.supportsCost()` is mandatory in the interface. Codex sessions show `—` with "Cost not tracked for this provider" tooltip — never $0.00. Aggregate cost totals exclude unsupported providers and disclose "(Claude only)" on aggregates. Real cost tracking for non-Claude providers will follow in v1.3.
+- **State migration v1 â†’ v2.** Schema bump with layered defense: explicit `migrateStateV1toV2()` + read-side defensive `provider: 'claude'` default. `_migrateBackupFiles()` runs unconditionally on init. Idempotent on re-launch; refuses to start with clear error on corrupt fixture.
+- **Cost tracking discipline.** `Provider.supportsCost()` is mandatory in the interface. Codex sessions show `â€”` with "Cost not tracked for this provider" tooltip â€” never $0.00. Aggregate cost totals exclude unsupported providers and disclose "(Claude only)" on aggregates. Real cost tracking for non-Claude providers will follow in v1.3.
 - **Grep gate (CI).** `test/grep-gate.test.js` enforces zero `'claude'` or `'codex'` string literals outside `src/providers/`. Legitimate exceptions carry `// gsd:provider-literal-allowed` markers. Prevents the abstraction from rotting as future providers are added.
 - **Drag-drop preserves provider.** Dragging a session across workspaces preserves its provider tag in the receiving `/api/sessions` request.
 
@@ -685,63 +695,63 @@ Git history was rewritten on `main` to remove 98 ephemeral planning docs from `.
 
 ### Added
 
-- **Session item two-line layout** — Session names display on their own line with badges, size, and time on a second row underneath. Removes 22-character name truncation.
-- **Auto-trust & question detection** — Automatically accepts safe trust/permission prompts (Y/n, trust folder, proceed, allow tool access) with 12 danger keyword guards (delete, credential, password, etc.). Amber "Needs input" badge on pane header for dangerous prompts. Opt-in via Settings > Automation.
-- **Tri-state status dots** — Worktree task sessions show pulsing green (active), amber (idle/waiting), or blue checkmark (done with commits) in sidebar. Server enriches tasks with `branchAhead` and `changedFiles` counts.
-- **Worktree Tasks view** — Dedicated "Tasks" sidebar view mode showing tasks grouped by Active/Review/Completed with quick actions (Open, Merge, Diff, Push).
-- **New Task dialog** — Full-featured task creation with auto-detected project directories, live branch name preview, model selector, flag checkboxes, and initial prompt.
-- **Workspace hover button** — Hover over a workspace to show a `+` button for quick worktree task creation.
-- **Changed files API** — `GET /api/worktree-tasks/:id/changes` returns per-file additions, deletions, and status (A/M/D/R).
-- **Per-file diff API** — `POST /api/worktree-tasks/:id/diff` now accepts optional `file` field for single-file diffs.
-- **Diff viewer modal** — Full diff viewer with file list sidebar (status icons, +/- counts), syntax-highlighted unified diff, hunk headers, and line numbers.
-- **Changed files in session detail** — Collapsible "Changed Files" section below worktree task review banner with click-to-open-diff.
-- **One-click merge dialog** — Merge dialog with squash toggle, custom commit message, and push-to-remote option. Replaces simple confirm modal.
-- **Branch push endpoint** — `POST /api/worktree-tasks/:id/push` pushes branch to remote for PR workflows. Push button in review banner and Tasks view.
-- **Workflows documentation** — Comprehensive `docs/WORKFLOWS.md` covering all features with user stories and step-by-step guides.
-- **16 new unit tests** — Auto-trust pattern matching (10 tests), diff parsing (4 tests), numstat parsing (2 tests). Total: 42 tests.
+- **Session item two-line layout** â€” Session names display on their own line with badges, size, and time on a second row underneath. Removes 22-character name truncation.
+- **Auto-trust & question detection** â€” Automatically accepts safe trust/permission prompts (Y/n, trust folder, proceed, allow tool access) with 12 danger keyword guards (delete, credential, password, etc.). Amber "Needs input" badge on pane header for dangerous prompts. Opt-in via Settings > Automation.
+- **Tri-state status dots** â€” Worktree task sessions show pulsing green (active), amber (idle/waiting), or blue checkmark (done with commits) in sidebar. Server enriches tasks with `branchAhead` and `changedFiles` counts.
+- **Worktree Tasks view** â€” Dedicated "Tasks" sidebar view mode showing tasks grouped by Active/Review/Completed with quick actions (Open, Merge, Diff, Push).
+- **New Task dialog** â€” Full-featured task creation with auto-detected project directories, live branch name preview, model selector, flag checkboxes, and initial prompt.
+- **Workspace hover button** â€” Hover over a workspace to show a `+` button for quick worktree task creation.
+- **Changed files API** â€” `GET /api/worktree-tasks/:id/changes` returns per-file additions, deletions, and status (A/M/D/R).
+- **Per-file diff API** â€” `POST /api/worktree-tasks/:id/diff` now accepts optional `file` field for single-file diffs.
+- **Diff viewer modal** â€” Full diff viewer with file list sidebar (status icons, +/- counts), syntax-highlighted unified diff, hunk headers, and line numbers.
+- **Changed files in session detail** â€” Collapsible "Changed Files" section below worktree task review banner with click-to-open-diff.
+- **One-click merge dialog** â€” Merge dialog with squash toggle, custom commit message, and push-to-remote option. Replaces simple confirm modal.
+- **Branch push endpoint** â€” `POST /api/worktree-tasks/:id/push` pushes branch to remote for PR workflows. Push button in review banner and Tasks view.
+- **Workflows documentation** â€” Comprehensive `docs/WORKFLOWS.md` covering all features with user stories and step-by-step guides.
+- **16 new unit tests** â€” Auto-trust pattern matching (10 tests), diff parsing (4 tests), numstat parsing (2 tests). Total: 42 tests.
 
 ## [0.7.0-alpha.1] - 2026-02-20
 
 ### Fixed
 
-- **Tab group switch blank canvas** — Switching from a 4-pane tab group to a 1-pane group and back caused all 4 terminals to appear blank. Canvas pixel buffer was cleared when xterm.js DOM was moved to DocumentFragments for caching. Added explicit `term.refresh()` after restoring cached panes.
-- **Discover Sessions "Import Selected"** — Clicking "Import Selected" in the Discover Claude Sessions modal did nothing. The confirm button had no click handler wired to resolve the promise.
-- **Dead terminal panes filling grid** — Saved layouts with stale sessions showed a multi-pane grid with dead terminals. Panes now auto-close after fatal connection errors (max retries or server error 1011).
-- **Mobile terminal scrolling** — Swiping on the terminal body now scrolls with native-feeling momentum. Manual touch-scroll handler bypasses xterm.js's touch event interception that was blocking native scroll. Long-press (400ms) activates text selection without triggering keyboard. Scrollbar now visible and draggable on mobile.
+- **Tab group switch blank canvas** â€” Switching from a 4-pane tab group to a 1-pane group and back caused all 4 terminals to appear blank. Canvas pixel buffer was cleared when xterm.js DOM was moved to DocumentFragments for caching. Added explicit `term.refresh()` after restoring cached panes.
+- **Discover Sessions "Import Selected"** â€” Clicking "Import Selected" in the Discover Claude Sessions modal did nothing. The confirm button had no click handler wired to resolve the promise.
+- **Dead terminal panes filling grid** â€” Saved layouts with stale sessions showed a multi-pane grid with dead terminals. Panes now auto-close after fatal connection errors (max retries or server error 1011).
+- **Mobile terminal scrolling** â€” Swiping on the terminal body now scrolls with native-feeling momentum. Manual touch-scroll handler bypasses xterm.js's touch event interception that was blocking native scroll. Long-press (400ms) activates text selection without triggering keyboard. Scrollbar now visible and draggable on mobile.
 
 ### Added
 
-- **Inspect Element** — Right-click anywhere shows "Inspect Element" and "Copy Selector" for developer access. Uses Chrome DevTools `inspect()` when available, falls back to console logging.
-- **Organized context menus** — Session context menu items grouped into submenus (Naming, Insights, Advanced) to reduce clutter from ~18 flat items to ~12 grouped items.
+- **Inspect Element** â€” Right-click anywhere shows "Inspect Element" and "Copy Selector" for developer access. Uses Chrome DevTools `inspect()` when available, falls back to console logging.
+- **Organized context menus** â€” Session context menu items grouped into submenus (Naming, Insights, Advanced) to reduce clutter from ~18 flat items to ~12 grouped items.
 
 ### Removed
 
-- **Weekly usage quota widget** — Fully removed (sidebar progress bars, polling, settings, API endpoint). Code archived to `docs/QUOTA_WIDGET_REFERENCE.md` for future re-implementation. Context window tracking in session detail and Resources panel retained.
+- **Weekly usage quota widget** â€” Fully removed (sidebar progress bars, polling, settings, API endpoint). Code archived to `docs/QUOTA_WIDGET_REFERENCE.md` for future re-implementation. Context window tracking in session detail and Resources panel retained.
 
 ## [0.6.0] - 2026-02-20
 
 ### Added
 
-- **Command Palette** — Ctrl+K now searches sessions, workspaces, features, actions, settings, and keyboard shortcuts. Type `>` for command mode (actions only), press `?` or `F1` for help mode (browse all features). Color-coded result badges per type (session/workspace/action/feature/setting/shortcut) with keyboard shortcut indicators.
-- **Feature Discovery** — 30+ feature catalog entries covering every capability in the app. Users can search "worktree", "template", "cost", etc. to discover features they didn't know existed. Settings are also searchable from the palette.
-- **Worktree Task Automation** — Create isolated worktree branches for Claude to work on autonomously. Right-click workspace > "New Worktree Task" (requires opt-in via Settings > Advanced). Auto-creates git worktree + branch + session. When session stops, task auto-transitions to "review" status with View Diff / Merge / Reject / Resume actions in the session detail panel. Merge cleans up the worktree and branch automatically.
-- **Worktree Tasks API** — Full CRUD endpoints: GET/POST/PUT/DELETE `/api/worktree-tasks`, plus `/merge`, `/reject`, `/diff` action endpoints. SSE events for real-time updates.
+- **Command Palette** â€” Ctrl+K now searches sessions, workspaces, features, actions, settings, and keyboard shortcuts. Type `>` for command mode (actions only), press `?` or `F1` for help mode (browse all features). Color-coded result badges per type (session/workspace/action/feature/setting/shortcut) with keyboard shortcut indicators.
+- **Feature Discovery** â€” 30+ feature catalog entries covering every capability in the app. Users can search "worktree", "template", "cost", etc. to discover features they didn't know existed. Settings are also searchable from the palette.
+- **Worktree Task Automation** â€” Create isolated worktree branches for Claude to work on autonomously. Right-click workspace > "New Worktree Task" (requires opt-in via Settings > Advanced). Auto-creates git worktree + branch + session. When session stops, task auto-transitions to "review" status with View Diff / Merge / Reject / Resume actions in the session detail panel. Merge cleans up the worktree and branch automatically.
+- **Worktree Tasks API** â€” Full CRUD endpoints: GET/POST/PUT/DELETE `/api/worktree-tasks`, plus `/merge`, `/reject`, `/diff` action endpoints. SSE events for real-time updates.
 
 ## [0.5.0] - 2026-02-18
 
 ### Added
 
-- **Refocus Session** — right-click any session to distill the full conversation into a structured context document, then Reset (clear + reinject) or Compact (compress + reinject) the session. Gives Claude a fresh context window with full project awareness.
-- **Unified Context Menus** — terminal pane right-click now includes all session management options (Start/Stop, Model, Flags, Rename, Summarize, Templates, Move to Workspace, etc.) matching the sidebar context menu.
-- **Persistent Password Config** — password can now be set in `~/.myrlin/config.json` for automatic startup without prompts.
-- **Cross-Platform Support** — merged community PR for WSL/Linux shell spawning. Shell selection, browser launch, and demo paths now work on Windows, Linux, and macOS.
-- **Security Hardening** — three-layer input validation (API boundary, WebSocket boundary, spawn point) for command injection prevention. Shell allowlist for safe binary selection. HTML escaping for template chip tooltips.
+- **Refocus Session** â€” right-click any session to distill the full conversation into a structured context document, then Reset (clear + reinject) or Compact (compress + reinject) the session. Gives Claude a fresh context window with full project awareness.
+- **Unified Context Menus** â€” terminal pane right-click now includes all session management options (Start/Stop, Model, Flags, Rename, Summarize, Templates, Move to Workspace, etc.) matching the sidebar context menu.
+- **Persistent Password Config** â€” password can now be set in `~/.myrlin/config.json` for automatic startup without prompts.
+- **Cross-Platform Support** â€” merged community PR for WSL/Linux shell spawning. Shell selection, browser launch, and demo paths now work on Windows, Linux, and macOS.
+- **Security Hardening** â€” three-layer input validation (API boundary, WebSocket boundary, spawn point) for command injection prevention. Shell allowlist for safe binary selection. HTML escaping for template chip tooltips.
 
 ### Fixed
 
-- **Terminal Scrollback Preserved on Tab Switch** — hidden terminal panes no longer get resized to 1x1 when switching tabs, which was permanently garbling scrollback. All 9 fit() call sites now use visibility-guarded `safeFit()`.
-- **Mobile Terminal Scroll** — native compositor-thread scrolling for 60fps smooth mobile scrolling.
-- **Session Rename Persistence** — renaming a session (via context menu, inline edit, or auto-title) now syncs the new name to terminal pane tabs, sidebar, and project views globally.
+- **Terminal Scrollback Preserved on Tab Switch** â€” hidden terminal panes no longer get resized to 1x1 when switching tabs, which was permanently garbling scrollback. All 9 fit() call sites now use visibility-guarded `safeFit()`.
+- **Mobile Terminal Scroll** â€” native compositor-thread scrolling for 60fps smooth mobile scrolling.
+- **Session Rename Persistence** â€” renaming a session (via context menu, inline edit, or auto-title) now syncs the new name to terminal pane tabs, sidebar, and project views globally.
 
 ## [0.4.1] - 2026-02-16
 

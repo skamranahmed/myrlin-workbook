@@ -1266,6 +1266,29 @@ class CWMApp {
       });
     }
 
+    // ─── P2: Re-render tab strips when crossing the mobile breakpoint ───
+    // The desktop tab-group strip and the mobile terminal-tab strip are built
+    // by different code paths that key off isMobile. Rotating a tablet or
+    // resizing a window across 768px would otherwise leave a strip in its
+    // stale (wrong-mode) form until the next unrelated re-render. Rebuild both
+    // on the crossing. Guarded for method existence so it never throws.
+    if (window.matchMedia) {
+      const mobileMq = window.matchMedia('(max-width: 768px)');
+      const onBreakpointChange = () => {
+        if (typeof this.updateTerminalTabs === 'function') this.updateTerminalTabs();
+        if (typeof this.renderTerminalGroupTabs === 'function' && this._tabGroups) {
+          this.renderTerminalGroupTabs();
+        }
+      };
+      // addEventListener('change') is the modern API; older Safari only has
+      // addListener. Prefer the former, fall back to the latter.
+      if (typeof mobileMq.addEventListener === 'function') {
+        mobileMq.addEventListener('change', onBreakpointChange);
+      } else if (typeof mobileMq.addListener === 'function') {
+        mobileMq.addListener(onBreakpointChange);
+      }
+    }
+
     // ─── Mobile: Terminal Toolbar ──────────────────────────────
     // Toolbar buttons send input directly via WebSocket - they work in
     // both scroll and type mode, no textarea focus needed.
@@ -1680,6 +1703,10 @@ class CWMApp {
 
     // Drag start/end delegation
     wsList.addEventListener('dragstart', (e) => {
+      // P1-2(b): DragDropTouch arms a drag at 350ms; the 500ms long-press timer
+      // above would still fire mid-drag and pop a context sheet over the drag.
+      // Cancel it the moment a drag begins.
+      clearTimeout(wsLPTimer);
       const wsSessionItem = e.target.closest('.ws-session-item');
       if (wsSessionItem) {
         e.stopPropagation();
@@ -1868,6 +1895,8 @@ class CWMApp {
 
     // Session list drag (moved from initDragAndDrop)
     sessList.addEventListener('dragstart', (e) => {
+      // P1-2(b): cancel the pending long-press so it does not fire mid-drag.
+      clearTimeout(sessLPTimer);
       const item = e.target.closest('.session-item');
       if (!item) return;
       console.log('[DnD] Drag started: session-item', item.dataset.id);
@@ -1920,6 +1949,8 @@ class CWMApp {
       });
 
       projList.addEventListener('dragstart', (e) => {
+        // P1-2(b): cancel the pending long-press so it does not fire mid-drag.
+        clearTimeout(projLPTimer);
         const sessionItem = e.target.closest('.project-session-item');
         if (sessionItem) {
           e.stopPropagation();
@@ -1988,6 +2019,38 @@ class CWMApp {
       }, { passive: false });
       projList.addEventListener('touchend', () => clearTimeout(projLPTimer));
       projList.addEventListener('touchmove', () => clearTimeout(projLPTimer));
+    }
+
+    // ── TERMINAL TAB GROUP STRIP (P1-3) ──────────────────────
+    // Tab groups previously had no touch path: rename was double-click only and
+    // the menu was right-click only. Add a delegated long-press on the strip
+    // (the persistent container, so it survives per-render innerHTML swaps) that
+    // opens the same context items as the desktop right-click, routed through
+    // _renderContextItems (an action sheet on mobile). Mirrors the wsList pattern.
+    const tabStrip = this.els.terminalGroupsTabs;
+    if (tabStrip) {
+      // Long-press threshold, matched to the sidebar lists for a consistent feel.
+      const TAB_LONG_PRESS_MS = 500;
+      let tabLPTimer = null;
+      tabStrip.addEventListener('touchstart', (e) => {
+        clearTimeout(tabLPTimer);
+        const tabEl = e.target.closest && e.target.closest('.terminal-group-tab');
+        if (!tabEl) return;
+        tabLPTimer = setTimeout(() => {
+          const touch = e.touches[0];
+          if (!touch) return;
+          const groupId = tabEl.dataset.groupId;
+          const group = this._tabGroups.find(g => g.id === groupId);
+          const items = this._buildTerminalTabContextItems(groupId, tabEl);
+          this._renderContextItems(group ? group.name : 'Tab Group', items, touch.clientX, touch.clientY);
+        }, TAB_LONG_PRESS_MS);
+      }, { passive: false });
+      tabStrip.addEventListener('touchend', () => clearTimeout(tabLPTimer));
+      tabStrip.addEventListener('touchmove', () => clearTimeout(tabLPTimer));
+      // Guard: tabs are draggable (reorder). Cancel the long-press the instant a
+      // drag begins so it does not pop a sheet over the drag. Delegated on the
+      // container so it covers the freshly-rendered tab buttons every render.
+      tabStrip.addEventListener('dragstart', () => clearTimeout(tabLPTimer));
     }
   }
 
@@ -11546,7 +11609,17 @@ class CWMApp {
 
         // Long-press for mobile terminal context menu
         let termLongPress = null;
+        // P1-2(a): terminal.js already arms mobile text-selection at 400ms on a
+        // still hold inside the xterm surface. Firing the pane context sheet
+        // here on the same hold double-fires. Skip when the touch lands on the
+        // terminal surface (the xterm screen or its container); the pane menu
+        // stays reachable from the pane header and the mobile tab strip.
+        const TERMINAL_SURFACE_SELECTOR = '.terminal-container, .xterm';
         pane.addEventListener('touchstart', (e) => {
+          if (this.isMobile && e.target && e.target.closest &&
+              e.target.closest(TERMINAL_SURFACE_SELECTOR)) {
+            return;
+          }
           termLongPress = setTimeout(() => {
             const tp = this.terminalPanes[slotIdx];
             if (!tp) return;
@@ -12438,6 +12511,22 @@ class CWMApp {
 
     // ── Pane management ───────────────────────────────────────
     items.push({ type: 'sep' });
+
+    // P1-4: Move this terminal to another tab group. Previously only possible by
+    // drag-and-drop onto a tab, which has no touch equivalent. Submenu lists all
+    // other tab groups; selecting one reuses the existing moveTerminalToGroup.
+    // Only shown when another group exists (an empty submenu would be dead UI).
+    const otherGroups = (this._tabGroups || []).filter(g => g.id !== this._activeGroupId);
+    if (otherGroups.length > 0) {
+      items.push({
+        label: 'Move to Tab...',
+        icon: '&#8594;',
+        submenu: otherGroups.map(g => ({
+          label: g.name,
+          action: () => this.moveTerminalToGroup(slotIdx, g.id),
+        })),
+      });
+    }
 
     // Close pane
     items.push({
@@ -13528,17 +13617,80 @@ class CWMApp {
   }
 
   /**
+   * Build the theme submenu items from the existing theme-picker dropdown in
+   * the DOM. Reading the dropdown keeps a single source of truth for the theme
+   * list (index.html) instead of duplicating it here. Each item routes through
+   * the existing setTheme() path and shows a check on the active theme.
+   * @returns {Array<{label: string, check: boolean, action: Function}>}
+   */
+  _buildThemeMenuItems() {
+    const dropdown = this.els.themeDropdown;
+    if (!dropdown) return [];
+    const activeTheme = document.documentElement.dataset.theme || 'mocha';
+    return Array.from(dropdown.querySelectorAll('.theme-option')).map(btn => {
+      const themeName = btn.dataset.theme;
+      // Collect only the button's direct text nodes so the swatch and the
+      // Catppuccin badge child spans are excluded, leaving the clean name.
+      const label = Array.from(btn.childNodes)
+        .filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent)
+        .join('')
+        .trim() || themeName;
+      return {
+        label,
+        check: themeName === activeTheme,
+        action: () => this.setTheme(themeName),
+      };
+    });
+  }
+
+  /**
    * "More" tab menu - shows action sheet with utility actions.
+   *
+   * P0-2 / P0-3: on mobile the entire header-right cluster is hidden and three
+   * view modes have no bottom-bar entry. This sheet is the single reachable
+   * surface for all of them, so it exposes: the Tasks/Recent/Resources views,
+   * Settings, Theme (submenu, flattened by showActionSheet), Pair Device, the
+   * Session Manager, and Conflicts (only when there are active conflicts). Each
+   * item reuses the exact function the hidden header button calls; no logic is
+   * duplicated here.
    */
   showMoreMenu() {
     const items = [
+      // ── Views without a bottom-bar tab (P0-3) ──
+      { label: 'Tasks', icon: '&#9745;', action: () => this.setViewMode('tasks') },
+      { label: 'Recent', icon: '&#128337;', action: () => this.setViewMode('recent') },
+      { label: 'Resources', icon: '&#128202;', action: () => this.setViewMode('resources') },
+      { type: 'sep' },
+      // ── Hidden header-right actions (P0-2) ──
+      { label: 'Settings', icon: '&#9881;', action: () => this.openSettings() },
+      { label: 'Theme', icon: '&#127912;', submenu: this._buildThemeMenuItems() },
+      { label: 'Pair Device', icon: '&#128241;', action: () => this.showPairMobileModal() },
+      { label: 'Sessions', icon: '&#9776;', action: () => this.toggleSessionManager('all') },
+    ];
+
+    // Conflicts entry only appears when the active workspace has conflicts,
+    // mirroring the header indicator that is hidden at zero. Show the count in
+    // the label so the sheet matches the badge the user cannot see on mobile.
+    const conflictCount = (this._currentConflicts || []).length;
+    if (conflictCount > 0) {
+      items.push({
+        label: `Conflicts (${conflictCount})`,
+        icon: '&#9888;',
+        action: () => this.openConflictCenter(),
+      });
+    }
+
+    items.push(
+      { type: 'sep' },
       { label: 'Quick Switcher', icon: '&#128269;', action: () => this.openQuickSwitcher() },
       { label: 'Discover Sessions', icon: '&#128260;', action: () => this.discoverSessions() },
       { type: 'sep' },
       { label: 'Restart All Sessions', icon: '&#8635;', action: () => this.restartAllSessions() },
       { type: 'sep' },
       { label: 'Logout', icon: '&#9211;', action: () => this.logout(), danger: true },
-    ];
+    );
+
     this.showActionSheet('', items);
   }
 
@@ -15060,7 +15212,14 @@ class CWMApp {
       </svg>
     </button>`;
 
+    // P0-1: capture the strip's horizontal scroll position BEFORE the full
+    // innerHTML swap. Replacing innerHTML resets scrollLeft to 0, which made
+    // every tab switch (and every re-render) snap the strip back to the start,
+    // hiding tabs the user had scrolled to. Restoring it immediately after the
+    // swap preserves position for touch AND mouse users.
+    const prevScrollLeft = this.els.terminalGroupsTabs.scrollLeft;
     this.els.terminalGroupsTabs.innerHTML = html;
+    this.els.terminalGroupsTabs.scrollLeft = prevScrollLeft;
 
     // Bind the "+" button
     const addBtn = this.els.terminalGroupsTabs.querySelector('.terminal-groups-add');
@@ -15235,63 +15394,18 @@ class CWMApp {
         if (nameEl) this.startInlineRenameGroup(nameEl, tab.dataset.groupId);
       });
 
-      // Right-click context menu - includes folder management
+      // Right-click context menu - includes folder management.
+      // P1-3: items are built by the shared _buildTerminalTabContextItems
+      // helper (also used by the touch long-press path) and routed through
+      // _renderContextItems. Previously this called showContextMenu(ctxItems,
+      // ...), but showContextMenu takes a session id as its first arg, so the
+      // array never matched a session and the menu silently never opened.
       tab.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const groupId = tab.dataset.groupId;
         const group = this._tabGroups.find(g => g.id === groupId);
-        const groupIdx = this._tabGroups.findIndex(g => g.id === groupId);
-        const ctxItems = [
-          { label: 'Rename', action: () => {
-            const nameEl = tab.querySelector('.terminal-group-tab-name');
-            if (nameEl) this.startInlineRenameGroup(nameEl, groupId);
-          }},
-        ];
-        if (groupIdx > 0) {
-          ctxItems.push({ label: 'Move Left', icon: '&#9664;', action: () => {
-            this._swapTabGroups(groupIdx, groupIdx - 1);
-          }});
-        }
-        if (groupIdx < this._tabGroups.length - 1) {
-          ctxItems.push({ label: 'Move Right', icon: '&#9654;', action: () => {
-            this._swapTabGroups(groupIdx, groupIdx + 1);
-          }});
-        }
-
-        // Folder assignment submenu
-        ctxItems.push({ type: 'sep' });
-        if (group && group.folderId) {
-          ctxItems.push({ label: 'Remove from Group', action: () => {
-            group.folderId = null;
-            this.renderTerminalGroupTabs();
-            this.saveTerminalLayout();
-          }});
-        }
-        if (this._tabFolders.length > 0) {
-          const folderItems = this._tabFolders
-            .filter(f => !group || group.folderId !== f.id)
-            .map(f => ({
-              label: f.name,
-              icon: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--${f.color || 'mauve'})"></span>`,
-              action: () => {
-                if (group) group.folderId = f.id;
-                this.renderTerminalGroupTabs();
-                this.saveTerminalLayout();
-              },
-            }));
-          if (folderItems.length > 0) {
-            ctxItems.push({ label: 'Add to Group', submenu: folderItems });
-          }
-        }
-        ctxItems.push({ label: 'New Group from Tab', action: () => {
-          this._createFolderFromTab(groupId);
-        }});
-
-        ctxItems.push({ type: 'sep' });
-        ctxItems.push(
-          { label: 'Delete', danger: true, action: () => this.deleteTerminalGroup(groupId) },
-        );
-        this.showContextMenu(ctxItems, e.clientX, e.clientY);
+        const items = this._buildTerminalTabContextItems(groupId, tab);
+        this._renderContextItems(group ? group.name : 'Tab Group', items, e.clientX, e.clientY);
       });
     });
 
@@ -15303,6 +15417,27 @@ class CWMApp {
         await this.closeTabGroupWithConfirmation(groupId);
       });
     });
+
+    // P0-1: after re-rendering, make sure the active tab is on-screen. Runs on
+    // every render so the just-activated tab is never left scrolled out of view.
+    this._ensureActiveTabVisible();
+  }
+
+  /**
+   * Scroll the currently-active terminal group tab into view within the
+   * horizontally-scrollable tab strip. Uses inline/block 'nearest' so it only
+   * nudges when the tab is off-screen and never scrolls the page vertically.
+   * Called after every tab-strip re-render (and after a tab switch) so the
+   * active tab stays visible on both desktop and touch. Fails safe when the
+   * strip or an active tab is absent.
+   */
+  _ensureActiveTabVisible() {
+    const strip = this.els.terminalGroupsTabs;
+    if (!strip) return;
+    const active = strip.querySelector('.terminal-group-tab.active');
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    }
   }
 
   switchTerminalGroup(groupId) {
@@ -15450,6 +15585,11 @@ class CWMApp {
     // fires during the switch and targets the freshly-rendered button.
     const newTabBtn = document.querySelector(`.terminal-group-tab[data-group-id="${groupId}"]`);
     if (newTabBtn) newTabBtn.classList.remove('tab-notify');
+
+    // P0-1: renderTerminalGroupTabs() above already preserves scroll and scrolls
+    // the active tab into view; call it explicitly here too so a switch always
+    // reveals the newly-activated tab even if render timing changes later.
+    this._ensureActiveTabVisible();
 
     this.saveTerminalLayout();
   }
@@ -15923,6 +16063,99 @@ class CWMApp {
     this.saveTerminalLayout();
     this.renderTerminalGroupTabs();
     this.showToast(`Moved "${sessionInfo.sessionName}" to "${targetGroup.name}"`, 'info');
+  }
+
+  /**
+   * Build the context-menu item descriptors for a terminal tab group. Shared by
+   * the desktop right-click path and the mobile long-press path so both offer
+   * identical actions. _renderContextItems downstream decides floating menu vs
+   * action sheet. Rename edits inline on desktop but uses the prompt modal on
+   * touch, where a virtual keyboard over an 80px inline field is unusable.
+   * @param {string} groupId - The tab group id.
+   * @param {HTMLElement} tabEl - The tab button element (used for inline rename).
+   * @returns {Array<Object>} Item descriptors compatible with _renderContextItems.
+   */
+  _buildTerminalTabContextItems(groupId, tabEl) {
+    const group = this._tabGroups.find(g => g.id === groupId);
+    const groupIdx = this._tabGroups.findIndex(g => g.id === groupId);
+    const items = [
+      { label: 'Rename', action: () => {
+        // Touch: inline editing of a tiny tab is impractical, use the modal.
+        if (this.isMobile) {
+          this._renameTerminalGroupPrompt(groupId);
+          return;
+        }
+        const nameEl = tabEl && tabEl.querySelector('.terminal-group-tab-name');
+        if (nameEl) this.startInlineRenameGroup(nameEl, groupId);
+      }},
+    ];
+    if (groupIdx > 0) {
+      items.push({ label: 'Move Left', icon: '&#9664;', action: () => {
+        this._swapTabGroups(groupIdx, groupIdx - 1);
+      }});
+    }
+    if (groupIdx < this._tabGroups.length - 1) {
+      items.push({ label: 'Move Right', icon: '&#9654;', action: () => {
+        this._swapTabGroups(groupIdx, groupIdx + 1);
+      }});
+    }
+
+    // Folder assignment submenu
+    items.push({ type: 'sep' });
+    if (group && group.folderId) {
+      items.push({ label: 'Remove from Group', action: () => {
+        group.folderId = null;
+        this.renderTerminalGroupTabs();
+        this.saveTerminalLayout();
+      }});
+    }
+    if (this._tabFolders.length > 0) {
+      const folderItems = this._tabFolders
+        .filter(f => !group || group.folderId !== f.id)
+        .map(f => ({
+          label: f.name,
+          icon: `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--${f.color || 'mauve'})"></span>`,
+          action: () => {
+            if (group) group.folderId = f.id;
+            this.renderTerminalGroupTabs();
+            this.saveTerminalLayout();
+          },
+        }));
+      if (folderItems.length > 0) {
+        items.push({ label: 'Add to Group', submenu: folderItems });
+      }
+    }
+    items.push({ label: 'New Group from Tab', action: () => {
+      this._createFolderFromTab(groupId);
+    }});
+
+    items.push({ type: 'sep' });
+    items.push(
+      { label: 'Delete', danger: true, action: () => this.deleteTerminalGroup(groupId) },
+    );
+    return items;
+  }
+
+  /**
+   * Rename a terminal tab group via the shared prompt modal. Used on touch
+   * where inline editing on the tab strip is impractical. Persists the new
+   * name and re-renders the strip. No-op on empty input or missing group.
+   * @param {string} groupId - The tab group id to rename.
+   */
+  async _renameTerminalGroupPrompt(groupId) {
+    const group = this._tabGroups.find(g => g.id === groupId);
+    if (!group) return;
+    const result = await this.showPromptModal({
+      title: 'Rename Tab Group',
+      fields: [{ key: 'name', label: 'Tab Group Name', value: group.name, required: true }],
+      confirmText: 'Save',
+    });
+    if (!result) return;
+    const newName = (result.name || '').trim();
+    if (!newName) return;
+    group.name = newName;
+    this.saveTerminalLayout();
+    this.renderTerminalGroupTabs();
   }
 
   startInlineRenameGroup(nameEl, groupId) {
