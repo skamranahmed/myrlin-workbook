@@ -1178,6 +1178,22 @@ class CWMApp {
       }
     });
 
+    // ─── Clipboard Paste Unavailable ─────────────────────────
+    // TerminalPane dispatches cwm:paste-unavailable when the async Clipboard
+    // API is missing (insecure origin, e.g. http over LAN) or a read is denied
+    // (Safari and some mobile browsers). The pane has no toast UI of its own,
+    // so app.js surfaces the message here. WHY centralized: keeps clipboard-
+    // failure messaging in one place regardless of which entry point (Ctrl+V,
+    // context menu, mobile long-press) triggered it. Tells the user the native
+    // Ctrl+V (Cmd+V on Mac) shortcut still works. See issue #64.
+    document.addEventListener('cwm:paste-unavailable', (e) => {
+      const reason = e && e.detail && e.detail.reason;
+      const msg = reason === 'denied'
+        ? 'Clipboard read blocked by the browser. Press Ctrl+V (Cmd+V on Mac) to paste'
+        : 'Clipboard needs HTTPS or localhost. Press Ctrl+V (Cmd+V on Mac) to paste';
+      this.showToast(msg, 'warning');
+    });
+
     // ─── Terminal Needs-Input Badge ─────────────────────────
     // When auto-trust detects a question it won't auto-answer, show/hide
     // an amber "Needs input" badge on the terminal pane header.
@@ -12432,10 +12448,25 @@ class CWMApp {
       });
     }
 
-    // Paste from clipboard
+    // Paste from clipboard.
+    // On secure origins (localhost/https) the async Clipboard API drives the
+    // paste directly via TerminalPane.pasteFromClipboard. On insecure origins
+    // (http over LAN) that API is undefined, so a fire-and-forget call would
+    // silently do nothing (issue #64). In that case we tell the user to press
+    // Ctrl+V (Cmd+V on Mac) and focus the pane so the shortcut lands on the
+    // terminal, which pastes through the native beforeinput/paste handlers. We
+    // never call document.execCommand('paste'): it is dead from script in
+    // modern browsers. This item is shared by the desktop right-click menu and
+    // the mobile long-press sheet (both route through showTerminalContextMenu).
+    const clipboardReadable = !!(navigator.clipboard && typeof navigator.clipboard.readText === 'function');
     items.push({
-      label: 'Paste', icon: '&#128203;', action: () => {
-        tp.pasteFromClipboard();
+      label: clipboardReadable ? 'Paste' : 'Paste (Ctrl+V)', icon: '&#128203;', action: () => {
+        if (clipboardReadable) {
+          tp.pasteFromClipboard();
+        } else {
+          this.showToast('Clipboard needs HTTPS or localhost. Press Ctrl+V (Cmd+V on Mac) to paste', 'info');
+          if (typeof tp.focus === 'function') tp.focus();
+        }
       },
     });
 
