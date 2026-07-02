@@ -361,6 +361,75 @@ console.log('  ' + '-'.repeat(70));
     });
   }
 
+  // ─── Test 10: archived_sessions/ discovered with archived: true ─────────
+  {
+    const tmp = makeCodexHome();
+    const liveId = '019dc872-a308-7111-ba78-068f9294120c';
+    const archivedId = '019dbc37-4284-71c2-b216-8f9b6c431001';
+    stageRollout(tmp, '2026/04/26', liveId);
+    // Stage an archived rollout flat under archived_sessions/ (the real
+    // on-disk layout Codex uses for ended threads).
+    const archDir = path.join(tmp, 'archived_sessions');
+    fs.mkdirSync(archDir, { recursive: true });
+    fs.copyFileSync(MODERN_FIXTURE, path.join(archDir, 'rollout-2026-04-23T17-20-31-' + archivedId + '.jsonl'));
+    await withCodexHome(tmp, async () => {
+      console.debug = () => {};
+      const results = await discover();
+      console.debug = realDebug;
+      test('discover surfaces archived_sessions/ entries tagged archived: true', () => {
+        assertEqual(results.length, 2, 'expected live + archived, got ' + results.length);
+        const archived = results.find((r) => r.providerSessionId === archivedId);
+        const live = results.find((r) => r.providerSessionId === liveId);
+        assert(archived, 'archived session missing from discovery');
+        assert(live, 'live session missing from discovery');
+        assertEqual(archived.archived, true, 'archived entry must carry archived: true');
+        assert(live.archived !== true, 'live entry must NOT be tagged archived');
+        assertEqual(archived.projectPath, '/home/user/project', 'archived cwd extracted from session_meta');
+      });
+    });
+  }
+
+  // ─── Test 11: live sessions/ record wins over an archived duplicate ─────
+  {
+    const tmp = makeCodexHome();
+    const dupId = '019dcac8-f459-7fa0-83e8-3c3112d0fe0e';
+    stageRollout(tmp, '2026/04/26', dupId);
+    const archDir = path.join(tmp, 'archived_sessions');
+    fs.mkdirSync(archDir, { recursive: true });
+    fs.copyFileSync(MODERN_FIXTURE, path.join(archDir, 'rollout-2026-04-23T17-20-31-' + dupId + '.jsonl'));
+    await withCodexHome(tmp, async () => {
+      console.debug = () => {};
+      const results = await discover();
+      console.debug = realDebug;
+      test('discover dedupes: live sessions/ record wins over archived duplicate of the same id', () => {
+        assertEqual(results.length, 1, 'expected one deduped record, got ' + results.length);
+        assertEqual(results[0].providerSessionId, dupId);
+        assert(results[0].archived !== true, 'deduped record must be the live (non-archived) one');
+      });
+    });
+  }
+
+  // ─── Test 12: archived-only CODEX_HOME (no sessions/ dir) still discovers ─
+  {
+    const tmp = makeCodexHome();
+    const onlyId = '019dbc37-4284-71c2-b216-8f9b6c431001';
+    // Deliberately NO sessions/ directory: only archived threads exist. The
+    // old guard returned [] here, silently hiding archived history.
+    const archDir = path.join(tmp, 'archived_sessions');
+    fs.mkdirSync(archDir, { recursive: true });
+    fs.copyFileSync(MODERN_FIXTURE, path.join(archDir, 'rollout-2026-04-23T17-20-31-' + onlyId + '.jsonl'));
+    await withCodexHome(tmp, async () => {
+      console.debug = () => {};
+      const results = await discover();
+      console.debug = realDebug;
+      test('discover works when only archived_sessions/ exists (no sessions/ dir)', () => {
+        assertEqual(results.length, 1, 'expected the archived-only record, got ' + results.length);
+        assertEqual(results[0].providerSessionId, onlyId);
+        assertEqual(results[0].archived, true);
+      });
+    });
+  }
+
   // ─── Summary + exit ─────────────────────────────────────────────────────
   console.log('  ' + '-'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');

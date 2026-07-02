@@ -178,6 +178,7 @@ function getSearchableFiles() {
               filePath: filePath,
               sessionId: sessionId,
               mtimeMs: mtimeMs,
+              archived: false,
             });
           }
         }
@@ -185,6 +186,52 @@ function getSearchableFiles() {
     }
   } catch (_) {
     // Top-level walk failed; cache empty list so we do not hammer the FS.
+  }
+
+  // Archived sessions: $CODEX_HOME/archived_sessions/ holds ended threads as
+  // flat rollout-*.jsonl files (same envelope format). They are invisible to
+  // the sessions/ walk above, so content search would silently miss them. We
+  // scan them here (guarded by existsSync) and tag each descriptor
+  // archived: true so results carry the flag through to the frontend.
+  try {
+    const archivedRoot = path.join(codexHome, 'archived_sessions');
+    if (fs.existsSync(archivedRoot)) {
+      // Recursive readdir handles both the flat layout and any nested
+      // date-bucketing; a corrupt/unreadable root just yields nothing.
+      let archEntries = [];
+      try {
+        archEntries = fs.readdirSync(archivedRoot, { recursive: true, withFileTypes: true });
+      } catch (_) {
+        // Older Node / rejected recursive option: fall back to a flat readdir.
+        try {
+          for (const name of fs.readdirSync(archivedRoot)) {
+            archEntries.push({ name: name, isFile: () => true, parentPath: archivedRoot });
+          }
+        } catch (_) { archEntries = []; }
+      }
+      for (const e of archEntries) {
+        if (typeof e.isFile === 'function' && !e.isFile()) continue;
+        const lower = e.name.toLowerCase();
+        if (!lower.startsWith('rollout-') || !lower.endsWith('.jsonl')) continue;
+        const parent = e.parentPath || e.path || archivedRoot;
+        const filePath = path.join(parent, e.name);
+        const idMatch =
+          /^rollout-.+-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(
+            e.name
+          );
+        const sessionId = idMatch ? idMatch[1].toLowerCase() : null;
+        let mtimeMs = 0;
+        try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch (_) { /* keep 0 */ }
+        files.push({
+          filePath: filePath,
+          sessionId: sessionId,
+          mtimeMs: mtimeMs,
+          archived: true,
+        });
+      }
+    }
+  } catch (_) {
+    // Archived scan is best-effort; a failure never blocks live-session search.
   }
 
   // Order newest-first so the time-budget self-check serves the most-recent
@@ -423,6 +470,9 @@ async function search({ query, limit, timeBudgetMs } = {}) {
           role: role,
           snippet: snippet,
           lineNumber: lineIdx + 1, // 1-based to match Claude's wire format
+          // Carry the archived flag so the UI can distinguish results that
+          // came from $CODEX_HOME/archived_sessions/ (ended threads).
+          archived: fileInfo.archived === true,
         });
       }
     }

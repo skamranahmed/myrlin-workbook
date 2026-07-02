@@ -443,6 +443,90 @@ async function main() {
       }
     });
 
+    // ── Test 12: title override merged onto content results ──
+    // (session-lifecycle fix: renames stored via PUT /api/session-titles are
+    // applied at the dispatcher, keyed by (r.provider, r.sessionId), so the
+    // result list shows what the user called the session. Hermetic: only the
+    // stub provider is enabled during the request.)
+    await test('Title override: r.sessionName replaced by store override keyed by (provider, sessionId)', async () => {
+      const stub = buildStubProvider({ id: 'title-' + Date.now() });
+      const uuid = 'aaaaaaaa-1111-7000-8000-000000000001';
+      stub.search = async () => ({ results: [{ provider: stub.id, sessionId: uuid, sessionName: 'extracted title', timestamp: '2026-05-01T00:00:00Z', snippet: 'x', role: 'user' }], timedOut: false, searchedFiles: 1 });
+      registry.register(stub);
+      registry.setEnabled(stub.id, true);
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity; restored in finally)
+      const { getStore } = require('../src/state/store');
+      const store = getStore();
+      store.setProviderSessionTitle(stub.id, uuid, 'Renamed By User');
+      try {
+        const r = await req('GET', '/api/search?q=any&limit=10');
+        assertEqual(r.status, 200);
+        const hit = r.body.results.find((x) => x.sessionId === uuid);
+        assert(hit, 'stub content result present');
+        assertEqual(hit.sessionName, 'Renamed By User', 'override must replace extracted sessionName');
+      } finally {
+        // Cleanup via the explicit empty-title deletion path.
+        store.setProviderSessionTitle(stub.id, uuid, '');
+        registry.setEnabled(stub.id, false);
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
+      }
+    });
+
+    // ── Test 13: synthetic name-match result from a title override value ──
+    await test('Name-match: title override value matching the query emits a synthetic result', async () => {
+      const stub = buildStubProvider({ id: 'namematch-' + Date.now() });
+      const uuid = 'bbbbbbbb-2222-7000-8000-000000000002';
+      stub.search = async () => ({ results: [], timedOut: false, searchedFiles: 0 });
+      registry.register(stub);
+      registry.setEnabled(stub.id, true);
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity)
+      const { getStore } = require('../src/state/store');
+      const store = getStore();
+      store.setProviderSessionTitle(stub.id, uuid, 'zebra-quokka rename target');
+      try {
+        const r = await req('GET', '/api/search?q=zebra-quokka&limit=10');
+        assertEqual(r.status, 200);
+        const hit = r.body.results.find((x) => x.sessionId === uuid);
+        assert(hit, 'synthetic name-match result present');
+        assertEqual(hit.snippet, 'Matched by name');
+        assertEqual(hit.provider, stub.id, 'provider comes from the override key, not a literal');
+        assertEqual(hit.sessionName, 'zebra-quokka rename target');
+      } finally {
+        store.setProviderSessionTitle(stub.id, uuid, '');
+        registry.setEnabled(stub.id, false);
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
+      }
+    });
+
+    // ── Test 14: synthetic name-match result from a store session name ──
+    await test('Name-match: store session name matching the query emits a synthetic result', async () => {
+      const stub = buildStubProvider({ id: 'sessname-' + Date.now() });
+      const resumeUuid = 'cccccccc-3333-7000-8000-000000000003';
+      stub.search = async () => ({ results: [], timedOut: false, searchedFiles: 0 });
+      registry.register(stub);
+      registry.setEnabled(stub.id, true);
+      registry.setEnabled('claude', false); // gsd:provider-literal-allowed (test hermeticity)
+      const { getStore } = require('../src/state/store');
+      const store = getStore();
+      const ws = store.createWorkspace({ name: 'search-title-ws' });
+      const sess = store.createSession({ name: 'xylophone-refactor session', workspaceId: ws.id, workingDir: 'C:\\tmp\\proj' });
+      store.updateSession(sess.id, { provider: stub.id, resumeSessionId: resumeUuid });
+      try {
+        const r = await req('GET', '/api/search?q=xylophone-refactor&limit=10');
+        assertEqual(r.status, 200);
+        const hit = r.body.results.find((x) => x.snippet === 'Matched by name');
+        assert(hit, 'synthetic name-match result present');
+        assertEqual(hit.provider, stub.id, 'provider comes from the session record');
+        assertEqual(hit.sessionId, resumeUuid, 'sessionId is the upstream resume uuid');
+        assertEqual(hit.sessionName, 'xylophone-refactor session');
+      } finally {
+        // Sandbox cleanup so later tests see a deterministic store.
+        store.deleteWorkspace(ws.id);
+        registry.setEnabled(stub.id, false);
+        registry.setEnabled('claude', true); // gsd:provider-literal-allowed (restore)
+      }
+    });
+
   } finally {
     await new Promise((resolve) => httpServer.close(resolve));
   }

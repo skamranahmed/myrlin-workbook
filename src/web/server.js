@@ -1666,6 +1666,66 @@ app.put('/api/sessions/:id/provider-settings', requireAuth, (req, res) => {
   });
 });
 
+// Provider id shape shared with the ad-hoc provider-settings route. Kept as a
+// named constant so both routes validate identically and a future change is
+// made in one place.
+const SESSION_TITLE_PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{0,32}$/;
+// Upper bound on a stored title. Long enough for any human name; short enough
+// that a hostile caller cannot bloat state. Trimmed before length is measured.
+const SESSION_TITLE_MAX_LEN = 200;
+
+/**
+ * PUT /api/session-titles/:providerId/:uuid
+ *
+ * Persist (or clear) a human title override for an upstream session UUID so a
+ * rename becomes searchable server-side AND syncs across devices (localStorage
+ * was device-local). Keyed by (providerId, upstream UUID), mirroring the
+ * ad-hoc provider-settings slot.
+ *
+ * Params:
+ *   - :providerId must match SESSION_TITLE_PROVIDER_ID_RE and resolve to a
+ *     registered provider (enabled or not); unknown providers are rejected so
+ *     we never store titles under a never-shipped id.
+ *   - :uuid must pass sanitizeSessionId (UUID-ish, shell-safe).
+ *
+ * Body: { title }. Trimmed and capped at SESSION_TITLE_MAX_LEN. An empty title
+ * DELETES the override (the only deletion path; the product rule is "no
+ * tracked session is ever lost", so titles are never dropped implicitly).
+ *
+ * Response: 200 { success, provider, uuid, title|null, deleted }.
+ */
+app.put('/api/session-titles/:providerId/:uuid', requireAuth, (req, res) => {
+  const providerId = req.params.providerId;
+  if (typeof providerId !== 'string' || !SESSION_TITLE_PROVIDER_ID_RE.test(providerId)) {
+    return res.status(400).json({ error: 'invalid providerId' });
+  }
+  // Reject unknown providers so state stays keyed by real registry ids.
+  if (!registry.getProvider(providerId)) {
+    return res.status(400).json({ error: 'unknown provider: ' + providerId });
+  }
+  const uuid = sanitizeSessionId(req.params.uuid);
+  if (!uuid) {
+    return res.status(400).json({ error: 'invalid session id' });
+  }
+  const rawTitle = req.body && typeof req.body.title === 'string' ? req.body.title : '';
+  let title = rawTitle.trim();
+  if (title.length > SESSION_TITLE_MAX_LEN) {
+    title = title.slice(0, SESSION_TITLE_MAX_LEN);
+  }
+
+  const store = getStore();
+  // Empty title -> deletion; non-empty -> set. The store method handles both
+  // and prunes empty buckets. It saves + emits an event either way.
+  const stored = store.setProviderSessionTitle(providerId, uuid, title);
+  return res.json({
+    success: true,
+    provider: providerId,
+    uuid: uuid,
+    title: stored,
+    deleted: stored === null,
+  });
+});
+
 /**
  * POST /api/sessions/:id/start
  * Launch the session process and mark it as recently used.
@@ -1842,6 +1902,15 @@ const DISCOVER_CACHE_TTL = 30000; // 30 seconds
  */
 function groupProviderSessionsForUI(sessions, provider) {
   const byProject = new Map();
+  // Read-time title merge: a rename persisted via PUT /api/session-titles is
+  // stored keyed by (provider.id, upstream UUID). We apply it here so the
+  // custom name shows in the sidebar AND flows into every consumer that
+  // reuses this grouping (GET /api/discover, POST /api/ai/find-session). The
+  // provider stays pure: the override lookup lives in server.js and keys off
+  // provider.id (registry data), never a string literal. Wrapped defensively
+  // so a store hiccup never breaks discovery grouping.
+  let _titleStore = null;
+  try { _titleStore = getStore(); } catch (_) { _titleStore = null; }
   for (const s of sessions) {
     const key = s.projectPath || '(unknown)';
     let bucket = byProject.get(key);
@@ -1866,12 +1935,22 @@ function groupProviderSessionsForUI(sessions, provider) {
     if (!bucket.lastActive || (s.lastActive && new Date(s.lastActive) > new Date(bucket.lastActive))) {
       bucket.lastActive = s.lastActive;
     }
+    // storeOverride wins over the transcript-extracted title so a user rename
+    // is authoritative; falls back to the provider-extracted title otherwise.
+    let storeOverride = null;
+    if (_titleStore && s.providerSessionId) {
+      try { storeOverride = _titleStore.getProviderSessionTitle(provider.id, s.providerSessionId); } catch (_) { storeOverride = null; }
+    }
     bucket.sessions.push({
       claudeSessionId: s.providerSessionId, // legacy field name; v1.1 frontend uses this key
       provider: provider.id,
       modified: s.lastActive,
       size: s.sizeBytes,
-      title: s.title || null,
+      title: storeOverride || s.title || null,
+      // Carry the archived flag from the provider (codex archived_sessions/)
+      // through to the frontend so a discovered archived thread can be shown
+      // with a muted affordance. Absent/false for live sessions.
+      archived: s.archived === true,
     });
   }
 
@@ -2927,6 +3006,11 @@ app.post('/api/ai/find-session', requireAuth, async (req, res) => {
         enriched.status = session.status;
         enriched.workspaceId = session.workspaceId;
         enriched.topic = session.topic || '';
+        // Carry the session's provider so the find-result card can resolve the
+        // correct CLI binary on open (a Codex session must spawn `codex`, not
+        // the default). Absent provider stays undefined; the frontend helper
+        // applies its own back-compat default.
+        if (session.provider) enriched.provider = session.provider;
         const ws = workspaces.find(w => w.id === session.workspaceId);
         enriched.workspaceName = ws ? ws.name : '';
       }
@@ -2951,6 +3035,8 @@ app.post('/api/ai/find-session', requireAuth, async (req, res) => {
         enriched.path = proj.path;
         enriched.sessionCount = proj.sessionCount;
         enriched.lastActive = proj.lastActive;
+        // Carry the discovered project's provider so the card opens the right CLI.
+        if (proj.provider) enriched.provider = proj.provider;
       }
     }
     return enriched;
@@ -7634,6 +7720,105 @@ app.get('/api/search', requireAuth, async (req, res) => {
       // them in merged but mark the provider in timedOutProviders so the
       // frontend can surface the partial-results state in the UI.
     }
+  }
+
+  // ── Title-override merge + name-match synthetic results ───────────────────
+  // Provider content search only reads transcript bodies. Two categories of
+  // match would otherwise be invisible:
+  //   (a) A content result whose session was renamed: we swap in the custom
+  //       name so the result list shows what the user called it.
+  //   (b) A session that matches ONLY by its custom name (Myrlin record
+  //       name/topic OR a title override for a discovered session): we emit a
+  //       synthetic "Matched by name" result so custom names are searchable.
+  // All of this lives in the dispatcher (providers stay pure) and keys off
+  // provider ids sourced from data (result.provider, session.provider,
+  // registry-enabled ids), never a string literal. Best-effort: any store
+  // hiccup leaves the content results untouched.
+  try {
+    const searchStore = getStore();
+    const lowerQuery = trimmedQuery.toLowerCase();
+
+    // (a) Override onto content results, keyed by (provider, sessionId).
+    for (const r of merged) {
+      if (!r || !r.provider || !r.sessionId) continue;
+      let override = null;
+      try { override = searchStore.getProviderSessionTitle(r.provider, r.sessionId); } catch (_) { override = null; }
+      if (override) r.sessionName = override;
+    }
+
+    // Dedup key: provider + space + sessionId. Neither a registry provider id
+    // (^[a-z][a-z0-9_-]*$) nor a sanitized session id contains a space, so the
+    // separator is unambiguous.
+    const keyOf = (provider, sid) => String(provider) + ' ' + String(sid || '');
+    const seenKeys = new Set();
+    for (const r of merged) {
+      if (r && r.provider && r.sessionId) seenKeys.add(keyOf(r.provider, r.sessionId));
+    }
+
+    const synthetic = [];
+    const SYNTHETIC_CAP = limit; // never emit more than the page can show
+
+    // (b1) Store sessions matched by name/topic.
+    let storeSessions = [];
+    try { storeSessions = searchStore.getAllSessionsList() || []; } catch (_) { storeSessions = []; }
+    const fallbackProviderId = (enabled[0] && enabled[0].id) || null;
+    for (const s of storeSessions) {
+      if (synthetic.length >= SYNTHETIC_CAP) break;
+      const name = typeof s.name === 'string' ? s.name : '';
+      const topic = typeof s.topic === 'string' ? s.topic : '';
+      if (name.toLowerCase().indexOf(lowerQuery) === -1 && topic.toLowerCase().indexOf(lowerQuery) === -1) continue;
+      const provider = s.provider || fallbackProviderId;
+      if (!provider) continue;
+      const sid = s.resumeSessionId || '';
+      const key = keyOf(provider, sid);
+      if (sid && seenKeys.has(key)) continue; // already surfaced by content search
+      if (sid) seenKeys.add(key);
+      const projectPath = s.workingDir || null;
+      synthetic.push({
+        provider: provider,
+        sessionId: sid || null,
+        sessionName: name || sid || null,
+        projectPath: projectPath,
+        projectName: projectPath ? path.basename(projectPath) : (name || null),
+        timestamp: s.lastActive || null,
+        role: 'name-match',
+        snippet: 'Matched by name',
+        lineNumber: 0,
+      });
+    }
+
+    // (b2) Title overrides matched by value (covers discovered sessions that
+    // have no Myrlin store record at all).
+    const titleRoot = (searchStore._state && searchStore._state.providerSessionTitles) || {};
+    for (const providerId of Object.keys(titleRoot)) {
+      if (synthetic.length >= SYNTHETIC_CAP) break;
+      const byUuid = titleRoot[providerId];
+      if (!byUuid || typeof byUuid !== 'object') continue;
+      for (const uuid of Object.keys(byUuid)) {
+        if (synthetic.length >= SYNTHETIC_CAP) break;
+        const title = byUuid[uuid];
+        if (typeof title !== 'string' || title.toLowerCase().indexOf(lowerQuery) === -1) continue;
+        const key = keyOf(providerId, uuid);
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        synthetic.push({
+          provider: providerId,
+          sessionId: uuid,
+          sessionName: title,
+          projectPath: null,
+          projectName: null,
+          timestamp: null,
+          role: 'name-match',
+          snippet: 'Matched by name',
+          lineNumber: 0,
+        });
+      }
+    }
+
+    for (const r of synthetic) merged.push(r);
+    totalMatches += synthetic.length;
+  } catch (_) {
+    // Name-match augmentation is best-effort; never fails the search response.
   }
 
   // Merge sort: descending timestamp (matches v1.1 sort exactly).

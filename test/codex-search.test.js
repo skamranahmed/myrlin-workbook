@@ -388,6 +388,34 @@ console.log('  ' + '-'.repeat(70));
     });
   });
 
+  // ─── Test 14: archived_sessions/ included in content search ─────────────
+  await test('search includes archived_sessions/ rollouts, tagged archived: true', async () => {
+    await withFreshHome(async (home) => {
+      // Live rollout under sessions/ + archived rollout flat under
+      // archived_sessions/ (the real layout for ended Codex threads). Both
+      // copies of the fixture match the query; the archived result must be
+      // present AND tagged so the UI can distinguish it.
+      const liveId = '019dc872-a308-7111-ba78-068f9294120c';
+      const archId = '019dbc37-4284-71c2-b216-8f9b6c431001';
+      stageRollout(home, MODERN_FIXTURE, '2026/04/26', liveId);
+      const archDir = path.join(home, 'archived_sessions');
+      fs.mkdirSync(archDir, { recursive: true });
+      fs.copyFileSync(MODERN_FIXTURE, path.join(archDir, 'rollout-2026-04-23T17-20-31-' + archId + '.jsonl'));
+      _internal._resetCache();
+      const out = await search({ query: 'summarize', limit: 20, timeBudgetMs: 5000 });
+      const archResults = out.results.filter((r) => r.sessionId === archId);
+      const liveResults = out.results.filter((r) => r.sessionId === liveId);
+      assert(archResults.length >= 1, 'expected at least 1 match from the archived rollout');
+      assert(liveResults.length >= 1, 'expected at least 1 match from the live rollout');
+      for (const r of archResults) {
+        assertEqual(r.archived, true, 'archived results must carry archived: true');
+      }
+      for (const r of liveResults) {
+        assertEqual(r.archived, false, 'live results must carry archived: false');
+      }
+    });
+  });
+
   // ─── Summary + exit ─────────────────────────────────────────────────────
   console.log('  ' + '-'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');

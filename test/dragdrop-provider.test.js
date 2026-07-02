@@ -173,6 +173,58 @@ check('app.js has zero ?legacy=1 references remaining', () => {
   assert.strictEqual(count, 0, 'expected zero ?legacy=1 references; got ' + count);
 });
 
+// ─── session-lifecycle: pane header dragstart advertises droppable types ───
+// The pane-header dragstart previously set ONLY 'cwm/terminal-swap', so the
+// sidebar's workspace/folder drop targets (which accept 'cwm/session' and
+// 'cwm/project-session') never fired for dragged panes. The fix adds both
+// types conditionally: store-managed panes set cwm/session (sidebar branch
+// calls moveSessionToWorkspace unchanged); ad-hoc panes set a
+// cwm/project-session JSON payload matching the drop branch's parsed shape.
+
+/**
+ * Locate the pane-header dragstart handler region: the setData call for
+ * 'cwm/terminal-swap' inside the header dragstart listener.
+ * @returns {string} A source window starting at the handler.
+ */
+function findPaneHeaderDragstartRegion() {
+  const idx = src.indexOf("setData('cwm/terminal-swap'");
+  assert.ok(idx > 0, "pane header dragstart must still set 'cwm/terminal-swap'");
+  // 3000-char window comfortably contains the whole handler body.
+  return src.slice(idx, idx + 3000);
+}
+
+check('pane header dragstart still sets cwm/terminal-swap (pane-to-pane swap preserved)', () => {
+  const count = (src.match(/setData\('cwm\/terminal-swap'/g) || []).length;
+  assert.ok(count >= 1, 'cwm/terminal-swap setData must remain');
+});
+
+check('pane header dragstart additionally sets cwm/session for store-managed panes', () => {
+  const region = findPaneHeaderDragstartRegion();
+  assert.ok(
+    /setData\('cwm\/session',\s*tp\.sessionId\)/.test(region),
+    "store-managed pane drag must set 'cwm/session' with tp.sessionId"
+  );
+});
+
+check('pane header dragstart sets cwm/project-session JSON payload for ad-hoc panes', () => {
+  const region = findPaneHeaderDragstartRegion();
+  // Payload must match the sidebar drop branch's parsed field names EXACTLY:
+  // sessionName (upstream resume UUID), projectPath, displayName, provider.
+  const re = /setData\('cwm\/project-session',\s*JSON\.stringify\(\{[\s\S]{0,400}sessionName:[\s\S]{0,400}projectPath:[\s\S]{0,400}displayName:[\s\S]{0,400}provider:/;
+  assert.ok(
+    re.test(region),
+    "ad-hoc pane drag must set 'cwm/project-session' with {sessionName, projectPath, displayName, provider}"
+  );
+});
+
+check('pane header dragstart resolves the ad-hoc resume uuid from spawnOpts.resumeSessionId first', () => {
+  const region = findPaneHeaderDragstartRegion();
+  assert.ok(
+    /spawnOpts\s*&&\s*tp\.spawnOpts\.resumeSessionId\)\s*\|\|\s*tp\.sessionId/.test(region),
+    'resume uuid must prefer tp.spawnOpts.resumeSessionId with tp.sessionId fallback'
+  );
+});
+
 // ─── Summary ─────────────────────────────────────────────────────
 console.log('  ' + '─'.repeat(42));
 console.log('  \x1b[1m[dragdrop-provider]\x1b[0m ' + passed + '/' + (passed + failed) + ' tests passed');

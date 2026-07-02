@@ -124,9 +124,14 @@ async function dispose() { /* no-op */ }
 /**
  * Resolve the on-disk path of a Claude session's transcript artifact.
  * Wraps the findJsonlFile helper (lifted into ./path-decode.js by Plan 15-01).
- * Codex (Phase 17) exposes the same method shape for its rollout-*.jsonl files,
- * which is why route handlers in src/web/server.js dispatch through this method
- * via getProviderForSession + provider.findArtifactPath.
+ * codexProvider now exposes the SAME method shape (sync, absolute-path-or-null)
+ * for its rollout-*.jsonl files under $CODEX_HOME/sessions/ and
+ * archived_sessions/, which is why route handlers in src/web/server.js can
+ * dispatch through provider.findArtifactPath uniformly via
+ * getProviderForSession. NOTE: this parity was ASPIRATIONAL until the
+ * session-lifecycle fix actually added the two methods to codexProvider; the
+ * previous wording claimed parity that did not exist, which is why a
+ * codex-tagged session 500'd GET /api/cost/batch.
  *
  * Plan 15-01 (DISC-03).
  *
