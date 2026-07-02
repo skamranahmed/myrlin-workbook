@@ -116,6 +116,27 @@ function cwdFromJsonl(sessionId) {
 // Maximum scrollback buffer size in total characters
 const MAX_SCROLLBACK_CHARS = 100 * 1024; // 100KB
 
+// Maximum PTY dimensions accepted from clients. Same bounds as the previous
+// inline clamp in the resize handler; centralized here so every resize path
+// (client message, ownership handoff, first-client attach) shares one gate.
+const MAX_PTY_COLS = 500;
+const MAX_PTY_ROWS = 200;
+
+// WebSocket backpressure threshold in bytes. A client whose send buffer
+// exceeds this is marked lagged and live chunks are withheld from it; once
+// the buffer drains back below this same threshold the client receives a
+// reset marker plus a full scrollback replay, so it never silently misses
+// output. Incremental TUI redraws land on stale screen state when chunks
+// are dropped without a resync, which produced the "text mixing with
+// previously outputted text" corruption users reported.
+const WS_BACKPRESSURE_BYTES = 65536; // 64KB
+
+// Control message telling a client to clear its terminal because a full
+// scrollback replay follows. Uses the exact same envelope convention as
+// 'exit'/'resumeId'/'error': raw PTY data is sent as plain strings, control
+// messages as JSON-stringified objects with a 'type' field.
+const RESET_MSG = JSON.stringify({ type: 'reset' });
+
 /**
  * Watch one or more directories for the appearance of a *.jsonl file that is
  * not in the pre-call snapshot. Emits exactly one result.
@@ -219,7 +240,14 @@ function waitForNewJsonl({ candidateDirsFn, snapshot, timeoutMs, claudeProjectsD
  * Represents a single PTY session with its process, clients, and scrollback.
  */
 class PtySession {
-  constructor(sessionId, ptyProcess) {
+  /**
+   * @param {string} sessionId - Unique session identifier
+   * @param {object} ptyProcess - The spawned node-pty process
+   * @param {object} [size] - Initial PTY dimensions (from spawn opts)
+   * @param {number} [size.cols=120] - Initial columns
+   * @param {number} [size.rows=30] - Initial rows
+   */
+  constructor(sessionId, ptyProcess, { cols = 120, rows = 30 } = {}) {
     this.sessionId = sessionId;
     this.pty = ptyProcess;
     this.clients = new Set();      // Set of WebSocket connections
@@ -231,6 +259,43 @@ class PtySession {
     this.pingInterval = null;    // Keepalive ping interval ID
     this._lastActiveTimer = null; // Debounce timer for lastActive updates
     this.createdAt = Date.now();  // Track when session was spawned
+    // Viewport ownership state. One PTY is shared by N WebSocket clients;
+    // the sizeOwner is the client whose device geometry currently applies.
+    // Ownership is claimed by typing (input) or an explicit 'activate'
+    // message, never by a bare resize, so a background phone viewer can no
+    // longer shrink the terminal out from under an active desktop user.
+    this.cols = cols;              // Current PTY width in columns
+    this.rows = rows;              // Current PTY height in rows
+    this.sizeOwner = null;         // ws that owns PTY geometry (null = unclaimed)
+  }
+
+  /**
+   * Apply a viewport size to the PTY if it differs from the current size.
+   * Central choke point for all resize paths. Clamps to sane bounds and
+   * suppresses no-op resizes: ConPTY repaints the entire viewport on EVERY
+   * resize call, and those repaint bytes are indistinguishable from real
+   * output, so they pollute the scrollback and the live stream of every
+   * other connected client (bug A root cause).
+   *
+   * @param {number} cols - Requested columns
+   * @param {number} rows - Requested rows
+   * @returns {boolean} True when a resize was actually applied
+   */
+  applyViewport(cols, rows) {
+    if (!this.alive) return false;
+    const c = Math.max(1, Math.min(MAX_PTY_COLS, Number(cols)));
+    const r = Math.max(1, Math.min(MAX_PTY_ROWS, Number(rows)));
+    if (!Number.isFinite(c) || !Number.isFinite(r)) return false;
+    // No-op suppression: identical dims must not trigger a ConPTY repaint
+    if (c === this.cols && r === this.rows) return false;
+    try {
+      this.pty.resize(c, r);
+    } catch (_) {
+      return false;
+    }
+    this.cols = c;
+    this.rows = r;
+    return true;
   }
 
   /**
@@ -569,7 +634,9 @@ class PtySessionManager {
       return null; // caller should check for null
     }
 
-    const session = new PtySession(sessionId, ptyProcess);
+    // Seed the session's size-tracking fields from the actual spawn dims so
+    // the first client resize with identical dims is a suppressed no-op.
+    const session = new PtySession(sessionId, ptyProcess, { cols, rows });
     this.sessions.set(sessionId, session);
 
     // Handle asynchronous PTY process errors (e.g. process crashes after spawn).
@@ -583,7 +650,11 @@ class PtySessionManager {
 
     // PTY output handler: immediate broadcast with backpressure safety valve.
     // Data is sent instantly to preserve the native terminal streaming feel.
-    // Only skips a client if its WebSocket buffer exceeds 64KB (overwhelmed tab).
+    // A client whose WebSocket buffer exceeds the backpressure threshold is
+    // marked lagged instead of silently skipped; when its buffer drains it
+    // gets a reset marker + full scrollback replay so its screen state never
+    // silently diverges from the PTY (previously dropped chunks corrupted
+    // incremental TUI redraws with no recovery path).
     ptyProcess.onData((data) => {
       session.appendScrollback(data);
 
@@ -591,12 +662,23 @@ class PtySessionManager {
       for (const ws of session.clients) {
         try {
           if (ws.readyState === 1) { // WebSocket.OPEN
-            // Backpressure check: if this client's send buffer exceeds 64KB,
-            // it can't keep up; skip it so other terminals stay responsive.
-            // Data is preserved in scrollback for reconnection.
-            if (ws.bufferedAmount < 65536) {
-              ws.send(data);
+            if (ws.bufferedAmount >= WS_BACKPRESSURE_BYTES) {
+              // Client cannot keep up right now. Withhold this chunk and
+              // remember that a resync is owed. Data stays in scrollback.
+              ws._lagged = true;
+              continue;
             }
+            if (ws._lagged) {
+              // Buffer drained: resynchronize with a reset + full scrollback
+              // replay. The current chunk was already appended to scrollback
+              // above, so the replay includes it; sending it again separately
+              // would duplicate it on screen.
+              ws._lagged = false;
+              ws.send(RESET_MSG);
+              ws.send(session.scrollback.join(''));
+              continue;
+            }
+            ws.send(data);
           }
         } catch (_) {
           session.clients.delete(ws);
@@ -817,6 +899,35 @@ class PtySessionManager {
       return;
     }
 
+    // Bug B fix: a client attaching to a live session with no other viewers
+    // defines the PTY geometry BEFORE scrollback replay, so the replay is
+    // rendered at the size it will actually be viewed at instead of whatever
+    // geometry the previous (possibly mobile) viewer left behind. For a
+    // freshly spawned session this is a suppressed no-op because the spawn
+    // already used these dims.
+    if (session.alive && session.clients.size === 0) {
+      const attachCols = Number(spawnOpts.cols);
+      const attachRows = Number(spawnOpts.rows);
+      if (Number.isFinite(attachCols) && attachCols > 0 &&
+          Number.isFinite(attachRows) && attachRows > 0) {
+        session.applyViewport(attachCols, attachRows);
+      }
+    }
+
+    // Reset marker BEFORE replay, unconditionally. Tells the client to clear
+    // its terminal so the replayed bytes land on a clean screen instead of
+    // interleaving with (or duplicating) stale frames from before a
+    // reconnect. Same JSON envelope as 'exit'; new clients handle it, and a
+    // client that ignores it still works because attach always replays the
+    // full scrollback anyway.
+    try {
+      if (ws.readyState === 1) {
+        ws.send(RESET_MSG);
+      }
+    } catch (_) {
+      // ignore; close handler cleans up dead sockets
+    }
+
     // Replay scrollback buffer BEFORE adding to broadcast set.
     // This ensures the client receives the full historical output first,
     // then starts receiving only NEW live data, no interleaving.
@@ -841,6 +952,23 @@ class PtySessionManager {
       } catch (_) {}
     }
 
+    // True when the current size owner is still an attached client. An owner
+    // that dropped out of the broadcast set without a close event (the send
+    // failure path deletes clients directly) must not block other clients'
+    // resizes forever.
+    const isCurrentOwner = () => !!(session.sizeOwner && session.clients.has(session.sizeOwner));
+
+    // Make this client the PTY geometry owner and apply its last known
+    // viewport. Shared by 'input' and 'activate' handling: interacting with
+    // a device is the signal that its geometry should win.
+    const claimSizeOwnership = () => {
+      session.sizeOwner = ws;
+      ws._lastActiveAt = Date.now();
+      if (ws._viewport) {
+        session.applyViewport(ws._viewport.cols, ws._viewport.rows);
+      }
+    };
+
     // Handle incoming messages from this WebSocket client
     ws.on('message', (raw) => {
       if (!session.alive) return;
@@ -850,14 +978,29 @@ class PtySessionManager {
         const msg = JSON.parse(raw.toString());
 
         if (msg.type === 'input' && msg.data !== undefined) {
+          // Typing on a device claims PTY geometry for that device
+          claimSizeOwnership();
           // Write user input directly to PTY - NO BUFFERING
           session.pty.write(msg.data);
         } else if (msg.type === 'resize' && msg.cols && msg.rows) {
-          session.pty.resize(
-            Math.max(1, Math.min(500, msg.cols)),
-            Math.max(1, Math.min(200, msg.rows))
-          );
+          // Always remember this client's viewport (used when ownership
+          // transfers to it later), but only apply it to the shared PTY when
+          // this client owns geometry or nobody does. The previous
+          // last-writer-wins behavior let a background phone viewer resize
+          // the terminal out from under an active desktop user (bug B), and
+          // every applied resize triggers a ConPTY repaint that pollutes all
+          // clients' streams and the scrollback (bug A).
+          ws._viewport = { cols: msg.cols, rows: msg.rows };
+          if (session.sizeOwner === ws || !isCurrentOwner()) {
+            session.applyViewport(msg.cols, msg.rows);
+          }
+        } else if (msg.type === 'activate') {
+          // Focus/visibility signal from the client: claims geometry
+          // ownership exactly like typing, but writes nothing to stdin.
+          claimSizeOwnership();
         }
+        // Unknown JSON control types fall through and are deliberately
+        // ignored (forward compatibility with newer clients).
       } catch (_) {
         // Not valid JSON - treat as raw input
         session.pty.write(raw.toString());
@@ -867,6 +1010,25 @@ class PtySessionManager {
     // Handle client disconnect - DON'T kill PTY, it persists for reconnect
     ws.on('close', () => {
       session.clients.delete(ws);
+
+      // Ownership handoff: when the geometry owner leaves, the most recently
+      // active remaining client takes over and its stored viewport is
+      // restored. This is what snaps a desktop terminal back to desktop size
+      // after a phone viewer disconnects (bug B). With no clients left the
+      // size is left as-is and ownership resets to unclaimed.
+      if (session.sizeOwner === ws) {
+        let nextOwner = null;
+        for (const client of session.clients) {
+          if (!nextOwner || (client._lastActiveAt || 0) > (nextOwner._lastActiveAt || 0)) {
+            nextOwner = client;
+          }
+        }
+        session.sizeOwner = nextOwner;
+        if (nextOwner && nextOwner._viewport) {
+          session.applyViewport(nextOwner._viewport.cols, nextOwner._viewport.rows);
+        }
+      }
+
       console.log(`[PTY] Client detached from session ${sessionId} (${session.clients.size} remaining)`);
     });
 

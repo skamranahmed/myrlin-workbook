@@ -1402,8 +1402,32 @@ class CWMApp {
           }, 10000);
           this.fetchResources(); // Immediate refresh on return
         }
+        // Re-assert the active pane's PTY geometry when this tab becomes
+        // visible again. Another device (e.g. a phone) may have resized the
+        // shared PTY while this tab was hidden; without this, the desktop
+        // terminal stays stuck rendering at the other device's size.
+        this._activateActiveTerminalPane();
       }
     });
+
+    // Window focus: same geometry re-assertion as visibilitychange. Covers
+    // returning to the browser window without a visibility transition
+    // (e.g. the window was merely unfocused on a second monitor).
+    window.addEventListener('focus', () => {
+      this._activateActiveTerminalPane();
+    });
+  }
+
+  /**
+   * Send an 'activate' claim + refit for the currently active terminal pane,
+   * if one exists. Used by the visibility/focus handlers and tab-group
+   * restore to re-assert this client's viewport on the shared PTY after the
+   * user returns to this device.
+   */
+  _activateActiveTerminalPane() {
+    if (!this.terminalPanes || this._activeTerminalSlot === null || this._activeTerminalSlot === undefined) return;
+    const tp = this.terminalPanes[this._activeTerminalSlot];
+    if (tp && typeof tp.activate === 'function') tp.activate();
   }
 
   /* ═══════════════════════════════════════════════════════════
@@ -12953,6 +12977,10 @@ class CWMApp {
     if (tp) {
       tp.setFocused(true);
       tp.focus();
+      // Re-assert this pane's geometry on the shared PTY. Clicking into a
+      // pane means the user works here now, so this client's viewport wins
+      // over any other device that resized the same session.
+      if (typeof tp.activate === 'function') tp.activate();
     }
 
     // If Tasks > td tab is visible and not manually pinned, update to this pane's project
@@ -15177,6 +15205,16 @@ class CWMApp {
             tp.term.refresh(0, tp.term.rows - 1);
           }
         }
+        // Re-assert geometry for the restored active pane. While this
+        // group's DOM lived in a detached fragment, the same slot may have
+        // hosted a different session (other group) at other dimensions, and
+        // the cached pane's own fits were suppressed by the isConnected
+        // guard. Fall back to the first restored pane when the remembered
+        // active slot is empty in this group.
+        const restoredTp = (this._activeTerminalSlot !== null && this._activeTerminalSlot !== undefined && this.terminalPanes[this._activeTerminalSlot])
+          ? this.terminalPanes[this._activeTerminalSlot]
+          : this.terminalPanes.find(p => p);
+        if (restoredTp && typeof restoredTp.activate === 'function') restoredTp.activate();
       });
     } else {
       // No cache, create fresh connections (first time opening this group)

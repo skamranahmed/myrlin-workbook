@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Terminal output corrupting mid-session (repeated/mixed text in scrollback).** Three compounding causes, all rooted in one PTY being shared by N WebSocket clients with raw byte broadcast. (1) Every client resize was applied last-writer-wins, and ConPTY repaints the whole viewport on EVERY resize; those repaint bytes are indistinguishable from real output, so they were appended to the shared scrollback and streamed to clients whose terminals had different dimensions. Resizes now go through a central `applyViewport` gate on `PtySession` that suppresses no-op resizes, and the client (`safeFit`/`_sendResizeIfChanged`) only sends a resize when its cols/rows actually changed. (2) The backpressure valve silently dropped chunks for clients whose WS buffer exceeded 64KB; incremental TUI redraws then landed on stale screen state with no recovery. Lagged clients are now flagged and, once their buffer drains, receive a `{type:'reset'}` control message plus a full scrollback replay instead of a permanent gap. (3) Reconnect replay could duplicate the replay tail because the client had no authoritative "clear now" signal; the server now sends `{type:'reset'}` before every scrollback replay (attach and lag-resync), and the client resets its terminal and drops buffered partial writes on receipt. Additionally, a `ResizeObserver` leak in tab-group switching let a cached (detached) pane fit itself against a slot container now hosting a different session and send stale dims to its PTY; `safeFit` now bails when the pane's terminal element is not connected to the document.
+- **Desktop terminal stuck in "mobile mode" after viewing the session on a phone.** The PTY had no notion of which device's geometry should win, so the last resize from ANY client (including a phone attaching in the background or its keyboard opening/closing) reshaped the terminal for everyone. `PtySession` now tracks `cols`/`rows` and a `sizeOwner`: typing (`input`) or the new `activate` message claims geometry ownership for that client; a bare `resize` from a non-owner is stored on the connection but not applied. When the owner disconnects, the most recently active remaining client becomes owner and its stored viewport is restored. A sole client attaching to a live session applies its own dimensions before the scrollback replay so history renders at viewing size. The frontend sends `activate` (ownership claim + refit, no stdin writes) when a pane is clicked, when the browser tab becomes visible, on window focus, and after tab-group restore, so returning to the PC re-asserts desktop geometry automatically. Both directions of a mixed-version window degrade gracefully: old servers parse and ignore `activate`; new clients never depend on receiving `reset`.
+
+### Tests
+
+- Added `test/pty-resize-ownership.test.js` (7): reset-marker-before-replay ordering, sole-attach viewport apply before replay, no-op resize suppression, ownership transfer on input, `activate` claiming ownership without stdin writes plus unknown-type tolerance, viewport restore on owner disconnect, and lagged-client reset+resync without duplicated chunks.
+
 ## [1.2.0-alpha.9] - 2026-05-11
 
 ### Added
