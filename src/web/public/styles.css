@@ -8165,6 +8165,490 @@ html {
 }
 
 
+/* ═══════════════════════════════════════════════════════════ */
+/* Claude Account Switcher (credential switcher, header left)   */
+/* Design: docs/plans/2026-07-02-credential-switcher-design.md  */
+/* section 6.3. Every color is a theme token so all Catppuccin  */
+/* flavors inherit through the custom-property cascade.         */
+/* ═══════════════════════════════════════════════════════════ */
+
+/* .header-left ships overflow: hidden (brand truncation), which would clip
+   the absolutely-positioned account panel to the 30px chip row. Restore
+   visible overflow; the chip label's own max-width + ellipsis keeps the
+   row bounded, preserving the original intent of the hidden overflow. */
+.header-left {
+  overflow: visible;
+}
+
+.account-switcher {
+  position: relative;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 4px 10px;
+  background: var(--surface0);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.account-chip:hover {
+  background: var(--mantle);
+  color: var(--text);
+}
+
+.account-chip-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--mauve);
+  color: var(--base);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.account-chip-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.account-chip-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--overlay0);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Usage cache older than the 10 min TTL: countdown dims (design 6.4) */
+.account-chip-meta.is-stale {
+  opacity: 0.55;
+}
+
+.account-chip-chevron {
+  color: var(--overlay0);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.account-chip[aria-expanded="true"] .account-chip-chevron {
+  transform: rotate(180deg);
+}
+
+/* Applying state: chip pulses gently (no spinner, per design system) */
+.account-chip.is-applying .account-chip-avatar {
+  animation: account-chip-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes account-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Panel: LEFT-anchored dropdown (unlike the right-anchored theme-dropdown),
+   same shadow and z-index treatment as .theme-dropdown above. */
+.account-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  width: 380px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  animation: account-panel-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The author display rules above would beat the UA [hidden] rule. */
+.account-panel[hidden] {
+  display: none;
+}
+
+@keyframes account-panel-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Inert fallback while a switch is applying (JS also sets the inert
+   attribute where supported). */
+.account-panel.is-applying {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+.account-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--overlay0);
+  position: sticky;
+  top: 0;
+  background: var(--mantle);
+  z-index: 1;
+}
+
+.account-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+
+/* Row: grid auto / 1fr / auto (avatar, body, side controls) */
+.account-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  outline: 1px solid transparent;
+  transition: background var(--transition-fast), outline-color var(--transition-fast);
+}
+
+.account-row:hover {
+  background: var(--surface0);
+}
+
+.account-row:focus-visible {
+  outline: 1px solid var(--overlay1);
+}
+
+.account-row.is-staged {
+  outline: 1px solid var(--mauve);
+}
+
+.account-row.is-dead {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.account-row-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--mauve);
+  color: var(--base);
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* Health states: needs-re-login (dead) and needs-attention (warn) rows
+   flag with the amber token on the avatar. */
+.account-row.is-dead .account-row-avatar,
+.account-row.is-warn .account-row-avatar {
+  background: var(--yellow);
+}
+
+.account-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.account-row-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-plan-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface0);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.account-row-secondary {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-row-dead-note {
+  font-size: 10px;
+  color: var(--yellow);
+}
+
+.account-usage-unavailable {
+  font-size: 10px;
+  color: var(--overlay0);
+}
+
+.account-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.account-usage.is-stale .account-usage-reset {
+  opacity: 0.55;
+}
+
+.account-usage-row {
+  display: grid;
+  grid-template-columns: 28px 64px 30px 1fr;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+}
+
+.account-usage-key {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.account-usage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface0);
+  overflow: hidden;
+}
+
+.account-usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Fill thresholds (design 6.3): green below 60, yellow 60 to 85, red above */
+.account-usage-fill.u-low { background: var(--green); }
+.account-usage-fill.u-mid { background: var(--yellow); }
+.account-usage-fill.u-high { background: var(--red); }
+
+.account-usage-pct {
+  text-align: right;
+}
+
+.account-usage-reset {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-row-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.account-active-pill {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  white-space: nowrap;
+}
+
+.account-row-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--overlay0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: border-color var(--transition-fast);
+}
+
+.account-row.is-staged .account-row-radio {
+  border-color: var(--mauve);
+}
+
+.account-row.is-staged .account-row-radio::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mauve);
+}
+
+/* Rename pencil: hover-reveal on desktop (always visible on mobile,
+   see styles-mobile.css) */
+.account-row-edit {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--overlay1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.account-row:hover .account-row-edit,
+.account-row-edit:focus-visible {
+  opacity: 1;
+}
+
+.account-row-edit:hover {
+  background: var(--surface1);
+  color: var(--text);
+}
+
+/* Dead rows keep the pencil reachable at reduced emphasis */
+.account-row.is-dead .account-row-edit {
+  cursor: pointer;
+}
+
+.account-panel-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--mantle);
+  border-top: 1px solid var(--surface0);
+  padding: 10px 12px;
+}
+
+.account-mac-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.account-mac-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--mauve);
+  cursor: pointer;
+}
+
+.account-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Empty state: capture-current CTA (design 6.4) */
+.account-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 12px;
+  text-align: center;
+}
+
+.account-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Skeleton loading rows (shimmer via the shared .skeleton-line) */
+.account-row-skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.account-skeleton-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+/* Mobile-only backdrop behind the bottom sheet; JS creates it on open.
+   Hidden on desktop, shown inside the phone media query in
+   styles-mobile.css. */
+.account-panel-backdrop {
+  display: none;
+}
+
+/* Motion preferences: no enter transform/opacity animation and no bar
+   width transitions when the user asks for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .account-panel {
+    animation: none;
+  }
+  .account-usage-fill {
+    transition: none;
+  }
+  .account-chip.is-applying .account-chip-avatar {
+    animation: none;
+  }
+  .account-chip-chevron {
+    transition: none;
+  }
+}
+
+
 /* Latte-specific overrides for hardcoded rgba values in Mocha */
 :root[data-theme="latte"] ::selection {
   background: rgba(136, 57, 239, 0.2);

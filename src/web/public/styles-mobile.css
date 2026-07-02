@@ -1075,3 +1075,111 @@
     inset: -12px;
   }
 }
+
+
+/* ─── Credential Switcher: mobile bottom sheet ─────────────────
+   The desktop dropdown (.account-panel, anchored under the header chip)
+   becomes a fixed bottom sheet on phones, following the action-sheet
+   recipe above. A JS-created backdrop (.account-panel-backdrop) dims the
+   app and closes on tap; body.account-sheet-open lifts the header's
+   stacking context so the sheet paints above the mobile tab bar and the
+   backdrop (the panel lives INSIDE the header's stacking context). */
+
+@media (max-width: 768px) {
+  /* Backdrop: dim everything at root level; tap to close (bound in JS). */
+  .account-panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: color-mix(in srgb, var(--crust) 60%, transparent);
+    animation: overlay-in 0.15s ease;
+  }
+
+  /* Lift the header stacking context above the tab bar (z 50) and the
+     backdrop (z 10000) while the account sheet is open. Modals (z 10002)
+     still stack above. Scoped to a dedicated class so the shared
+     sheet-open scroll lock never changes header stacking for other
+     sheets. */
+  body.account-sheet-open .app-header {
+    z-index: 10001;
+  }
+
+  .account-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    margin-top: 0;
+    max-height: 75vh;
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    z-index: 10001;
+    animation: sheet-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Drag-handle bar, mirroring .action-sheet-handle. Rendered as a
+     pseudo-element so the section 6.1 markup stays untouched. */
+  .account-panel::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    margin: 8px auto 4px;
+  }
+
+  /* Comfortable touch rows; hover-reveal becomes always-visible. */
+  .account-row {
+    min-height: 56px;
+  }
+
+  .account-row-edit {
+    opacity: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Footer buttons: full-width, stacked, Save on top (column-reverse
+     mirrors the .modal-footer treatment near the top of this file). */
+  .account-panel-actions {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .account-panel-actions .btn {
+    width: 100%;
+    padding: 14px;
+    justify-content: center;
+  }
+
+  /* Compact chip: drop the countdown so the 50px header never wraps. */
+  .account-chip-meta {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Smallest phones: avatar + chevron only. */
+  .account-chip-label {
+    display: none;
+  }
+
+  .account-chip {
+    padding: 4px 8px;
+  }
+}
+
+/* Reduced motion: the sheet snaps into place instead of sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .account-panel,
+  .account-panel-backdrop {
+    animation: none;
+  }
+}
