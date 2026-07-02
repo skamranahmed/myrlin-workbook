@@ -157,6 +157,7 @@ class CWMApp {
         confirmBeforeClose: true,
         autoOpenTerminal: true,
         autoTrustDialogs: false,
+        smoothScrolling: true,
         maxConcurrentTasks: 4,
         headerHeight: 80,
         defaultModelPlanning: '',
@@ -605,6 +606,19 @@ class CWMApp {
       document.addEventListener('click', () => {
         if (this.els.themeDropdown) this.els.themeDropdown.hidden = true;
       });
+    }
+
+    // Issue #41: re-apply settings when the OS reduced-motion preference
+    // changes, so terminal smooth scrolling honors it live (no reload).
+    const reducedMotionMq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reducedMotionMq) {
+      const onMotionPrefChange = () => this.applySettings();
+      if (typeof reducedMotionMq.addEventListener === 'function') {
+        reducedMotionMq.addEventListener('change', onMotionPrefChange);
+      } else if (typeof reducedMotionMq.addListener === 'function') {
+        // Older Safari exposes only the deprecated addListener API.
+        reducedMotionMq.addListener(onMotionPrefChange);
+      }
     }
 
     // Virtual keyboard toggle. inputmode="none" is a no-op on devices without
@@ -1176,6 +1190,22 @@ class CWMApp {
           break;
         }
       }
+    });
+
+    // ─── Clipboard Paste Unavailable ─────────────────────────
+    // TerminalPane dispatches cwm:paste-unavailable when the async Clipboard
+    // API is missing (insecure origin, e.g. http over LAN) or a read is denied
+    // (Safari and some mobile browsers). The pane has no toast UI of its own,
+    // so app.js surfaces the message here. WHY centralized: keeps clipboard-
+    // failure messaging in one place regardless of which entry point (Ctrl+V,
+    // context menu, mobile long-press) triggered it. Tells the user the native
+    // Ctrl+V (Cmd+V on Mac) shortcut still works. See issue #64.
+    document.addEventListener('cwm:paste-unavailable', (e) => {
+      const reason = e && e.detail && e.detail.reason;
+      const msg = reason === 'denied'
+        ? 'Clipboard read blocked by the browser. Press Ctrl+V (Cmd+V on Mac) to paste'
+        : 'Clipboard needs HTTPS or localhost. Press Ctrl+V (Cmd+V on Mac) to paste';
+      this.showToast(msg, 'warning');
     });
 
     // ─── Terminal Needs-Input Badge ─────────────────────────
@@ -4070,6 +4100,7 @@ class CWMApp {
       { key: 'paneColorHighlights', label: 'Pane Color Highlights', description: 'Color-coded left border on terminal pane headers, with matching pips in sidebar', category: 'Terminal' },
       { key: 'activityIndicators', label: 'Activity Indicators', description: 'Show real-time activity labels (Reading, Writing, etc.) on pane headers', category: 'Terminal' },
       { key: 'autoOpenTerminal', label: 'Auto-open Terminal on Start', description: 'Automatically open a terminal when starting a session', category: 'Terminal' },
+      { key: 'smoothScrolling', label: 'Smooth Scrolling', description: 'Animate terminal scrolling (mouse wheel, Shift+PageUp/Down) instead of jumping in blocks. Automatically disabled when your system requests reduced motion.', category: 'Terminal' },
       { key: 'completionNotifications', label: 'Completion Notifications', description: 'Sound and toast when a background terminal finishes', category: 'Notifications' },
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
@@ -5237,6 +5268,19 @@ class CWMApp {
     const autoTrust = !!this.state.settings.autoTrustDialogs;
     this.terminalPanes.forEach(tp => {
       if (tp) tp._autoTrustEnabled = autoTrust;
+    });
+
+    // Sync smooth-scroll setting to every live pane, including panes cached
+    // for inactive tab groups (issue #41). Cached panes reattach without
+    // reconstruction on tab switch, so skipping them would leave a stale
+    // scroll duration until the next full remount. TerminalPane guards the
+    // mobile momentum engine internally (no-op while a gesture is driving).
+    const syncSmoothScroll = (tp) => {
+      if (tp && typeof tp.applySmoothScrollSetting === 'function') tp.applySmoothScrollSetting();
+    };
+    this.terminalPanes.forEach(syncSmoothScroll);
+    Object.values(this._groupPaneCache || {}).forEach(cached => {
+      if (cached && Array.isArray(cached.panes)) cached.panes.forEach(syncSmoothScroll);
     });
 
     // Re-render sidebar to update pane color pips
@@ -12432,10 +12476,25 @@ class CWMApp {
       });
     }
 
-    // Paste from clipboard
+    // Paste from clipboard.
+    // On secure origins (localhost/https) the async Clipboard API drives the
+    // paste directly via TerminalPane.pasteFromClipboard. On insecure origins
+    // (http over LAN) that API is undefined, so a fire-and-forget call would
+    // silently do nothing (issue #64). In that case we tell the user to press
+    // Ctrl+V (Cmd+V on Mac) and focus the pane so the shortcut lands on the
+    // terminal, which pastes through the native beforeinput/paste handlers. We
+    // never call document.execCommand('paste'): it is dead from script in
+    // modern browsers. This item is shared by the desktop right-click menu and
+    // the mobile long-press sheet (both route through showTerminalContextMenu).
+    const clipboardReadable = !!(navigator.clipboard && typeof navigator.clipboard.readText === 'function');
     items.push({
-      label: 'Paste', icon: '&#128203;', action: () => {
-        tp.pasteFromClipboard();
+      label: clipboardReadable ? 'Paste' : 'Paste (Ctrl+V)', icon: '&#128203;', action: () => {
+        if (clipboardReadable) {
+          tp.pasteFromClipboard();
+        } else {
+          this.showToast('Clipboard needs HTTPS or localhost. Press Ctrl+V (Cmd+V on Mac) to paste', 'info');
+          if (typeof tp.focus === 'function') tp.focus();
+        }
       },
     });
 
