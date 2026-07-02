@@ -157,6 +157,7 @@ class CWMApp {
         confirmBeforeClose: true,
         autoOpenTerminal: true,
         autoTrustDialogs: false,
+        smoothScrolling: true,
         maxConcurrentTasks: 4,
         headerHeight: 80,
         defaultModelPlanning: '',
@@ -605,6 +606,19 @@ class CWMApp {
       document.addEventListener('click', () => {
         if (this.els.themeDropdown) this.els.themeDropdown.hidden = true;
       });
+    }
+
+    // Issue #41: re-apply settings when the OS reduced-motion preference
+    // changes, so terminal smooth scrolling honors it live (no reload).
+    const reducedMotionMq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reducedMotionMq) {
+      const onMotionPrefChange = () => this.applySettings();
+      if (typeof reducedMotionMq.addEventListener === 'function') {
+        reducedMotionMq.addEventListener('change', onMotionPrefChange);
+      } else if (typeof reducedMotionMq.addListener === 'function') {
+        // Older Safari exposes only the deprecated addListener API.
+        reducedMotionMq.addListener(onMotionPrefChange);
+      }
     }
 
     // Virtual keyboard toggle. inputmode="none" is a no-op on devices without
@@ -4086,6 +4100,7 @@ class CWMApp {
       { key: 'paneColorHighlights', label: 'Pane Color Highlights', description: 'Color-coded left border on terminal pane headers, with matching pips in sidebar', category: 'Terminal' },
       { key: 'activityIndicators', label: 'Activity Indicators', description: 'Show real-time activity labels (Reading, Writing, etc.) on pane headers', category: 'Terminal' },
       { key: 'autoOpenTerminal', label: 'Auto-open Terminal on Start', description: 'Automatically open a terminal when starting a session', category: 'Terminal' },
+      { key: 'smoothScrolling', label: 'Smooth Scrolling', description: 'Animate terminal scrolling (mouse wheel, Shift+PageUp/Down) instead of jumping in blocks. Automatically disabled when your system requests reduced motion.', category: 'Terminal' },
       { key: 'completionNotifications', label: 'Completion Notifications', description: 'Sound and toast when a background terminal finishes', category: 'Notifications' },
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
@@ -5253,6 +5268,19 @@ class CWMApp {
     const autoTrust = !!this.state.settings.autoTrustDialogs;
     this.terminalPanes.forEach(tp => {
       if (tp) tp._autoTrustEnabled = autoTrust;
+    });
+
+    // Sync smooth-scroll setting to every live pane, including panes cached
+    // for inactive tab groups (issue #41). Cached panes reattach without
+    // reconstruction on tab switch, so skipping them would leave a stale
+    // scroll duration until the next full remount. TerminalPane guards the
+    // mobile momentum engine internally (no-op while a gesture is driving).
+    const syncSmoothScroll = (tp) => {
+      if (tp && typeof tp.applySmoothScrollSetting === 'function') tp.applySmoothScrollSetting();
+    };
+    this.terminalPanes.forEach(syncSmoothScroll);
+    Object.values(this._groupPaneCache || {}).forEach(cached => {
+      if (cached && Array.isArray(cached.panes)) cached.panes.forEach(syncSmoothScroll);
     });
 
     // Re-render sidebar to update pane color pips
