@@ -53,8 +53,45 @@
 'use strict';
 
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const os = require('os');
+
+// ─── Blocking-read guards (2026-07-02, mirrors claude/search.js) ─────────
+// Rollouts are usually small, but the same failure class applies: a sync
+// whole-file read blocks the event loop so neither the in-loop budget check
+// nor the dispatcher's race timer can fire. Oversized files are tail-read
+// (JSONL is append-only, recent content lives at the end); all reads are
+// async so I/O never blocks timers.
+const MAX_SEARCH_FILE_BYTES = 8 * 1024 * 1024;  // full-read cap per file
+const HUGE_FILE_TAIL_BYTES = 2 * 1024 * 1024;   // tail window for oversized files
+
+/**
+ * Read the last `tailBytes` of a file asynchronously and drop the first
+ * (almost certainly partial) line so the caller only sees whole JSONL lines.
+ * Duplicated from claude/search.js intentionally: providers stay isolated.
+ *
+ * @param {string} filePath  - Absolute file path.
+ * @param {number} fileSize  - Size in bytes from a fresh stat.
+ * @param {number} tailBytes - Window size to read from the end.
+ * @returns {Promise<string>} UTF-8 text of the tail window, whole lines only.
+ */
+async function readFileTail(filePath, fileSize, tailBytes) {
+  const start = Math.max(0, fileSize - tailBytes);
+  const fh = await fsp.open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(Math.min(tailBytes, fileSize));
+    await fh.read(buf, 0, buf.length, start);
+    let text = buf.toString('utf-8');
+    if (start > 0) {
+      const nl = text.indexOf('\n');
+      text = nl >= 0 ? text.slice(nl + 1) : '';
+    }
+    return text;
+  } finally {
+    await fh.close();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Module-scoped file-list cache. Mirrors claude/search.js's cache pattern.
@@ -374,10 +411,21 @@ async function search({ query, limit, timeBudgetMs } = {}) {
 
     let content;
     try {
-      content = fs.readFileSync(fileInfo.filePath, 'utf-8');
+      // Stat first so oversized rollouts get a tail-window read instead of a
+      // whole-file read (see blocking-read guards at the top of this module).
+      const st = await fsp.stat(fileInfo.filePath);
+      if (st.size > MAX_SEARCH_FILE_BYTES) {
+        content = await readFileTail(fileInfo.filePath, st.size, HUGE_FILE_TAIL_BYTES);
+      } else {
+        content = await fsp.readFile(fileInfo.filePath, 'utf-8');
+      }
     } catch (_) {
       continue; // unreadable; skip
     }
+
+    // Yield between files so the dispatcher's hard-timeout race timer can
+    // fire even during long scans.
+    await new Promise((resolve) => setImmediate(resolve));
 
     const lines = content.split('\n');
     // Lazy-computed per-file metadata; resolved on first match in this file.
