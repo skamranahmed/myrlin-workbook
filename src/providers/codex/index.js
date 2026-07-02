@@ -36,7 +36,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const discover = require('./discover');
-const { parseTranscript } = require('./parse');
+const { parseTranscript, parseLine } = require('./parse');
 const { spawnCommand } = require('./spawn');
 const { search } = require('./search');
 
@@ -104,6 +104,21 @@ function getKeyBindings() {
  * @returns {boolean}
  */
 function supportsCost() {
+  return false;
+}
+
+/**
+ * supportsForkResume capability flag (issue #10 Tier 1). OPTIONAL Provider
+ * member; NOT in the registry's REQUIRED_METHODS list. Codex CLI has no
+ * fork-from-message / resume-at-checkpoint affordance, so this returns
+ * false. The flag exists (rather than being absent) so callers can probe
+ * every provider uniformly with provider.supportsForkResume?.() and treat
+ * an explicit false and a missing member identically; explicit is clearer
+ * for readers and greppers.
+ *
+ * @returns {boolean} Always false for Codex.
+ */
+function supportsForkResume() {
   return false;
 }
 
@@ -346,6 +361,16 @@ module.exports = {
   supportsCost: supportsCost,
   isIdleSignal: isIdleSignal,
   getKeyBindings: getKeyBindings,
+  // Issue #10 Tier 1: OPTIONAL mirror capability. mirror.parseLine maps one
+  // raw rollout JSONL line to a MirrorMessage (or null); the session-mirror
+  // wiring feeds it lines from src/web/jsonl-tailer.js. Optional member:
+  // NOT added to REQUIRED_METHODS, so providers without a mirror still
+  // validate.
+  mirror: { parseLine: parseLine },
+  // Issue #10 Tier 1: OPTIONAL capability flag; false because Codex has no
+  // fork/resume affordance (see the function's JSDoc for why an explicit
+  // false is exported instead of omitting the member).
+  supportsForkResume: supportsForkResume,
   // Transcript artifact resolution: parity with claudeProvider so
   // server.js route handlers (cost batch, cost single, backfill) dispatch
   // through provider.findArtifactPath / findArtifactByWorkingDir uniformly.
