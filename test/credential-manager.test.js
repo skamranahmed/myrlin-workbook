@@ -925,9 +925,51 @@ let stubBase = '';
     assertEqual(live.tokenState, TOKEN_STATE_UNVERIFIED, 'imports arrive unverified');
     assertEqual(dead.label, 'DeadOne', 'label carried');
     assertEqual(dead.email, EMAIL_B);
-    // Second call: no-op because the store is non-empty.
+    // Second call: no-op because the one-time sentinel is now present.
     const again = await fx.manager.seedFromClaudeSwap(seedRoot);
     assertEqual(again.imported, 0, 'seed never runs twice');
+  });
+
+  await test('REGRESSION: seed imports even when the active account self-captured first (boot ordering); sentinel makes it one-time and delete-proof', async () => {
+    const fx = makeFixture(); // live files for account A are on disk
+    // Reproduce the real boot ordering: startCredentialWatcher's initial
+    // sync self-captures the ACTIVE account into the store BEFORE any HTTP
+    // request can trigger the seed. The old snapshot-count guard saw a
+    // non-empty store here and skipped the import forever, so the dropdown
+    // only ever showed the active account.
+    await fx.manager.syncActiveTokenToProfile();
+    assertEqual(fx.manager.listSnapshots().length, 1, 'active account self-captured at boot');
+    const seedRoot = path.join(process.env.CWM_DATA_DIR, 'seed-boot-' + fixtureSeq);
+    const pcDir = path.join(seedRoot, 'profiles', 'pc');
+    fs.mkdirSync(pcDir, { recursive: true });
+    const mkProfile = (uuid, email, label) => JSON.stringify({
+      email,
+      label,
+      capturedAt: '2026-06-23T00:00:00Z',
+      credentialsFileText: serializeCredentialsFile(makeOauth('BOOT-' + label, Date.now() + HOUR_MS)),
+      oauthAccountJson: JSON.stringify(makeIdentity(uuid, email)),
+      usageCache: null,
+      tokenDead: true, // must still be ignored on this path
+    });
+    fs.writeFileSync(path.join(pcDir, 'b@example.com.json'), mkProfile(UUID_B, EMAIL_B, 'SeedB'), 'utf-8');
+    fs.writeFileSync(path.join(pcDir, 'c@example.com.json'), mkProfile(UUID_C, 'c@example.com', 'SeedC'), 'utf-8');
+    const result = await fx.manager.seedFromClaudeSwap(seedRoot);
+    assertEqual(result.imported, 2, 'BOTH pc profiles imported despite the pre-existing active snapshot');
+    assertEqual(fx.manager.listSnapshots().length, 3, 'roster = active account plus both seeded accounts');
+    assertEqual(fx.manager.readSnapshot(UUID_A).tokenState, TOKEN_STATE_OK, 'self-captured active snapshot untouched');
+    assertEqual(fx.manager.readSnapshot(UUID_B).tokenState, TOKEN_STATE_UNVERIFIED, 'seeded B lands unverified');
+    assertEqual(fx.manager.readSnapshot(UUID_C).tokenState, TOKEN_STATE_UNVERIFIED, 'seeded C lands unverified');
+    assert(fs.existsSync(path.join(fx.accountsDir, '.seeded')), 'sentinel written after the first import');
+    // Sentinel gating: a second call is a no-op regardless of store content.
+    const again = await fx.manager.seedFromClaudeSwap(seedRoot);
+    assertEqual(again.imported, 0, 'sentinel present: seed does not re-import');
+    // Deleting an imported account must NEVER resurrect it via the seed
+    // (the old count-based guard re-imported the moment the store emptied).
+    await fx.manager.deleteSnapshot(UUID_B);
+    const afterDelete = await fx.manager.seedFromClaudeSwap(seedRoot);
+    assertEqual(afterDelete.imported, 0, 'deleted account is NOT re-imported');
+    assertEqual(fx.manager.readSnapshot(UUID_B), null, 'B stays deleted');
+    assertEqual(fx.manager.listSnapshots().length, 2, 'roster after delete: active plus remaining seed');
   });
 
   await test('backup prune keeps backupKeep per basename, never the just-created file', async () => {

@@ -64,6 +64,14 @@ const RENAME_MAX_ATTEMPTS = 5;
 const RENAME_BACKOFF_MS = 50;
 const LABEL_MAX_LENGTH = 60;
 const CREDENTIALS_FILE_NAME = '.credentials.json';
+// One-time claude-swap seed sentinel, written into the accounts dir after the
+// first import attempt completes. The sentinel's PRESENCE (not snapshot
+// count) is the "already seeded" signal: snapshot count is wrong evidence
+// because the boot watcher self-captures the active account before the first
+// seed can run (making the store non-empty and killing the import on any
+// machine with a live login), and because deleting an account later must
+// never trigger a silent re-import from the old tool's stale profiles.
+const SEED_SENTINEL_FILE = '.seeded';
 
 // ─── Default settings (section 2.3 of the design) ───────────────────────────
 const DEFAULT_CRED_SETTINGS = Object.freeze({
@@ -916,12 +924,20 @@ function createCredentialManager(opts = {}) {
 
   /**
    * Unlocked core of seedFromClaudeSwap: one-time READ-ONLY conversion of
-   * claude-swap's profiles/pc/*.json into our schema. Runs only when the
-   * accounts dir has no snapshots. The old tool's tokenDead flags are
-   * IGNORED entirely (they come from its buggy refresh classification and
-   * are provably wrong); every import lands as 'unverified' and the first
-   * refresh, usage success, apply verification, or watcher recapture
-   * converts it to ok or needs_login with fresh evidence.
+   * claude-swap's profiles/pc/*.json into our schema. Idempotence comes from
+   * an explicit sentinel file (<accountsDir>/.seeded) written after the
+   * first import attempt, NEVER from snapshot count: the boot watcher's
+   * initial sync self-captures the active account before any seed can run,
+   * so a count-based guard is dead on arrival on every machine with a live
+   * login, and it would also re-import deleted accounts once the store
+   * emptied. The sentinel is written even when zero profiles import
+   * (including when the seed dir does not exist) so a machine without
+   * claude-swap never re-scans on every boot. The old tool's tokenDead
+   * flags are IGNORED entirely (they come from its buggy refresh
+   * classification and are provably wrong); every import lands as
+   * 'unverified' and the first refresh, usage success, apply verification,
+   * or watcher recapture converts it to ok or needs_login with fresh
+   * evidence.
    *
    * @param {string} [dir] - Seed root; defaults to resolveSeedDir().
    * @returns {{imported: number, skipped: number}}
@@ -929,13 +945,14 @@ function createCredentialManager(opts = {}) {
   function _seedFromClaudeSwapUnlocked(dir) {
     const source = dir || resolveSeedDir();
     const result = { imported: 0, skipped: 0 };
-    if (listSnapshots().length > 0) return result; // store already populated
+    const sentinelPath = path.join(accountsDir, SEED_SENTINEL_FILE);
+    if (fs.existsSync(sentinelPath)) return result; // one-time import already ran
     const pcDir = path.join(source, 'profiles', 'pc');
-    let files;
+    let files = [];
     try {
       files = fs.readdirSync(pcDir).filter((f) => f.toLowerCase().endsWith('.json'));
     } catch (_) {
-      return result; // no seed dir: silent no-op
+      files = []; // no seed dir: nothing to import, but the attempt still counts
     }
     for (const f of files) {
       try {
@@ -969,6 +986,20 @@ function createCredentialManager(opts = {}) {
     }
     if (result.imported > 0) {
       log.log('[Credentials] seeded ' + result.imported + ' snapshot(s) from claude-swap (all unverified; old dead flags ignored)');
+    }
+    // Mark the one-time import as done regardless of outcome (zero imports
+    // included) so it never re-runs and never resurrects deleted accounts.
+    // A failed sentinel write only degrades to a harmless re-scan next boot
+    // (duplicate uuids are skipped), so it warns instead of throwing.
+    try {
+      writeFileAtomic(sentinelPath, JSON.stringify({
+        seededAt: new Date(clock()).toISOString(),
+        source,
+        imported: result.imported,
+        skipped: result.skipped,
+      }, null, 2));
+    } catch (err) {
+      log.warn('[Credentials] seed sentinel write failed (seed may re-scan next boot): ' + ((err && err.message) || err));
     }
     return result;
   }

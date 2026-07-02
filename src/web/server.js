@@ -8383,6 +8383,21 @@ function startServer(port = 3456, host = '127.0.0.1') {
   _scheduler.start();
   mountScheduleRoutes(app, { requireAuth, scheduler: _scheduler, store: getStore() });
 
+  // One-time claude-swap roster import, queued BEFORE the watcher starts so
+  // the watcher's initial sync (which self-captures the ACTIVE account into
+  // the store) lands on an already-seeded roster instead of poisoning the
+  // old snapshot-count guard. The manager's serialize() chain preserves this
+  // ordering, and the seed itself is sentinel-gated (<accountsDir>/.seeded)
+  // so it runs at most once per store no matter how often it is called.
+  // A bad or missing seed dir must never block boot: failures only log.
+  try {
+    credentialManager.seedFromClaudeSwap().catch((err) => {
+      console.warn('[Credentials] startup seed skipped:', (err && err.message) || err);
+    });
+  } catch (err) {
+    console.warn('[Credentials] startup seed skipped:', (err && err.message) || err);
+  }
+
   // Credential rotation write-back watcher (design Decision 3): keeps the
   // account snapshots in sync with the live token file as the CLI rotates
   // tokens. Crash-proof by construction; a start failure only logs.

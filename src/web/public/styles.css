@@ -8182,6 +8182,19 @@ html {
 
 .account-switcher {
   position: relative;
+  /* The switcher is the designated flexible item on the header's left side:
+     it shrinks (label ellipsis absorbs the squeeze) instead of painting over
+     the view-tab row. min-width lifts the flex-item auto minimum. */
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* The brand never shrinks; without pinning it, a tight header would shrink
+   the brand and chip proportionally and the title could wrap or spill over
+   the chip before the chip label finished truncating. The width ladder
+   below hides the title outright at widths where it cannot fit whole. */
+.header-left .header-brand {
+  flex-shrink: 0;
 }
 
 .account-chip {
@@ -8198,6 +8211,13 @@ html {
   font-family: inherit;
   cursor: pointer;
   flex-shrink: 0;
+  /* Cap the chip at the (shrinkable) switcher width so a long label or the
+     meta countdown can never force the header-left content past the tabs,
+     and clip rather than spill when the squeeze passes the chip's own
+     min-content (the pre-fix spill is exactly what painted over the tabs). */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
@@ -8239,6 +8259,46 @@ html {
 /* Usage cache older than the 10 min TTL: countdown dims (design 6.4) */
 .account-chip-meta.is-stale {
   opacity: 0.55;
+}
+
+/* Desktop width ladder for the header. Measured budget: the view tabs
+   (about 640px), the right-side action rail (about 347px), and the header
+   padding leave the left side roughly (viewport - 1019px), which is 261px
+   at 1280 and 110px at 1024, so the chip and the brand CANNOT both render
+   whole at common laptop widths. The ladder sheds the least valuable
+   pixels first: meta countdown, then the redundant title (the logo keeps
+   the brand), then the chip label and chevron (avatar-only chip, same
+   treatment the mobile sheet already uses under 480px). Every step is
+   scoped to desktop widths so the mobile stylesheet's own header rules
+   stay authoritative at 768px and below. */
+
+/* Step 1: the countdown is the first casualty; it also lives in the panel
+   rows, so nothing is lost. (Mobile hides it at 768px already.) */
+@media (min-width: 769px) and (max-width: 1459px) {
+  .account-chip-meta {
+    display: none;
+  }
+}
+
+/* Step 2: logo-only brand; the freed 160px keeps the account label whole
+   at 1280, where identity matters more than repeating the app name. */
+@media (min-width: 769px) and (max-width: 1359px) {
+  .header-left .header-title {
+    display: none;
+  }
+}
+
+/* Step 3: avatar-only chip so even a 110px budget at 1024 fits with zero
+   spill next to the full tab row. */
+@media (min-width: 769px) and (max-width: 1179px) {
+  .account-chip-label,
+  .account-chip-chevron {
+    display: none;
+  }
+
+  .account-chip {
+    padding: 4px 6px;
+  }
 }
 
 .account-chip-chevron {
@@ -8319,11 +8379,12 @@ html {
   padding: 4px;
 }
 
-/* Row: grid auto / 1fr / auto (avatar, body, side controls) */
+/* Row: grid auto / 1fr / auto (avatar, body, side controls). The 3px row
+   gap matches the old body flex gap; the 10px column gap is unchanged. */
 .account-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 3px 10px;
   align-items: start;
   width: 100%;
   padding: 10px 12px;
@@ -8334,6 +8395,51 @@ html {
   cursor: pointer;
   outline: 1px solid transparent;
   transition: background var(--transition-fast), outline-color var(--transition-fast);
+}
+
+/* Flatten the body into the row grid (display: contents) so the usage and
+   note lines can span from the name column to the row's right edge. In the
+   old three-column layout the side column (ACTIVE pill plus pencil)
+   reserved its width for the FULL row height, so the active row's reset
+   text clipped while non-active rows showed it whole. Skeleton rows keep
+   the flex body (their placeholder lines have no grid placements). */
+.account-row:not(.account-row-skeleton) > .account-row-body {
+  display: contents;
+}
+
+.account-row:not(.account-row-skeleton) .account-row-avatar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.account-row:not(.account-row-skeleton) .account-row-primary {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* The side controls span the primary and secondary rows so their height
+   distributes across both (keeps the 44px touch pencil on mobile from
+   inflating the first line) while staying clear of the usage rows below. */
+.account-row:not(.account-row-skeleton) .account-row-side {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+/* The secondary identity line keeps the side clearance of the old layout
+   (the pill and pencil sit beside it), but the usage and note lines below
+   span to the row edge, so the ACTIVE pill can no longer clip reset text.
+   Rows are explicit (not auto-placed) because auto placement would dodge
+   the side item's spanned cells and push these lines below phantom rows. */
+.account-row:not(.account-row-skeleton) .account-row-secondary {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.account-row:not(.account-row-skeleton) .account-usage,
+.account-row:not(.account-row-skeleton) .account-usage-unavailable,
+.account-row:not(.account-row-skeleton) .account-row-dead-note {
+  grid-column: 2 / -1;
+  grid-row: 3;
 }
 
 .account-row:hover {

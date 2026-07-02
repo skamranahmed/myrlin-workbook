@@ -104,8 +104,10 @@ function setupCredentialRoutes(app, { requireAuth, getStore, broadcast, structur
   }
 
   // ─── GET /api/credentials ─────────────────────────────────────────────
-  // List the roster. Side effects: one-time claude-swap seed when the store
-  // is empty, and a cheap guarded sync so the active account always appears.
+  // List the roster. Side effects: the sentinel-gated one-time claude-swap
+  // seed (a harmless no-op once the startup seed in startServer has run;
+  // kept as a belt-and-braces path for stores created before that seed
+  // existed), and a cheap guarded sync so the active account always appears.
   // NO network usage calls (pure cache read).
   app.get('/api/credentials', requireAuth, async (req, res) => {
     try {
