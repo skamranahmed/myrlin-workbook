@@ -916,6 +916,7 @@ const standaloneTests = [
   'idle-notification-gating.test.js', // notification-storm fix: edge-triggered re-arm, replay suppression, refire cooldown, focus ack
   'mobile-ux-fixes.test.js',         // fix/mobile-ux: mobile tab scroll, More sheet, settings sheet, long-press + tab touch paths
   'phantom-tokens.test.js',          // ui-token-repair: every consumed var(--x) must be defined (phantom-token gate)
+  'smooth-scroll.test.js',           // issue #41: xterm smoothScrollDuration capability gate, setting/reduced-motion resolution, mobile engine guard
 ];
 
 let standaloneFailed = 0;
