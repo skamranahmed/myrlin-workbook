@@ -109,6 +109,19 @@ class CWMApp {
    *  so several sessions finishing together produce one ding, not a burst. */
   static CHIME_COOLDOWN_MS = 5000;
 
+  // ── Credential switcher constants (design doc sections 6.2 and 6.4) ──
+  /** Usage cache staleness threshold; mirrors the server's usageCacheMinutes
+   *  default (10 min). Stale rows dim their countdown and trigger one
+   *  auto-refresh per panel open. */
+  static CRED_USAGE_STALE_MS = 10 * 60 * 1000;
+  /** Cadence of the reset-countdown re-render tick while the chip/panel is
+   *  visible. Countdowns have minute granularity, so 60s is exact. */
+  static CRED_TICK_MS = 60000;
+  /** Window during which credentials:changed SSE broadcasts are treated as
+   *  echoes of this client's own mutation (apply/rename/capture) and are
+   *  not toasted as remote changes. */
+  static CRED_SELF_ACTION_MS = 8000;
+
   constructor() {
     // ─── State ─────────────────────────────────────────────────
     this.state = {
@@ -149,6 +162,12 @@ class CWMApp {
       showHidden: false,
       resourceData: null,
       gitStatusCache: {},
+      // Credential switcher (Claude account roster; design doc section 6.2).
+      // list: safe projection rows from GET /api/credentials (never tokens).
+      // activeId: profileId of the machine-wide active login. stagedId: the
+      // row the user selected but has not saved yet. mac: { configured,
+      // enabled, host, user } for the Mac mirror checkbox visibility.
+      credentials: { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null },
       settings: Object.assign({
         paneColorHighlights: true,
         activityIndicators: true,
@@ -291,6 +310,20 @@ class CWMApp {
       vkbToggleBtn: document.getElementById('vkb-toggle-btn'),
       scaleDownBtn: document.getElementById('scale-down-btn'),
       scaleUpBtn: document.getElementById('scale-up-btn'),
+
+      // Credential switcher (Claude account chip + panel, design doc 6.1 ids)
+      accountSwitcher: document.getElementById('account-switcher'),
+      accountChip: document.getElementById('account-chip'),
+      accountChipAvatar: document.getElementById('account-chip-avatar'),
+      accountChipLabel: document.getElementById('account-chip-label'),
+      accountChipMeta: document.getElementById('account-chip-meta'),
+      accountPanel: document.getElementById('account-panel'),
+      accountPanelList: document.getElementById('account-panel-list'),
+      accountRefreshBtn: document.getElementById('account-refresh-btn'),
+      accountSaveBtn: document.getElementById('account-save-btn'),
+      accountCancelBtn: document.getElementById('account-cancel-btn'),
+      accountMacToggle: document.getElementById('account-mac-toggle'),
+      accountMacCheckbox: document.getElementById('account-mac-checkbox'),
 
       // Sessions
       sessionPanelTitle: document.getElementById('session-panel-title'),
@@ -2112,6 +2145,9 @@ class CWMApp {
     this.initNotesEditor();
     this.initAIInsights();
     this.initPairMobile();
+    // Credential switcher: binds once, then kicks a non-blocking roster load.
+    // If the server lacks the routes (404), the switcher simply stays hidden.
+    this.initAccountSwitcher();
     await this.loadAll();
     this.connectSSE();
     this.startConflictChecks();
@@ -2258,6 +2294,12 @@ class CWMApp {
       clearTimeout(this.sseRetryTimeout);
       this.sseRetryTimeout = null;
     }
+    // Credential switcher teardown: stop the countdown tick, close the panel,
+    // and re-hide the chip so the login screen never shows account state.
+    this._stopAccountTick();
+    this._closeAccountPanel();
+    if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = true;
+    this.state.credentials = { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null };
     this.disconnectSSE();
     this.showLogin();
   }
@@ -7975,21 +8017,33 @@ class CWMApp {
     return null;
   }
 
-  async restartAllSessions() {
+  /**
+   * Restart every running/idle session so they pick up fresh state (for
+   * example a new machine-wide login after a credential switch).
+   * @param {object} [opts] - Options bag (additive; callers passing nothing keep the old behavior).
+   * @param {boolean} [opts.skipConfirm=false] - When true, skip the built-in
+   *   confirm modal. Used by the credential switcher's post-apply restart
+   *   offer, which has ALREADY confirmed with its own modal; without this
+   *   flag the user would be double-prompted.
+   * @returns {Promise<void>}
+   */
+  async restartAllSessions({ skipConfirm = false } = {}) {
     const runningSessions = this.state.sessions.filter(s => s.status === 'running' || s.status === 'idle');
     if (runningSessions.length === 0) {
       this.showToast('No running sessions to restart', 'info');
       return;
     }
 
-    const confirmed = await this.showConfirmModal({
-      title: 'Restart All Sessions',
-      message: `Restart <strong>${runningSessions.length}</strong> running session(s)? This will stop and relaunch each one, picking up any new login credentials.`,
-      confirmText: 'Restart All',
-      confirmClass: 'btn-primary',
-    });
+    if (!skipConfirm) {
+      const confirmed = await this.showConfirmModal({
+        title: 'Restart All Sessions',
+        message: `Restart <strong>${runningSessions.length}</strong> running session(s)? This will stop and relaunch each one, picking up any new login credentials.`,
+        confirmText: 'Restart All',
+        confirmClass: 'btn-primary',
+      });
 
-    if (!confirmed) return;
+      if (!confirmed) return;
+    }
 
     for (const s of runningSessions) {
       try {
@@ -8001,6 +8055,802 @@ class CWMApp {
     this.showToast(`Restarted ${runningSessions.length} session(s)`, 'success');
     await this.loadSessions();
     await this.loadStats();
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     CREDENTIAL SWITCHER (Claude account chip + panel)
+     Design contract: docs/plans/2026-07-02-credential-switcher-design.md
+     sections 4 (API), 5 (SSE), 6 (frontend). Tokens NEVER reach this
+     code; only the safe projection rows from GET /api/credentials.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Wire up the credential switcher (chip, panel, footer, keyboard nav,
+   * outside-click close) and kick off the first roster load. Bindings
+   * attach once even if _initializeApp runs again after a re-login; the
+   * roster load runs on every call so a fresh login always refreshes it.
+   * @returns {void}
+   */
+  initAccountSwitcher() {
+    const els = this.els;
+    if (!els.accountSwitcher || !els.accountChip || !els.accountPanel) return;
+
+    if (!this._accountSwitcherBound) {
+      this._accountSwitcherBound = true;
+
+      // Chip toggles the panel (mirrors the theme-dropdown toggle pattern).
+      els.accountChip.addEventListener('click', () => {
+        if (els.accountPanel.hidden) this._openAccountPanel();
+        else this._closeAccountPanel();
+      });
+
+      // ArrowDown on the chip opens the panel and moves focus into the list.
+      els.accountChip.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this._openAccountPanel();
+          this._moveAccountFocus(1);
+        }
+      });
+
+      // Row interactions are delegated on the stable list container so the
+      // per-render innerHTML swaps never need re-binding.
+      els.accountPanelList.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('.account-row-edit');
+        if (editBtn) {
+          // The pencil must never stage the row it sits on.
+          e.stopPropagation();
+          const row = editBtn.closest('.account-row');
+          const p = row && this.state.credentials.list.find(x => x.profileId === row.dataset.profileId);
+          if (p) this.renameAccount(p);
+          return;
+        }
+        if (e.target.closest('#account-capture-btn')) {
+          this.captureCurrentAccount();
+          return;
+        }
+        const row = e.target.closest('.account-row');
+        if (row && row.dataset.profileId && row.getAttribute('aria-disabled') !== 'true') {
+          this.stageAccount(row.dataset.profileId);
+        }
+      });
+
+      // Keyboard: ArrowUp/ArrowDown roving focus between selectable rows,
+      // Enter/Space stages the focused row (needs-re-login rows excluded).
+      els.accountPanel.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          this._moveAccountFocus(e.key === 'ArrowDown' ? 1 : -1);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ') {
+          const row = e.target.closest && e.target.closest('.account-row');
+          if (row && row.dataset.profileId && row.getAttribute('aria-disabled') !== 'true') {
+            e.preventDefault();
+            this.stageAccount(row.dataset.profileId);
+          }
+        }
+      });
+
+      // Header + footer controls.
+      els.accountRefreshBtn.addEventListener('click', () => this.loadCredentials({ refresh: true }));
+      els.accountCancelBtn.addEventListener('click', () => {
+        this.state.credentials.stagedId = null;
+        this._closeAccountPanel();
+        this.renderAccountSwitcher();
+      });
+      els.accountSaveBtn.addEventListener('click', () => this.applyStagedAccount());
+      els.accountMacCheckbox.addEventListener('change', (e) => {
+        // Persist the mirror choice so it survives reloads (design 6.2).
+        localStorage.setItem('cwm_credMirrorMac', e.target.checked ? '1' : '0');
+      });
+
+      // Outside click closes. composedPath() is checked instead of a plain
+      // contains() because staging re-renders the list synchronously,
+      // detaching the clicked row before the event reaches the document;
+      // contains() on a detached node would close the panel on every stage.
+      document.addEventListener('click', (e) => {
+        if (!els.accountPanel || els.accountPanel.hidden) return;
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        if (path.includes(els.accountSwitcher) || els.accountSwitcher.contains(e.target)) return;
+        this._closeAccountPanel();
+      });
+
+      // Escape closes the panel (unless a modal owns the key) and returns
+      // focus to the chip for keyboard users.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (this._modalOpen) return;
+        if (els.accountPanel && !els.accountPanel.hidden) {
+          this._closeAccountPanel();
+          els.accountChip.focus();
+        }
+      });
+    }
+
+    // Non-blocking first load: a 404 (old server without the credential
+    // routes) simply keeps the switcher hidden. Never blocks app init.
+    this.loadCredentials();
+  }
+
+  /**
+   * Fetch helper dedicated to the credential routes. The generic api()
+   * helper discards the HTTP status and the structuredError message field,
+   * both of which this feature needs: 404 detection drives the graceful
+   * degradation on servers without the routes, and error toasts must show
+   * the server's human-readable message. 401 handling mirrors api().
+   * @param {string} method - HTTP verb.
+   * @param {string} path - Route path.
+   * @param {object} [body] - JSON body for non-GET requests.
+   * @returns {Promise<{ok: boolean, status: number, data: object|null}>} Response envelope.
+   * @throws {Error} 'Unauthorized' on 401 (after local logout), or the network-level fetch error.
+   */
+  async _credApi(method, path, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.state.token) headers['Authorization'] = `Bearer ${this.state.token}`;
+    const opts = { method, headers };
+    if (body && method !== 'GET') opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      this.state.token = null;
+      localStorage.removeItem('cwm_token');
+      this.showLogin();
+      this.disconnectSSE();
+      throw new Error('Unauthorized');
+    }
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = null; }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  /**
+   * Load the credential roster: GET /api/credentials, or POST
+   * /api/credentials/refresh-usage when opts.refresh is true (empty body,
+   * so the server-side cache TTL is honored). On 404 or network failure
+   * the switcher stays hidden and nothing else breaks (old-server /
+   * new-frontend mixes degrade gracefully, per design 6.1).
+   * @param {object} [opts] - Options bag.
+   * @param {boolean} [opts.refresh=false] - Refresh usage instead of a plain list read.
+   * @returns {Promise<void>} Never rejects; failures degrade silently or toast.
+   */
+  async loadCredentials({ refresh = false } = {}) {
+    const cred = this.state.credentials;
+    if (!this.els.accountSwitcher) return;
+    if (cred.loading) return;
+    cred.loading = true;
+    const firstLoad = cred.lastListAt === 0;
+    // Render immediately so an open panel shows the 3 skeleton rows.
+    this.renderAccountSwitcher();
+    try {
+      const resp = refresh
+        ? await this._credApi('POST', '/api/credentials/refresh-usage', {})
+        : await this._credApi('GET', '/api/credentials');
+      if (!resp.ok) {
+        if (resp.status === 404) return; // routes absent: feature self-hides
+        if (!firstLoad) {
+          const msg = (resp.data && (resp.data.message || resp.data.error)) || `Failed to load accounts (${resp.status})`;
+          this.showToast(msg, 'error');
+        }
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+    } catch (_) {
+      // Network failure or auth logout: degrade silently. If the roster was
+      // never loaded the switcher stays hidden; otherwise the previous data
+      // remains on screen until the next successful load.
+    } finally {
+      cred.loading = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Apply a 4.1-shape list response ({ activeProfileId, profiles, mac }) to
+   * local state, unhide the switcher, start the countdown tick, and render.
+   * Shared by loadCredentials, rename, and capture (their routes all return
+   * the same list shape).
+   * @param {object} data - Response body in the GET /api/credentials shape.
+   * @returns {boolean} True when the payload carried a usable profiles array.
+   */
+  _applyCredListResponse(data) {
+    if (!data || !Array.isArray(data.profiles)) return false;
+    const cred = this.state.credentials;
+    cred.list = data.profiles;
+    cred.activeId = data.activeProfileId || null;
+    if (data.mac !== undefined) cred.mac = data.mac || null;
+    cred.lastListAt = Date.now();
+    // Staging hygiene: a staged row that vanished or became active is stale.
+    if (cred.stagedId && (cred.stagedId === cred.activeId || !cred.list.some(p => p.profileId === cred.stagedId))) {
+      cred.stagedId = null;
+    }
+    if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = false;
+    this._startAccountTick();
+    this.renderAccountSwitcher();
+    return true;
+  }
+
+  /**
+   * Render the chip (avatar initial, display name, next 5-hour reset
+   * countdown) and, when the panel is open, the row list and footer.
+   * Save enables only when a staged selection differs from the active
+   * account. Loading with an empty roster renders 3 skeleton rows; an
+   * empty roster renders the capture-current empty state.
+   * @returns {void}
+   */
+  renderAccountSwitcher() {
+    const els = this.els;
+    const cred = this.state.credentials;
+    if (!els.accountSwitcher) return;
+
+    // ── Chip ──
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const chipName = active ? this._accountDisplayName(active) : 'Unknown account';
+    if (els.accountChipAvatar) els.accountChipAvatar.textContent = active ? (chipName.charAt(0).toUpperCase() || '?') : '?';
+    if (els.accountChipLabel) els.accountChipLabel.textContent = chipName;
+    if (els.accountChipMeta) {
+      const fiveHour = active && active.usage && active.usage.five_hour;
+      if (fiveHour && fiveHour.resets_at) {
+        els.accountChipMeta.textContent = this._formatResetText(fiveHour.resets_at);
+        els.accountChipMeta.dataset.resetAt = fiveHour.resets_at;
+        els.accountChipMeta.hidden = false;
+        els.accountChipMeta.classList.toggle('is-stale', this._isUsageStale(active));
+      } else {
+        els.accountChipMeta.textContent = '';
+        delete els.accountChipMeta.dataset.resetAt;
+        els.accountChipMeta.hidden = true;
+      }
+    }
+    if (els.accountChip) els.accountChip.classList.toggle('is-applying', cred.applying);
+
+    // Panel applying state is synced even while hidden so a panel closed
+    // mid-apply can never get stuck inert.
+    if (els.accountPanel) {
+      els.accountPanel.classList.toggle('is-applying', cred.applying);
+      try {
+        els.accountPanel.inert = cred.applying;
+      } catch (_) {
+        // inert unsupported: the is-applying class disables pointer events.
+      }
+    }
+
+    if (!els.accountPanel || els.accountPanel.hidden) return;
+
+    // ── Row list ──
+    if (cred.loading && cred.list.length === 0) {
+      // First load: skeleton rows, never spinners (design system rule).
+      els.accountPanelList.innerHTML = Array.from({ length: 3 }, () => `
+        <div class="account-row account-row-skeleton" aria-hidden="true">
+          <span class="skeleton-line account-skeleton-avatar"></span>
+          <span class="account-row-body">
+            <span class="skeleton-line" style="width: 55%"></span>
+            <span class="skeleton-line" style="width: 75%"></span>
+            <span class="skeleton-line" style="width: 40%"></span>
+          </span>
+        </div>
+      `).join('');
+    } else if (cred.list.length === 0) {
+      els.accountPanelList.innerHTML = `
+        <div class="account-empty">
+          <p>No saved credentials yet</p>
+          <button type="button" class="btn btn-primary btn-sm" id="account-capture-btn">Capture current account</button>
+        </div>`;
+    } else {
+      els.accountPanelList.innerHTML = cred.list.map(p => this.renderAccountRow(p)).join('');
+    }
+
+    // ── Footer ──
+    const macVisible = !!(cred.mac && cred.mac.configured && cred.mac.enabled);
+    if (els.accountMacToggle) els.accountMacToggle.hidden = !macVisible;
+    if (macVisible && els.accountMacCheckbox) {
+      els.accountMacCheckbox.checked = localStorage.getItem('cwm_credMirrorMac') === '1';
+    }
+    if (els.accountSaveBtn) {
+      els.accountSaveBtn.disabled = !(cred.stagedId && cred.stagedId !== cred.activeId) || cred.applying;
+      els.accountSaveBtn.textContent = cred.applying ? 'Applying' : 'Save';
+    }
+    // Footer fully disabled during the first-load skeleton state (6.4) and
+    // while a switch is applying.
+    const skeletonState = cred.loading && cred.list.length === 0;
+    if (els.accountCancelBtn) els.accountCancelBtn.disabled = cred.applying || skeletonState;
+    if (els.accountRefreshBtn) els.accountRefreshBtn.disabled = cred.loading || cred.applying;
+  }
+
+  /**
+   * Build the HTML for one account row: avatar, primary line (display name
+   * plus plan badge), secondary identity line (email is ALWAYS visible),
+   * usage mini-bars with reset texts, active pill / staged radio, and the
+   * rename pencil. Rows are div[role=option] rather than <button> because
+   * each row CONTAINS the pencil button and nested interactive elements
+   * are invalid HTML (browsers split them unpredictably).
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @returns {string} Row HTML string.
+   */
+  renderAccountRow(p) {
+    const cred = this.state.credentials;
+    const health = this.accountHealth(p);
+    const isDead = health === 'needs-re-login';
+    const isWarn = health === 'needs-attention';
+    const isActive = p.profileId === cred.activeId;
+    const isStaged = p.profileId === cred.stagedId;
+    const name = this._accountDisplayName(p);
+    const badge = this._accountPlanBadge(p);
+
+    // Identity always visible (design 2.2): named rows show the email as
+    // the secondary line; unnamed rows already show the email as primary,
+    // so their secondary is the uuid8 marker.
+    const email = p.email || '';
+    let secondary = '';
+    if (email && name !== email) secondary = email;
+    else if (email) secondary = (p.profileId || '').slice(0, 8) + ' unnamed';
+
+    let usageHtml = '';
+    if (isDead) {
+      usageHtml = '<span class="account-row-dead-note">needs re-login (stored token is dead)</span>';
+    } else if (p.usage && (p.usage.five_hour || p.usage.seven_day)) {
+      const stale = this._isUsageStale(p) ? ' is-stale' : '';
+      usageHtml = `<span class="account-usage${stale}">`
+        + this._accountUsageRowHtml('5h', p.usage.five_hour, false)
+        + this._accountUsageRowHtml('week', p.usage.seven_day, true)
+        + '</span>';
+    } else {
+      usageHtml = '<span class="account-usage-unavailable">usage unavailable</span>';
+    }
+
+    const classes = ['account-row'];
+    if (isActive) classes.push('is-active');
+    if (isStaged && !isActive) classes.push('is-staged');
+    if (isDead) classes.push('is-dead');
+    if (isWarn) classes.push('is-warn');
+
+    const avatarChar = isDead ? '!' : (name.charAt(0).toUpperCase() || '?');
+    const deadTitle = isDead
+      ? ' title="Run /login as this account in a terminal; it is recaptured automatically"'
+      : '';
+
+    const sideBits = [];
+    if (isActive) sideBits.push('<span class="account-active-pill">ACTIVE</span>');
+    else if (!isDead) sideBits.push('<span class="account-row-radio" aria-hidden="true"></span>');
+    sideBits.push(`<button type="button" class="account-row-edit" title="Rename" aria-label="Rename ${this.escapeHtml(name)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg></button>`);
+
+    return `<div class="${classes.join(' ')}" role="option" data-profile-id="${this.escapeHtml(p.profileId)}" data-health="${health}" tabindex="${isDead ? '-1' : '0'}" aria-selected="${isStaged ? 'true' : 'false'}"${isDead ? ' aria-disabled="true"' : ''}${deadTitle}>
+      <span class="account-row-avatar" aria-hidden="true">${this.escapeHtml(avatarChar)}</span>
+      <span class="account-row-body">
+        <span class="account-row-primary">
+          <span class="account-row-name">${this.escapeHtml(name)}</span>
+          ${badge ? `<span class="account-plan-badge">${this.escapeHtml(badge)}</span>` : ''}
+        </span>
+        ${secondary ? `<span class="account-row-secondary">${this.escapeHtml(secondary)}</span>` : ''}
+        ${usageHtml}
+      </span>
+      <span class="account-row-side">${sideBits.join('')}</span>
+    </div>`;
+  }
+
+  /**
+   * Build one usage mini-bar row (5h or week): 4px track, colored fill,
+   * percent, and the reset text. Reset spans carry data-reset-at (and
+   * data-absolute for the weekly line) so the 60s tick can update the
+   * countdown text in place without a focus-stealing re-render.
+   * @param {string} keyLabel - Short window label shown left ('5h' or 'week').
+   * @param {object|null} u - { utilization, resets_at } window object, or null.
+   * @param {boolean} absolute - Render the reset as an absolute day/time.
+   * @returns {string} Row HTML, or '' when the window object is missing.
+   */
+  _accountUsageRowHtml(keyLabel, u, absolute) {
+    if (!u) return '';
+    const pct = Math.max(0, Math.min(100, Math.round(Number(u.utilization) || 0)));
+    // Fill color thresholds per design 6.3: green below 60, yellow 60 to 85,
+    // red above 85.
+    const fillClass = pct > 85 ? 'u-high' : (pct >= 60 ? 'u-mid' : 'u-low');
+    const resetText = u.resets_at ? this._formatResetText(u.resets_at, absolute) : '';
+    const resetAttrs = u.resets_at
+      ? ` data-reset-at="${this.escapeHtml(u.resets_at)}"${absolute ? ' data-absolute="1"' : ''}`
+      : '';
+    return `<span class="account-usage-row">
+      <span class="account-usage-key">${this.escapeHtml(keyLabel)}</span>
+      <span class="account-usage-bar"><span class="account-usage-fill ${fillClass}" style="width:${pct}%"></span></span>
+      <span class="account-usage-pct">${pct}%</span>
+      <span class="account-usage-reset"${resetAttrs}>${this.escapeHtml(resetText)}</span>
+    </span>`;
+  }
+
+  /**
+   * Map a profile row to a health enum: 'healthy', 'needs-attention', or
+   * 'needs-re-login'. ALL rendering keys off this single helper so a richer
+   * server-side field later is a one-line change here: a recognized string
+   * p.health is preferred when present; otherwise tokenDead:true maps to
+   * 'needs-re-login' and everything else to 'healthy'.
+   * @param {object} p - Safe profile row.
+   * @returns {'healthy'|'needs-attention'|'needs-re-login'} Health enum value.
+   */
+  accountHealth(p) {
+    if (p && typeof p.health === 'string') {
+      if (p.health === 'needs-re-login' || p.health === 'needs-attention' || p.health === 'healthy') {
+        return p.health;
+      }
+    }
+    return (p && p.tokenDead) ? 'needs-re-login' : 'healthy';
+  }
+
+  /**
+   * Client-side mirror of the server's displayNameFor fallback chain
+   * (design 2.2): displayName (already server-computed), else label, else
+   * email, else uuid8 + ' unnamed'. Guards missing fields so a row is
+   * never blank.
+   * @param {object} p - Safe profile row.
+   * @returns {string} Non-empty display name.
+   */
+  _accountDisplayName(p) {
+    if (!p) return 'Unknown';
+    if (p.displayName && String(p.displayName).trim()) return String(p.displayName).trim();
+    if (p.label && String(p.label).trim()) return String(p.label).trim();
+    if (p.email) return p.email;
+    return (p.profileId || '').slice(0, 8) + ' unnamed';
+  }
+
+  /**
+   * Plan badge text per design 6.2: subscriptionType 'max' with a rate
+   * limit tier containing '20x' renders 'max 20x'; team organizations
+   * render 'team'; otherwise the raw subscriptionType (may be '').
+   * @param {object} p - Safe profile row.
+   * @returns {string} Badge text, '' when nothing applies.
+   */
+  _accountPlanBadge(p) {
+    const sub = String(p.subscriptionType || '').toLowerCase();
+    const tier = String(p.rateLimitTier || '').toLowerCase();
+    const org = String(p.organizationType || '').toLowerCase();
+    if (sub === 'max' && tier.includes('20x')) return 'max 20x';
+    if (org.includes('team')) return 'team';
+    return sub;
+  }
+
+  /**
+   * Whether a profile's cached usage is stale (older than the server's
+   * 10-minute usage cache TTL) or missing entirely. Dead rows are never
+   * "stale" because they cannot be refreshed without a re-login.
+   * @param {object} p - Safe profile row.
+   * @returns {boolean} True when the panel-open auto-refresh should include this row.
+   */
+  _isUsageStale(p) {
+    if (!p || this.accountHealth(p) === 'needs-re-login') return false;
+    const fetchedAt = p.usage && p.usage.fetchedAt;
+    if (!fetchedAt) return true;
+    const age = Date.now() - new Date(fetchedAt).getTime();
+    return !(age < CWMApp.CRED_USAGE_STALE_MS);
+  }
+
+  /**
+   * Stage an account row for the Save button. Staging the active row
+   * clears the selection (it means "keep current"); needs-re-login rows
+   * are not selectable at all.
+   * @param {string} profileId - accountUuid of the clicked row.
+   * @returns {void}
+   */
+  stageAccount(profileId) {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const p = cred.list.find(x => x.profileId === profileId);
+    if (!p) return;
+    if (this.accountHealth(p) === 'needs-re-login') return;
+    cred.stagedId = (profileId === cred.activeId) ? null : profileId;
+    this.renderAccountSwitcher();
+    // The re-render rebuilt the rows; put keyboard focus back on the row
+    // the user acted on so arrow-key navigation continues where it was.
+    try {
+      const escaped = (window.CSS && CSS.escape) ? CSS.escape(profileId) : profileId;
+      const rowEl = this.els.accountPanelList.querySelector(`.account-row[data-profile-id="${escaped}"]`);
+      if (rowEl) rowEl.focus({ preventScroll: true });
+    } catch (_) {
+      // Focus restoration is cosmetic; never fatal.
+    }
+  }
+
+  /**
+   * Rename a saved credential via the existing prompt modal. Empty submit
+   * clears the label (display falls back to email / uuid8 per design 2.2).
+   * The SSE credentials:changed broadcast is the primary re-render path;
+   * the route's list response is applied too so a dropped SSE connection
+   * cannot leave a stale label on screen.
+   * @param {object} p - Safe profile row being renamed.
+   * @returns {Promise<void>}
+   */
+  async renameAccount(p) {
+    if (!p || !p.profileId) return;
+    const result = await this.showPromptModal({
+      title: 'Rename account',
+      fields: [{
+        key: 'label',
+        label: 'Label',
+        value: p.label || '',
+        placeholder: p.email || 'Label',
+        maxlength: 60,
+      }],
+      confirmText: 'Save',
+    });
+    if (!result) return; // cancelled
+    const label = (result.label || '').trim().slice(0, 60);
+    if (label === (p.label || '')) return; // unchanged: skip the round-trip
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    try {
+      const resp = await this._credApi('PUT', `/api/credentials/${encodeURIComponent(p.profileId)}/label`, { label });
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Rename failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+      this.showToast(label ? `Renamed to ${label}` : 'Label cleared', 'success');
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Rename failed: could not reach the server', 'error');
+    }
+  }
+
+  /**
+   * Empty-state CTA: snapshot the machine's currently active Claude login
+   * via POST /api/credentials/capture, with an optional label prompt
+   * (defaults to the active account's email when known).
+   * @returns {Promise<void>}
+   */
+  async captureCurrentAccount() {
+    const cred = this.state.credentials;
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const result = await this.showPromptModal({
+      title: 'Capture current account',
+      fields: [{
+        key: 'label',
+        label: 'Label (optional)',
+        value: (active && active.email) || '',
+        placeholder: 'e.g. Personal',
+        maxlength: 60,
+      }],
+      confirmText: 'Capture',
+    });
+    if (!result) return; // cancelled
+    const label = (result.label || '').trim().slice(0, 60);
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    try {
+      const resp = await this._credApi('POST', '/api/credentials/capture', label ? { label } : {});
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Capture failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+      this.showToast('Current account captured', 'success');
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Capture failed: could not reach the server', 'error');
+    }
+  }
+
+  /**
+   * Commit the staged account: confirm, POST /api/credentials/apply (with
+   * the Mac mirror flag when the checkbox is visible and checked), then
+   * offer to restart running sessions so they pick up the new login.
+   * While the request is in flight the panel is inert and Save reads
+   * "Applying" (no spinner, per design system rules). Failure keeps the
+   * panel open with the staged selection intact.
+   * @returns {Promise<void>}
+   */
+  async applyStagedAccount() {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const target = cred.list.find(p => p.profileId === cred.stagedId);
+    if (!target || cred.stagedId === cred.activeId) return;
+
+    const name = this._accountDisplayName(target);
+    // Restart semantics note from the design doc (section 4.3), surfaced in
+    // the confirm so the user knows running sessions keep the old login.
+    const restartNote = 'New sessions use this account immediately. Running Claude sessions keep the previous account until restarted.';
+    const confirmed = await this.showConfirmModal({
+      title: 'Switch Claude account?',
+      message: `Switch to <strong>${this.escapeHtml(name)}</strong> (${this.escapeHtml(target.email || 'no email on record')})?<br><br>${restartNote}`,
+      confirmText: 'Switch',
+    });
+    if (!confirmed) return;
+
+    // Mirror choice: the checkbox is only shown when the Mac bridge is
+    // configured AND enabled; otherwise mirrorToMac is always false.
+    const macAvailable = !!(cred.mac && cred.mac.configured && cred.mac.enabled);
+    const mirrorToMac = macAvailable && !!(this.els.accountMacCheckbox && this.els.accountMacCheckbox.checked);
+
+    cred.applying = true;
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    this.renderAccountSwitcher();
+    try {
+      const resp = await this._credApi('POST', '/api/credentials/apply', {
+        profileId: target.profileId,
+        mirrorToMac,
+      });
+      if (!resp.ok) {
+        // structuredError shape { error, code, message, retryable }: the
+        // human message is the toast. Panel stays open, staging preserved.
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Switch failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      const result = resp.data || {};
+      cred.activeId = result.activeProfileId || target.profileId;
+      cred.stagedId = null;
+      cred.applying = false;
+      this._closeAccountPanel();
+      this.renderAccountSwitcher();
+      this.showToast(
+        result.alreadyActive ? `${name} was already the active account` : `Switched Claude account to ${name}`,
+        'success'
+      );
+      // Mac mirror problems ride in the response as a warning; the PC apply
+      // itself succeeded, so this is a separate warning-level toast.
+      if (result.mac && result.mac.attempted && !result.mac.mirrored) {
+        this.showToast(`Mac mirror failed: ${result.mac.message || result.mac.error || 'unknown error'}`, 'warning');
+      }
+      // Background roster refresh (isActive flags, usage, mac state).
+      this.loadCredentials();
+      // Offer the restart; never auto-restart (design decision 10.9). The
+      // skipConfirm flag avoids a double prompt: this modal IS the confirm.
+      if (!result.alreadyActive) {
+        const restart = await this.showConfirmModal({
+          title: 'Restart sessions?',
+          message: 'Restart running sessions now so they pick up the new login?',
+          confirmText: 'Restart sessions',
+        });
+        if (restart) await this.restartAllSessions({ skipConfirm: true });
+      }
+    } catch (err) {
+      if (!(err && err.message === 'Unauthorized')) {
+        this.showToast('Switch failed: could not reach the server', 'error');
+      }
+    } finally {
+      cred.applying = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Open the account panel: render, arm the mobile bottom-sheet chrome
+   * (backdrop, scroll lock, header stacking lift), and auto-refresh stale
+   * usage once per open. No-op when already open.
+   * @returns {void}
+   */
+  _openAccountPanel() {
+    const els = this.els;
+    if (!els.accountPanel || !els.accountPanel.hidden) return;
+    els.accountPanel.hidden = false;
+    els.accountChip.setAttribute('aria-expanded', 'true');
+    // sheet-open reuses the existing mobile scroll lock; account-sheet-open
+    // lifts the header's stacking context above the mobile tab bar and the
+    // backdrop (see styles-mobile.css). Both classes are inert on desktop.
+    document.body.classList.add('sheet-open', 'account-sheet-open');
+    this._ensureAccountBackdrop();
+    this.renderAccountSwitcher();
+    // Stale-usage auto refresh, once per open (design 6.4). The empty-body
+    // refresh honors the server-side cache TTL, so only genuinely stale
+    // snapshots actually hit the network.
+    const cred = this.state.credentials;
+    if (!cred.loading && cred.list.some(p => this._isUsageStale(p))) {
+      this.loadCredentials({ refresh: true });
+    }
+  }
+
+  /**
+   * Close the account panel and tear down the mobile sheet chrome. Safe to
+   * call when already closed (also used from logout()).
+   * @returns {void}
+   */
+  _closeAccountPanel() {
+    const els = this.els;
+    if (els.accountPanel) els.accountPanel.hidden = true;
+    if (els.accountChip) els.accountChip.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('sheet-open', 'account-sheet-open');
+    this._removeAccountBackdrop();
+  }
+
+  /**
+   * Create the mobile backdrop behind the bottom sheet (dim, tap to close).
+   * Created lazily on open and removed on close; styles-mobile.css shows it
+   * only at phone widths, so on desktop it exists but renders nothing.
+   * @returns {void}
+   */
+  _ensureAccountBackdrop() {
+    if (this._accountBackdrop) return;
+    const bd = document.createElement('div');
+    bd.className = 'account-panel-backdrop';
+    bd.addEventListener('click', () => this._closeAccountPanel());
+    document.body.appendChild(bd);
+    this._accountBackdrop = bd;
+  }
+
+  /**
+   * Remove the mobile backdrop if present.
+   * @returns {void}
+   */
+  _removeAccountBackdrop() {
+    if (this._accountBackdrop) {
+      this._accountBackdrop.remove();
+      this._accountBackdrop = null;
+    }
+  }
+
+  /**
+   * Move keyboard focus between selectable account rows (roving focus).
+   * Wraps at both ends; enters from the chip land on the first/last row.
+   * @param {number} dir - +1 for ArrowDown, -1 for ArrowUp.
+   * @returns {void}
+   */
+  _moveAccountFocus(dir) {
+    if (!this.els.accountPanelList) return;
+    const rows = Array.from(this.els.accountPanelList.querySelectorAll('.account-row[tabindex="0"]'));
+    if (rows.length === 0) return;
+    const idx = rows.indexOf(document.activeElement);
+    let next;
+    if (idx === -1) next = dir > 0 ? rows[0] : rows[rows.length - 1];
+    else next = rows[(idx + dir + rows.length) % rows.length];
+    if (next) next.focus();
+  }
+
+  /**
+   * Start the single 60-second countdown tick. Idempotent; started when the
+   * switcher first becomes visible and cleared on logout (design 6.2).
+   * @returns {void}
+   */
+  _startAccountTick() {
+    if (this._accountTickTimer) return;
+    this._accountTickTimer = setInterval(() => this._tickAccountCountdowns(), CWMApp.CRED_TICK_MS);
+  }
+
+  /**
+   * Stop the countdown tick (logout / teardown).
+   * @returns {void}
+   */
+  _stopAccountTick() {
+    if (this._accountTickTimer) {
+      clearInterval(this._accountTickTimer);
+      this._accountTickTimer = null;
+    }
+  }
+
+  /**
+   * Re-render every visible reset countdown in place. Updates textContent
+   * on the data-reset-at spans (chip meta + open panel rows) instead of a
+   * full re-render, so keyboard focus and scroll position are preserved.
+   * @returns {void}
+   */
+  _tickAccountCountdowns() {
+    const sw = this.els.accountSwitcher;
+    if (!sw || sw.hidden) return;
+    sw.querySelectorAll('[data-reset-at]').forEach(el => {
+      el.textContent = this._formatResetText(el.dataset.resetAt, el.dataset.absolute === '1');
+    });
+  }
+
+  /**
+   * Format a millisecond duration into a human-readable reset countdown.
+   * Matches Anthropic dashboard format: "Resets in 2 hr 32 min", "Resets Thu 5:00 PM"
+   * @param {string} resetAt - ISO timestamp of reset
+   * @param {boolean} [absolute] - Show absolute day/time instead of countdown
+   * @returns {string} Formatted reset text
+   */
+  _formatResetText(resetAt, absolute) {
+    if (!resetAt) return '';
+    const diffMs = new Date(resetAt).getTime() - Date.now();
+    if (diffMs <= 0) return 'Resetting...';
+
+    if (absolute) {
+      const d = new Date(resetAt);
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const hr = d.getHours();
+      const ampm = hr >= 12 ? 'PM' : 'AM';
+      const h12 = hr % 12 || 12;
+      const min = d.getMinutes().toString().padStart(2, '0');
+      return `Resets ${days[d.getDay()]} ${h12}:${min} ${ampm}`;
+    }
+
+    const hrs = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    if (hrs > 0) return `Resets in ${hrs} hr ${mins} min`;
+    return `Resets in ${mins} min`;
   }
 
 
@@ -8867,10 +9717,13 @@ class CWMApp {
         }
         const tag = f.type === 'textarea' ? 'textarea' : 'input';
         const typeAttr = f.type === 'textarea' ? '' : `type="${f.type || 'text'}"`;
+        // Additive: fields may declare a numeric maxlength (e.g. the credential
+        // label rename caps at 60 chars to match the server-side VALIDATION).
+        const maxlenAttr = f.maxlength ? `maxlength="${parseInt(f.maxlength, 10)}"` : '';
         bodyHtml += `
           <div class="input-group">
             <label class="input-label" for="modal-field-${f.key}">${f.label}</label>
-            <${tag} id="modal-field-${f.key}" class="input" ${typeAttr}
+            <${tag} id="modal-field-${f.key}" class="input" ${typeAttr} ${maxlenAttr}
               placeholder="${this.escapeHtml(f.placeholder || '')}"
               value="${tag === 'input' ? this.escapeHtml(f.value || '') : ''}"
               ${f.required ? 'required' : ''}
@@ -9478,6 +10331,56 @@ class CWMApp {
           const stopBtn = document.getElementById('named-tunnel-stop-btn');
           if (startBtn) startBtn.disabled = data.running;
           if (stopBtn) stopBtn.disabled = !data.running;
+        }
+        break;
+      }
+      case 'credentials:changed': {
+        // Credential switcher (design doc section 5): the machine-wide Claude
+        // login changed, or a snapshot was captured/renamed/deleted. These
+        // cases MUST exist here; without them the default branch below would
+        // turn every credentials broadcast into a full loadAll() reload storm.
+        // Payload rides at data.data, same convention as docs:updated.
+        const payload = (data && data.data) || {};
+        const cred = this.state.credentials;
+        const activeChanged = payload.activeProfileId !== undefined &&
+          payload.activeProfileId !== cred.activeId;
+        // A different account went live: any pending selection is stale.
+        if (activeChanged) cred.stagedId = null;
+        // Toast only when the change came from ANOTHER client. Our own
+        // mutations arm _credSelfActionUntil right before the request, so
+        // broadcasts landing inside that window are self-echoes.
+        const fromSelf = this._credSelfActionUntil && Date.now() < this._credSelfActionUntil;
+        if (!fromSelf) {
+          if (payload.renamed) {
+            this.showToast('A saved Claude account was renamed', 'info');
+          } else if (payload.captured) {
+            this.showToast('Current Claude account was captured', 'info');
+          } else if (payload.deleted) {
+            this.showToast('A saved Claude account was removed', 'info');
+          } else if (activeChanged) {
+            const who = payload.email ? ` to ${payload.email}` : '';
+            this.showToast(`Claude account switched${who} from another client`, 'info');
+          }
+        }
+        // Re-fetch the safe roster so chip, rows and mac config all refresh.
+        // loadCredentials() re-renders and never throws (graceful degrade).
+        this.loadCredentials();
+        break;
+      }
+      case 'credentials:usage': {
+        // Usage refresh completed (always client-triggered on the server
+        // side). Merge the returned safe rows into local state by profileId
+        // and re-render so mini-bars and reset countdowns update in place.
+        const payload = (data && data.data) || {};
+        const cred = this.state.credentials;
+        if (Array.isArray(payload.profiles) && payload.profiles.length > 0) {
+          const byId = new Map(payload.profiles.map(p => [p.profileId, p]));
+          cred.list = cred.list.map(p => byId.get(p.profileId) || p);
+          // Any brand-new profiles (captured elsewhere) get appended.
+          payload.profiles.forEach(p => {
+            if (!cred.list.some(x => x.profileId === p.profileId)) cred.list.push(p);
+          });
+          this.renderAccountSwitcher();
         }
         break;
       }

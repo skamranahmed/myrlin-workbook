@@ -106,6 +106,34 @@
           <img src="logo.png" alt="Myrlin" class="header-logo-img">
           <span class="header-title">Myrlin's Workbook</span>
         </div>
+        <!-- Claude account switcher (credential switcher design doc, section 6.1).
+             Starts hidden; unhidden by app.js only after GET /api/credentials
+             succeeds, so old servers without the routes degrade gracefully.
+             Rows are rendered by app.js; this shell is static. -->
+        <div class="account-switcher" id="account-switcher" hidden>
+          <button class="account-chip" id="account-chip" aria-haspopup="listbox" aria-expanded="false" title="Claude account">
+            <span class="account-chip-avatar" id="account-chip-avatar">G</span>
+            <span class="account-chip-label" id="account-chip-label">Gayane</span>
+            <span class="account-chip-meta" id="account-chip-meta">resets 2h 14m</span>
+            <svg class="account-chip-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M2 4l3 3 3-3" stroke="currentColor" fill="none" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+          <div class="account-panel" id="account-panel" role="listbox" hidden>
+            <div class="account-panel-header">
+              <span>Claude account</span>
+              <button class="btn btn-ghost btn-icon btn-sm" id="account-refresh-btn" title="Refresh usage">&#8635;</button>
+            </div>
+            <div class="account-panel-list" id="account-panel-list"></div>
+            <div class="account-panel-footer">
+              <label class="account-mac-toggle" id="account-mac-toggle" hidden>
+                <input type="checkbox" id="account-mac-checkbox"> Also apply on Mac Mini
+              </label>
+              <div class="account-panel-actions">
+                <button class="btn btn-ghost btn-sm" id="account-cancel-btn">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="account-save-btn" disabled>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="header-center">
