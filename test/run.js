@@ -901,6 +901,7 @@ const standaloneTests = [
   'keybindings-dispatch.test.js',    // Plan 19-02: Shift+Enter dispatch + backend-frontend parity (PTY-05)
   'idle-signal-parity.test.js',      // Plan 19-02: backend.isIdleSignal vs frontend regex parity (PTY-04 drift gate)
   'bracketed-paste-isolation.test.js', // Plan 19-02: per-pane paste listener scope (PTY-06)
+  'paste-secure-context-fallback.test.js', // issue #64: secure-context paste feature-detect + native fallback (regression gate for PR #45)
   'codex-settings-route.test.js',    // Plan 21-01: PUT /api/sessions/:id/provider-settings (Codex menu persistence)
   'pane-context-menu.test.js',       // Plan 21-01: Codex pane right-click menu structure gate
   'project-session-resume-provider.test.js', // alpha.5 bug fix: discovered-session right-click routes by provider
@@ -915,6 +916,7 @@ const standaloneTests = [
   'idle-notification-gating.test.js', // notification-storm fix: edge-triggered re-arm, replay suppression, refire cooldown, focus ack
   'mobile-ux-fixes.test.js',         // fix/mobile-ux: mobile tab scroll, More sheet, settings sheet, long-press + tab touch paths
   'phantom-tokens.test.js',          // ui-token-repair: every consumed var(--x) must be defined (phantom-token gate)
+  'smooth-scroll.test.js',           // issue #41: xterm smoothScrollDuration capability gate, setting/reduced-motion resolution, mobile engine guard
 ];
 
 let standaloneFailed = 0;
