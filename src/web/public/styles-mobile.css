@@ -124,7 +124,13 @@
     padding-top: 0;
   }
 
-  .modal {
+  /* .modal-panel (New Task, Spinoff) and .modal-dialog (Create PR) share the
+     .modal card recipe in styles.css, so they take the same bottom-sheet
+     treatment here. Without this they would sit at the bottom edge as
+     square-cornered desktop cards. */
+  .modal,
+  .modal-panel,
+  .modal-dialog {
     border-radius: 18px 18px 0 0;
     max-width: 100%;
     margin: 0;

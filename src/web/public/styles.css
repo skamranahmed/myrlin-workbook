@@ -58,12 +58,40 @@
   --text-muted: var(--overlay1);
   --accent: var(--mauve);
 
+  /* ─── Compatibility aliases ──────────────────────────────────
+     These tokens were consumed across the stylesheet (context menus,
+     the settings nav rail, Codex status chips, the workspace group
+     stripe, mobile overlays) but were never defined, so every rule
+     that referenced them silently did nothing (no context-menu hover,
+     no nav-rail hover/active surface, invisible menu borders). Each is
+     defined once here as an alias of the closest existing Catppuccin
+     token that visually-matched working components already use:
+       - --bg-hover   -> --surface0 (same hover bg as .settings-row:hover,
+                         .btn-ghost:hover)
+       - --border     -> --border-default (= --surface1; matches the #444/#555
+                         hex fallbacks these sites carried)
+       - --surface-1  -> --surface0 (first elevation; chip/hover backgrounds)
+       - --surface-2  -> --surface1 (second elevation; pill bg + dividers)
+       - --text-base  -> --text (primary text on hover/active states)
+     Because each alias references a palette/semantic var that every theme
+     block re-declares, the alias automatically follows theme switches. */
+  --bg-hover: var(--surface0);
+  --border: var(--border-default);
+  --surface-1: var(--surface0);
+  --surface-2: var(--surface1);
+  --text-base: var(--text);
+
   /* UI Scale (overridden by localStorage-based inline style) */
   --ui-scale: 1;
 
   /* Dimensions */
   --sidebar-width: 280px;
   --header-height: 80px;
+  /* --radius-xs completes the radius scale below --radius-sm. It was consumed
+     at a couple of chip/tab sites via the ad-hoc fallback var(--radius-xs, 3px)
+     but never defined, so it silently fell back. Defined here as 4px so the
+     scale (4/6/10/14/18) is contiguous and themeable. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -201,7 +229,10 @@ h1, h2, h3, h4 {
 }
 
 .btn-primary:hover {
-  background: #d4b4fa;
+  /* Lighten the theme's mauve instead of a hardcoded Mocha hex (#d4b4fa) so
+     the primary-button hover follows every Catppuccin flavor. The focus-ring
+     rgba glow below matches the existing .btn-danger:hover convention. */
+  background: color-mix(in srgb, var(--mauve) 85%, white);
   box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2);
 }
 
@@ -1964,7 +1995,12 @@ textarea.input {
    MODALS
    ═══════════════════════════════════════════════════════════════ */
 
-.modal-overlay {
+/* .qs-overlay (global search backdrop, #search-overlay) shares the modal
+   backdrop recipe so the search palette dims/blurs the page exactly like
+   every other dialog. It carried zero rules before, rendering as a bare
+   input on an unblurred page. */
+.modal-overlay,
+.qs-overlay {
   position: fixed;
   inset: 0;
   z-index: 10002; /* Must be above .context-menu (z-index: 10000) so modals are never obscured */
@@ -1978,7 +2014,8 @@ textarea.input {
   animation: overlay-in 0.15s ease;
 }
 
-.modal-overlay[hidden] {
+.modal-overlay[hidden],
+.qs-overlay[hidden] {
   display: none;
 }
 
@@ -2296,7 +2333,14 @@ textarea.input {
   opacity: 0.45;
 }
 
-.modal {
+/* .modal-panel (New Task, Spinoff) and .modal-dialog (Create PR) are dialog
+   cards that reuse .modal-header/.modal-body/.modal-footer but had no card
+   surface of their own, so they rendered as invisible boxes on the blurred
+   backdrop. They share the .modal recipe exactly; their inline max-width /
+   max-height / display overrides still win over the defaults below. */
+.modal,
+.modal-panel,
+.modal-dialog {
   width: 100%;
   max-width: 440px;
   background: var(--bg-primary);
@@ -2399,6 +2443,37 @@ textarea.input {
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-muted);
+}
+
+/* Global search palette card + input (#search-panel / #search-input). These
+   reuse .qs-results/.qs-result below but had no container or input rules of
+   their own. The card mirrors .quick-switcher; the input mirrors
+   .qs-search-input so the search field matches the design system. */
+.qs-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  animation: modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.qs-input {
+  width: 100%;
+  padding: 14px 18px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  outline: none;
+}
+
+.qs-input::placeholder {
+  color: var(--overlay0);
 }
 
 .qs-results {
@@ -6266,7 +6341,7 @@ html.activity-indicators-disabled .terminal-pane-activity {
   width: 28px;
   height: 24px;
   border: none;
-  border-radius: var(--radius-xs, 3px);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--overlay0);
   cursor: pointer;
@@ -6438,7 +6513,7 @@ html.activity-indicators-disabled .terminal-pane-activity {
   margin-top: 6px;
   padding: 4px 6px;
   background: var(--mantle);
-  border-radius: var(--radius-xs, 3px);
+  border-radius: var(--radius-xs);
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 10px;
   line-height: 1.3;
@@ -9693,7 +9768,7 @@ html {
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast, 150ms), background var(--transition-fast, 150ms);
   position: relative;
@@ -9760,7 +9835,7 @@ html {
   gap: 8px;
   padding: 6px 10px;
   background: var(--surface0);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   font-size: 12px;
 }
 
@@ -9789,7 +9864,7 @@ html {
   color: var(--subtext0);
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   font-size: 11px;
   transition: color var(--transition-fast, 150ms), background var(--transition-fast, 150ms);
 }

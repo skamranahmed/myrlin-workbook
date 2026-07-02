@@ -22,7 +22,15 @@ window.addEventListener('error', function _cwmFallbackHandler(e) {
   fetch('/api/health').then(r => r.json()).then(data => {
     if (data.status !== 'ok') return;
 
-    // Server is fine - show fallback recovery UI
+    // Server is fine - show fallback recovery UI.
+    // NOTE: The alert()/confirm() calls in the inline onclick handlers below are
+    // intentionally left as native browser dialogs. This handler only runs when
+    // CWMApp failed to construct (see the `if (window.cwm) return` guard above),
+    // and it replaces document.body wholesale, destroying the modal DOM
+    // (#modal-overlay et al.) that showConfirmModal/showPromptModal depend on.
+    // There is no app instance (`this`/window.cwm is null) and no modal markup
+    // to drive here, so the design-system modal API is unavailable by
+    // construction. Native dialogs are the correct fallback on this path.
     document.body.innerHTML = `
       <div style="
         display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -4070,12 +4078,12 @@ class CWMApp {
       { key: 'autoTrustDialogs', label: 'Auto-accept Trust Dialogs', description: 'Automatically accept safe trust/permission prompts in terminals. Dangerous prompts (delete, credentials) are never auto-accepted.', category: 'Automation' },
       { key: 'enableWorktreeTasks', label: 'Worktree Tasks', description: 'Enable automated worktree task creation and review workflow', category: 'Advanced' },
       { key: 'enableTd', label: 'td Task Management', description: 'Show td issue tracking integration (github.com/marcus/td). When disabled, hides all td UI including the docs panel section and sidebar toggle.', category: 'Advanced' },
-      { key: 'tdBinary', label: 'td Binary Path', description: 'Optional. td is an alternative task management system (github.com/marcus/td) — Myrlin works fine without it. If installed, set the absolute path to the binary here, or leave blank to use the TD_BINARY environment variable or "td" from PATH. Example: /home/user/go/bin/td', category: 'Advanced', type: 'server-text', placeholder: 'e.g. /home/user/go/bin/td', apiEndpoint: '/api/td/binary', apiField: 'binary' },
+      { key: 'tdBinary', label: 'td Binary Path', description: 'Optional. td is an alternative task management system (github.com/marcus/td); Myrlin works fine without it. If installed, set the absolute path to the binary here, or leave blank to use the TD_BINARY environment variable or "td" from PATH. Example: /home/user/go/bin/td', category: 'Advanced', type: 'server-text', placeholder: 'e.g. /home/user/go/bin/td', apiEndpoint: '/api/td/binary', apiField: 'binary' },
       { key: 'maxConcurrentTasks', label: 'Max Concurrent Tasks', description: 'Maximum number of worktree tasks that can run simultaneously (1-8)', category: 'Advanced', type: 'number', min: 1, max: 8 },
       { key: 'defaultModelPlanning', label: 'Default Model (Planning)', description: 'Auto-assign when tasks enter Planning. Haiku is fast/cheap for exploration. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'haiku', label: 'Haiku (fast, cheap)' }, { value: 'sonnet', label: 'Sonnet (balanced)' }, { value: 'opus', label: 'Opus (thorough)' }, { value: 'sonnet[1m]', label: 'Sonnet 1M' }, { value: 'opusplan', label: 'OpusPlan' }] },
       { key: 'defaultModelRunning', label: 'Default Model (Running)', description: 'Auto-assign when tasks enter Running. Sonnet balances speed and quality for implementation. Only applies to tasks without a model set.', category: 'Advanced', type: 'select', options: [{ value: '', label: 'None' }, { value: 'haiku', label: 'Haiku (fast, cheap)' }, { value: 'sonnet', label: 'Sonnet (balanced)' }, { value: 'opus', label: 'Opus (thorough)' }, { value: 'sonnet[1m]', label: 'Sonnet 1M' }, { value: 'opusplan', label: 'OpusPlan' }] },
       { key: 'anthropicApiKey', label: 'Anthropic API Key', description: 'Required for AI-powered session finder. Uses Claude Haiku for fast, low-cost semantic search across your projects and sessions. Get a key at console.anthropic.com.', category: 'AI', type: 'server-text', placeholder: 'sk-ant-...', apiEndpoint: '/api/keys/anthropic', apiField: 'key' },
-      { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ… string).', category: 'Remote Access', type: 'tunnel' },
+      { key: 'cfNamedTunnel', label: 'Cloudflare Named Tunnel', description: 'Expose Myrlin on the internet via your own domain. Go to one.dash.cloudflare.com → Networks → Tunnels → Create a tunnel, then copy the token from the install command (the long eyJ... string).', category: 'Remote Access', type: 'tunnel' },
     ];
   }
 
@@ -4745,19 +4753,19 @@ class CWMApp {
               <div id="named-tunnel-status" style="font-size:11px;font-family:monospace;opacity:0.65;">checking...</div>
               <ol style="font-size:11px;opacity:0.55;margin:2px 0 4px 16px;padding:0;line-height:1.7;">
                 <li>Open <a href="https://one.dash.cloudflare.com/" target="_blank" rel="noopener" style="color:inherit;">one.dash.cloudflare.com</a> → Networks → Tunnels</li>
-                <li>Create a tunnel → Cloudflared → copy the <code style="font-size:10px;">eyJ…</code> token → paste below → Save</li>
+                <li>Create a tunnel → Cloudflared → copy the <code style="font-size:10px;">eyJ...</code> token → paste below → Save</li>
                 <li>Add a public hostname: subdomain of your choice, your domain, Type <code style="font-size:10px;">HTTP</code>, URL <code style="font-size:10px;">localhost:3456</code></li>
                 <li>Click Start below (or enable Auto-start)</li>
               </ol>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
                 <input type="password" id="named-tunnel-token-input" autocomplete="off"
-                  placeholder="eyJ… token from Cloudflare dashboard"
-                  style="flex:1;min-width:180px;font-size:12px;padding:4px 8px;background:var(--input-bg,#1e1e2e);border:1px solid var(--border,#444);border-radius:4px;color:inherit;" />
-                <button id="named-tunnel-save-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border,#555);background:var(--btn-bg,#313244);color:inherit;cursor:pointer;">Save</button>
+                  placeholder="eyJ... token from Cloudflare dashboard"
+                  style="flex:1;min-width:180px;font-size:12px;padding:4px 8px;background:var(--surface0);border:1px solid var(--border-subtle);border-radius:4px;color:inherit;" />
+                <button id="named-tunnel-save-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border-subtle);background:var(--surface0);color:inherit;cursor:pointer;">Save</button>
               </div>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                <button id="named-tunnel-start-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:none;background:#89b4fa;color:#1e1e2e;cursor:pointer;font-weight:600;">Start</button>
-                <button id="named-tunnel-stop-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border,#555);background:var(--btn-bg,#313244);color:inherit;cursor:pointer;">Stop</button>
+                <button id="named-tunnel-start-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:none;background:var(--blue);color:var(--base);cursor:pointer;font-weight:600;">Start</button>
+                <button id="named-tunnel-stop-btn" style="font-size:12px;padding:4px 10px;border-radius:4px;border:1px solid var(--border-subtle);background:var(--surface0);color:inherit;cursor:pointer;">Stop</button>
                 <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;user-select:none;">
                   <input type="checkbox" id="named-tunnel-autostart" style="cursor:pointer;" />
                   Auto-start on launch
@@ -5378,7 +5386,7 @@ class CWMApp {
       return;
     }
 
-    this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;">Loading td issues…</div>';
+    this.els.sidebarTasksList.innerHTML = '<div style="padding:16px;color:var(--overlay0);font-size:12px;">Loading td issues...</div>';
 
     try {
       const data = await this.api('GET', `/api/workspaces/${ws.id}/td/issues`);
@@ -6990,11 +6998,19 @@ class CWMApp {
         label: `View Timeline (${task.history.length} events)`,
         icon: '&#128340;',
         action: () => {
+          // Design-system info modal with a monospace body instead of the old
+          // native alert() dump (which ignored theming and scrolled poorly).
           const rows = task.history.map(h => {
             const d = new Date(h.at);
-            return `${d.toLocaleTimeString()} -- ${h.status}`;
-          }).join('\n');
-          alert(`Task Timeline\n\n${rows}`);
+            return `<div style="display:flex;gap:12px;padding:2px 0;">`
+              + `<span style="color:var(--overlay1);flex-shrink:0;">${this.escapeHtml(d.toLocaleTimeString())}</span>`
+              + `<span>${this.escapeHtml(h.status || '')}</span>`
+              + `</div>`;
+          }).join('');
+          this.showInfoModal({
+            title: 'Task Timeline',
+            bodyHtml: `<div style="font-family:var(--font-mono);font-size:12px;max-height:50vh;overflow-y:auto;">${rows}</div>`,
+          });
         }
       });
     }
@@ -8706,19 +8722,12 @@ class CWMApp {
       this.modalResolve = resolve;
       this.els.modalTitle.textContent = title;
 
+      // Swatches preview the theme token (var(--name)) rather than a hardcoded
+      // Mocha hex, so the color picker shows each option's real color in every
+      // Catppuccin flavor. data-color still stores the token name.
       const colorOptions = [
-        { name: 'mauve', hex: '#cba6f7' },
-        { name: 'blue', hex: '#89b4fa' },
-        { name: 'green', hex: '#a6e3a1' },
-        { name: 'red', hex: '#f38ba8' },
-        { name: 'peach', hex: '#fab387' },
-        { name: 'teal', hex: '#94e2d5' },
-        { name: 'pink', hex: '#f5c2e7' },
-        { name: 'yellow', hex: '#f9e2af' },
-        { name: 'lavender', hex: '#b4befe' },
-        { name: 'sapphire', hex: '#74c7ec' },
-        { name: 'sky', hex: '#89dceb' },
-        { name: 'flamingo', hex: '#f2cdcd' },
+        'mauve', 'blue', 'green', 'red', 'peach', 'teal',
+        'pink', 'yellow', 'lavender', 'sapphire', 'sky', 'flamingo',
       ];
 
       let bodyHtml = '';
@@ -8733,11 +8742,11 @@ class CWMApp {
             <div class="input-group">
               <label class="input-label">${f.label}</label>
               <div class="color-picker" id="modal-field-${f.key}">
-                ${colorOptions.map(c => `
-                  <div class="color-swatch${c.name === selectedColor ? ' selected' : ''}"
-                       data-color="${c.name}"
-                       style="background: ${c.hex}"
-                       title="${c.name}">
+                ${colorOptions.map(name => `
+                  <div class="color-swatch${name === selectedColor ? ' selected' : ''}"
+                       data-color="${name}"
+                       style="background: var(--${name})"
+                       title="${name}">
                   </div>
                 `).join('')}
               </div>
@@ -8772,7 +8781,7 @@ class CWMApp {
           if (Object.keys(materialCats).length > 0) {
             gridHtml += `<span class="icon-picker-set-sep" data-set="material">Material</span>`;
             for (const [cat, names] of Object.entries(materialCats)) {
-              gridHtml += `<span class="icon-picker-cat-sep" data-cat="${this.escapeHtml('Material — ' + cat)}">${this.escapeHtml(cat)}</span>`;
+              gridHtml += `<span class="icon-picker-cat-sep" data-cat="${this.escapeHtml('Material - ' + cat)}">${this.escapeHtml(cat)}</span>`;
               for (const name of names) {
                 if (!materialIcons[name]) continue;
                 const storedName = 'mi/' + name;
@@ -8970,6 +8979,50 @@ class CWMApp {
       });
 
       this.els.modalFooter.appendChild(btnContainer);
+      this.els.modalOverlay.hidden = false;
+    });
+  }
+
+  /**
+   * Show a read-only informational modal with a single dismiss button. For
+   * surfacing content the user only needs to read (e.g. a task timeline),
+   * where Confirm/Cancel semantics do not fit. Body is raw HTML so callers can
+   * pass preformatted / monospace markup (caller is responsible for escaping).
+   *
+   * Built on the same fresh-button pattern as showChoiceModal: it hides the
+   * shared confirm/cancel buttons and renders its own dismiss button inside a
+   * .modal-choice-actions container that closeModal() removes and whose hidden
+   * buttons closeModal() restores. That means no click listener leaks onto the
+   * shared confirm button and no dismiss path (Close click, ESC, backdrop, ×)
+   * can leave the next modal missing a button.
+   *
+   * @param {object} opts
+   * @param {string} opts.title - Modal title
+   * @param {string} opts.bodyHtml - Modal body markup (HTML; caller escapes)
+   * @param {string} [opts.closeText='Close'] - Dismiss button label
+   * @returns {Promise<void>} Resolves when the modal is dismissed
+   */
+  showInfoModal({ title, bodyHtml, closeText = 'Close' }) {
+    return new Promise((resolve) => {
+      this._modalOpen = true;
+      this.modalResolve = resolve;
+      this.els.modalTitle.textContent = title;
+      this.els.modalBody.innerHTML = bodyHtml;
+
+      // Hide the default confirm/cancel; render a single fresh dismiss button.
+      this.els.modalConfirmBtn.hidden = true;
+      this.els.modalCancelBtn.hidden = true;
+
+      const btnContainer = document.createElement('div');
+      btnContainer.className = 'modal-choice-actions';
+      btnContainer.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:flex-end;';
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'btn btn-primary';
+      closeBtn.textContent = closeText;
+      closeBtn.addEventListener('click', () => this.closeModal());
+      btnContainer.appendChild(closeBtn);
+      this.els.modalFooter.appendChild(btnContainer);
+
       this.els.modalOverlay.hidden = false;
     });
   }
@@ -9411,11 +9464,17 @@ class CWMApp {
       return;
     }
 
+    // Emit theme tokens (var(--name)) rather than hardcoded Mocha hexes so the
+    // workspace/group color stripes follow every Catppuccin flavor. Each value
+    // feeds an inline CSS custom property (--ws-color / --group-color /
+    // --ws-group-color) that CSS consumes via var(), so a token resolves and
+    // re-resolves on theme switch. Matches the var(--${color}) pattern used by
+    // tag badges elsewhere in this file.
     const colorMap = {
-      mauve: '#cba6f7', blue: '#89b4fa', green: '#a6e3a1', red: '#f38ba8',
-      peach: '#fab387', teal: '#94e2d5', pink: '#f5c2e7', yellow: '#f9e2af',
-      lavender: '#b4befe', sapphire: '#74c7ec', sky: '#89dceb', flamingo: '#f2cdcd',
-      rosewater: '#f5e0dc',
+      mauve: 'var(--mauve)', blue: 'var(--blue)', green: 'var(--green)', red: 'var(--red)',
+      peach: 'var(--peach)', teal: 'var(--teal)', pink: 'var(--pink)', yellow: 'var(--yellow)',
+      lavender: 'var(--lavender)', sapphire: 'var(--sapphire)', sky: 'var(--sky)', flamingo: 'var(--flamingo)',
+      rosewater: 'var(--rosewater)',
     };
 
     // Phase 18-02: render-time provider filter. 'all' lets every session
@@ -11932,7 +11991,7 @@ class CWMApp {
     if (!ws) return;
     const docs = await this.api('GET', `/api/workspaces/${ws.id}/docs`);
     const textarea = document.createElement('textarea');
-    textarea.style.cssText = 'width:100%;height:100%;resize:none;background:var(--base);color:var(--text);border:none;padding:12px;font-family:var(--mono);flex:1;min-height:0;';
+    textarea.style.cssText = 'width:100%;height:100%;resize:none;background:var(--base);color:var(--text);border:none;padding:12px;font-family:var(--font-mono);flex:1;min-height:0;';
     textarea.value = docs.raw || '';
     textarea.addEventListener('blur', async () => {
       await this.api('POST', `/api/workspaces/${ws.id}/docs`, { content: textarea.value });
@@ -12081,7 +12140,7 @@ class CWMApp {
         if (typeof this._renderCodexStatusStrip === 'function') {
           this._renderCodexStatusStrip(slotIdx);
         }
-        this.showToast('Codex settings updated — restart pane to apply', 'info');
+        this.showToast('Codex settings updated, restart pane to apply', 'info');
       } catch (err) {
         this.showToast(err.message || 'Failed to update Codex settings', 'error');
       }
@@ -14760,7 +14819,7 @@ class CWMApp {
       }
       const loading = document.createElement('div');
       loading.className = 'td-issue-modal-loading';
-      loading.textContent = 'Loading issue details…';
+      loading.textContent = 'Loading issue details...';
       this.els.tdIssueModalBody.appendChild(loading);
     }
     this.els.tdIssueModalOverlay.hidden = false;
@@ -15964,7 +16023,7 @@ class CWMApp {
       if (choice === 'kill') {
         this.showToast(`Killed ${liveSessions.length} ${sessionWord} and closed tab`, 'success');
       } else {
-        this.showToast(`Moved ${liveSessions.length} ${sessionWord} to background — drag to reconnect`, 'info');
+        this.showToast(`Moved ${liveSessions.length} ${sessionWord} to background, drag to reconnect`, 'info');
       }
     }
 
@@ -18409,7 +18468,7 @@ class CWMApp {
         const refocusPrompt = 'Read the file .refocus-context.md in this directory. It contains a comprehensive summary of our previous conversation including what was accomplished, key decisions, open issues, and next steps. Use this to fully orient yourself on the project state. After reading, briefly confirm what you understand and ask what I\'d like to work on next.';
         tp.sendCommand(refocusPrompt + '\r');
 
-        this.showToast(`Session refocused (${mode}) — context document injected`, 'success');
+        this.showToast(`Session refocused (${mode}), context document injected`, 'success');
       }, 3000);
 
       // Clean up the refocus file after a delay
