@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0-alpha.11] - 2026-07-02
 
 ### Added
 
@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - **Paste silently did nothing for every non-localhost user (issue #64).** Regression chain: PR #45 (commit cee137a) added an unconditional `e.preventDefault()` to the Ctrl+V/Cmd+V branch of `TerminalPane.attachCustomKeyEventHandler` to stop a double-paste on localhost. That cancels the browser's native paste, leaving `pasteFromClipboard()` (`navigator.clipboard.readText()`) as the only paste path. `navigator.clipboard` only exists in secure contexts (https or localhost), so on insecure origins (http over LAN, the documented remote-access mode) it is undefined; the rejection was caught and logged to console only, and paste did nothing on every browser and device. The native fallback handlers (`beforeinput` insertFromPaste and the `paste` listener, deduped via `_pasteHandled`) still worked but never fired because the keydown `preventDefault` cancelled the native paste that would have triggered them. The custom context-menu Paste and the mobile long-press sheet both funneled into the same dead `pasteFromClipboard()`, and the native context menu is suppressed over terminals, so no paste path worked on http. Fix: the Ctrl+V branch now feature-detects `navigator.clipboard.readText`; in a secure context it keeps `preventDefault` + `pasteFromClipboard()` (preserving the PR #45 double-paste fix), and in an insecure context it skips `preventDefault` so the browser's native paste flows through the existing `beforeinput`/`paste` handlers and is sent exactly once. `pasteFromClipboard()` now guards clipboard availability up front (returns `false` instead of throwing into the catch), and both the unavailable-API and denied-read (Safari) paths surface a user-visible toast via a bubbling `cwm:paste-unavailable` CustomEvent handled in `app.js`, telling the user that Ctrl+V (Cmd+V on Mac) still works. The context-menu Paste item now feature-detects the API too: when unavailable it shows that toast, focuses the pane so the shortcut lands, and relabels itself "Paste (Ctrl+V)" instead of a fire-and-forget call that does nothing.
+
+### Security
+
+- **Explicit npm `files` allow-list so only the runtime ships.** `package.json` had no `files` field, so `npm publish` shipped almost everything not gitignored, including local operator scripts that never belong in a public package (a Chrome/Edge DPAPI credential-extraction helper, state seeders, recovery and watchdog scripts, and build tooling). The package now declares `files: [src/, scripts/postinstall.js, README.md, LICENSE, CHANGELOG.md, DEMO_GUIDE.md]`, dropping the tarball from 91 to 86 files with zero dev scripts. Note: none of those scripts reached the registry (all predated the last publish or postdated it), so this is preventative packaging hygiene, not a leak remediation. Same class of packaging drift that previously caused issues #27, #32, #33, and #39; the allow-list is the durable fix.
 
 ## [1.2.0-alpha.10] - 2026-07-02
 
