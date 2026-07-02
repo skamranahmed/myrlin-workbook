@@ -967,3 +967,105 @@
     font-size: 15px;
   }
 }
+
+
+/* ─── Phase 7: Settings Full-Screen Sheet (P1-1) ───────────────
+   Desktop renders .settings-panel as a 520px popover with a 152px nav rail,
+   leaving ~210px of content on a 390px phone. On mobile the panel becomes a
+   full-screen sheet and the nav rail flips from a left column into a
+   horizontal, scrollable strip of category chips above the body. The overlay
+   itself drops its 15vh top padding and centering so the sheet reaches the
+   top-left corner. */
+
+@media (max-width: 768px) {
+  /* Overlay: remove the desktop drop-in offset so the sheet is edge-to-edge. */
+  #settings-overlay {
+    padding-top: 0;
+    align-items: stretch;
+  }
+
+  #settings-overlay .settings-panel {
+    max-width: 100%;
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  /* Single column: nav strip on top, scrollable body below. The explicit rows
+     constrain the body row so its own overflow-y:auto engages instead of the
+     whole panel growing past the viewport. */
+  #settings-overlay .settings-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  #settings-overlay .settings-nav {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle, var(--surface0));
+    scrollbar-width: none;
+  }
+
+  #settings-overlay .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  #settings-overlay .settings-nav-item {
+    white-space: nowrap;
+    width: auto;
+  }
+}
+
+
+/* ─── Phase 8: Terminal Tab Group Touch Targets (P1-3) ─────────
+   The tab-group close (x) is invisible without :hover on desktop; expose it at
+   half-opacity on touch. Taller tabs give a comfortable long-press / tap area
+   for the new long-press context sheet. */
+
+@media (max-width: 768px) {
+  .terminal-group-tab-close {
+    opacity: 0.5;
+  }
+
+  .terminal-group-tab {
+    min-height: 40px;
+    padding: 8px 14px;
+  }
+}
+
+
+/* ─── Phase 9: Tab Strip Polish (P2 bundle) ───────────────────
+   1. Fade the trailing edge of both tab strips so partially-scrolled content
+      reads as "more to the right", and gently snap tabs into place.
+   2. Grow the mobile terminal-tab close hit area without changing its visual
+      size, so the tiny x is tappable. */
+
+@media (max-width: 768px) {
+  /* Terminal group tab strip: edge fade + horizontal scroll snap. The mask
+     gradient uses opaque-black to transparent purely as an alpha mask (it is
+     theme-independent, not a visible color). */
+  .terminal-groups-tabs {
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 24px), transparent);
+    scroll-snap-type: x proximity;
+  }
+
+  .terminal-group-tab {
+    scroll-snap-align: start;
+  }
+
+  /* Mobile terminal tab close: keep the 18px visual box but extend the tap
+     target 12px in every direction with a transparent ::before overlay. */
+  .terminal-tab-close {
+    position: relative;
+  }
+
+  .terminal-tab-close::before {
+    content: '';
+    position: absolute;
+    inset: -12px;
+  }
+}

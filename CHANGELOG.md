@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Workspace tab bar is now touch-scrollable** (P0-1). `.terminal-group-tab` carried `touch-action: none` (a DragDropTouch accommodation), and since the tabs fill the strip, a finger dragging across them could never pan the strip's `overflow-x: auto`. Tabs, the strip, and folder headers now use `touch-action: pan-x`; press-hold drag-to-reorder still works because a stationary 350ms hold never starts a native pan. The strip also preserves `scrollLeft` across `renderTerminalGroupTabs()` innerHTML re-renders and scrolls the active tab into view after every render and tab switch (desktop benefits too; it previously snapped to the start on every switch).
+- **Terminal tab group right-click menu never opened.** The tab `contextmenu` handler passed an items array to `showContextMenu(sessionId, x, y)`, whose session lookup always failed, so the menu silently no-oped. Tab items now build through a shared `_buildTerminalTabContextItems()` and route through `_renderContextItems` (floating menu on desktop, action sheet on mobile).
+- **Long-press gesture collisions** (P1-2). The pane's 600ms context long-press no longer fires when the touch lands on the xterm surface on mobile (terminal.js arms text selection at 400ms on the same hold; the pane menu stays reachable from the pane header and tab strip). The workspace, session, and discovered-project lists clear their 500ms long-press timers on `dragstart` so DragDropTouch drags (armed at 350ms) no longer pop a context sheet mid-drag.
+
+### Added
+
+- **Mobile More sheet exposes everything the hidden header had** (P0-2/P0-3). `.header-right` is display:none on phones, which orphaned Settings, themes, pairing, the session manager, and the conflict indicator; Tasks/Recent/Resources had no bottom-bar tab. The More sheet now includes: Tasks, Recent, Resources (via `setViewMode`), Settings, Theme (submenu built from the existing theme dropdown, check on the active theme), Pair Device, Sessions (session manager), and Conflicts with a live count (only when nonzero). All entries reuse the exact functions the header buttons call.
+- **Settings panel is a full-screen sheet on phones** (P1-1). The 520px popover with a 152px nav rail left ~210px of content at 390px width. On mobile the panel is now 100dvh edge-to-edge and the category rail becomes a horizontal, scrollable chip strip above the body.
+- **Tab group touch management** (P1-3). Delegated 500ms long-press on the tab strip opens the same context items as desktop right-click as an action sheet. Rename routes to the prompt modal on touch (inline editing of an 80px field under a virtual keyboard is unusable). The close x is visible at 0.5 opacity on mobile and tabs get a 40px min-height touch target. The long-press timer clears on `dragstart` since tabs are draggable.
+- **"Move to Tab..." in the terminal pane context menu** (P1-4). Submenu of all other tab groups calling the existing `moveTerminalToGroup`. Previously drag-only, which had no touch path; works on desktop and mobile.
+- **Tab strip polish** (P2). Trailing-edge fade mask plus `scroll-snap-type: x proximity` on the strip (snap-align on tabs) scoped to mobile; a `matchMedia('(max-width: 768px)')` change listener rebuilds both tab strips when crossing the breakpoint (rotation/resize); the mobile terminal-tab close button gets a 12px-inset invisible hit-area extension.
+- **Regression gate `test/mobile-ux-fixes.test.js`**: 18 string-match checks over styles.css, styles-mobile.css, and app.js locking every fix above (no-jsdom source-harvest pattern, registered in test/run.js).
+
 ## [1.2.0-alpha.9] - 2026-05-11
 
 ### Added

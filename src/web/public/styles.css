@@ -5568,6 +5568,12 @@ html.activity-indicators-disabled .terminal-pane-activity {
   overflow-x: auto;
   scrollbar-width: none;
   align-items: center;
+  /* P0-1: allow horizontal finger panning of the tab strip on touch devices
+     and momentum scrolling on iOS. The child tabs opt into pan-x too (below),
+     so a moving finger scrolls the strip while a stationary press-hold still
+     arms the DragDropTouch polyfill for drag-to-reorder. */
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .terminal-groups-tabs::-webkit-scrollbar {
@@ -5589,10 +5595,14 @@ html.activity-indicators-disabled .terminal-pane-activity {
   white-space: nowrap;
   transition: all var(--transition-fast);
   position: relative;
-  /* Touch: let DragDropTouch polyfill handle long-press-to-drag without the
-     browser claiming the gesture for the scrollable tab strip.
-  */
-  touch-action: none;
+  /* P0-1: was touch-action:none, which forbade panning ANY ancestor scroll
+     container, so a finger dragging across the tabs could not scroll the
+     overflowing strip (the whole strip is covered by tabs). pan-x lets the
+     browser pan the strip horizontally on a moving finger while a stationary
+     press-hold (350ms, DragDropTouch) still arms drag-to-reorder because a
+     held finger never begins a native pan. Inert for mouse users; desktop
+     is unaffected. */
+  touch-action: pan-x;
 }
 
 .terminal-group-tab::before {
@@ -5723,6 +5733,9 @@ html.activity-indicators-disabled .terminal-pane-activity {
   white-space: nowrap;
   transition: all var(--transition-fast);
   flex-shrink: 0;
+  /* P0-1: match the tabs so a finger dragging over a folder header still pans
+     the strip; press-hold-to-drag remains armed by DragDropTouch. */
+  touch-action: pan-x;
 }
 
 .tab-folder-header:hover {
