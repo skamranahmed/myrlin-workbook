@@ -19734,6 +19734,20 @@ class CWMApp {
         return;
       }
 
+      // Only run the git-based per-workspace scan when the conflict center is
+      // actually open. That endpoint runs `git status` for EVERY running
+      // session at once, and on Windows each spawn flashes a console window
+      // (OpenConsole / conhost). Firing it on the 60s background poll produced
+      // the burst of "popping up terminals" (8+ git.exe + terminal windows
+      // every minute) and a steady lag. The background poll now relies on the
+      // JSONL-based check below, which spawns nothing; the git scan runs only
+      // on demand, when the user opens the conflict center (which sets the
+      // flag before calling this) or clicks refresh while it is open.
+      if (!this._conflictCenterOpen) {
+        this._checkJsonlConflicts();
+        return;
+      }
+
       const data = await this.api('GET', `/api/workspaces/${ws.id}/conflicts`);
       const conflicts = data.conflicts || [];
 
