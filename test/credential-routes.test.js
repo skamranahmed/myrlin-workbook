@@ -284,6 +284,8 @@ function openSSE(server) {
       ['DELETE', '/api/credentials/' + UUID_A],
       ['GET', '/api/credentials/mac-config'],
       ['PUT', '/api/credentials/mac-config'],
+      ['GET', '/api/credentials/mac-state'],
+      ['POST', '/api/credentials/mac-state/refresh'],
     ];
     for (const [method, url] of cases) {
       const r = await req(listener, method, url, { body: {}, skipAuth: true });
@@ -487,6 +489,147 @@ function openSSE(server) {
     assertEqual(again.status, 404);
     assertEqual(again.body.error, 'CRED_NOT_FOUND');
   });
+
+  // ─── Mac-state routes on the env-disabled real server ─────────────────
+  await test('mac-state on the env-disabled server: available:false, refresh never sweeps', async () => {
+    const g = await req(listener, 'GET', '/api/credentials/mac-state');
+    assertEqual(g.status, 200);
+    assertEqual(g.body.available, false, 'CWM_CRED_DISABLE_MAC=1 hides the feature');
+    assertEqual(g.body.state, null);
+    assertEqual(g.body.stale, true);
+    const p = await req(listener, 'POST', '/api/credentials/mac-state/refresh', { body: {} });
+    assertEqual(p.status, 200);
+    assertEqual(p.body.available, false, 'refresh degrades to the same unavailable shape');
+  });
+
+  // ─── Mac-state routes with a FAKE bridge (hermetic sub-app) ────────────
+  // The real server above stays env-disabled forever; these tests build a
+  // second Express app around setupCredentialRoutes with an injected fake
+  // macBridge (zero SSH possible by construction), lift the env gate only
+  // while the fake is the ONLY bridge in play, and restore it afterwards.
+  const express = require('express');
+  const { createCredentialManager } = require('../src/web/credential-manager');
+  const { setupCredentialRoutes } = require('../src/web/credential-routes');
+  const realBridge = require('../src/web/mac-bridge');
+
+  const UUID_MAC = 'ababab00-1111-2222-3333-555555555506';
+  const macFixRoot = path.join(process.env.CWM_DATA_DIR, 'mac-route-fixtures');
+  const macClaudeDir = path.join(macFixRoot, 'dot-claude');
+  fs.mkdirSync(macClaudeDir, { recursive: true });
+  fs.writeFileSync(path.join(macClaudeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: makeOauth('MACPC-LIVE', Date.now() + 12 * HOUR_MS) }), 'utf-8');
+  const macClaudeJson = path.join(macFixRoot, 'dot-claude.json');
+  fs.writeFileSync(macClaudeJson, JSON.stringify({ oauthAccount: makeIdentity(UUID_A, EMAIL_A) }), 'utf-8');
+  const macSettings = { mac: { enabled: true, host: 'alloy', user: 'arthur' } };
+  const macManager = createCredentialManager({
+    claudeDir: macClaudeDir,
+    claudeJsonPath: macClaudeJson,
+    accountsDir: path.join(macFixRoot, 'accounts'),
+    settingsProvider: () => macSettings,
+    usageUrl: stubBase + '/usage',
+    tokenUrl: stubBase + '/token',
+    seedDir: path.join(macFixRoot, 'no-seed'),
+    log: { log: () => {}, warn: () => {}, error: () => {} },
+  });
+  // The snapshot the fake Mac inventory will match by slug ('Mac Main').
+  const macStoredExp = Date.now() + HOUR_MS;
+  macManager.saveSnapshot({
+    accountUuid: UUID_MAC,
+    email: 'macmain@example.com',
+    label: 'Mac Main',
+    credentials: makeOauth('MACMAIN', macStoredExp),
+    identity: makeIdentity(UUID_MAC, 'macmain@example.com'),
+    tokenState: 'ok',
+  });
+  const macEvents = [];
+  const fakeBridge = {
+    sweeps: 0,
+    nextInventory: null,
+    /** Scripted inventory sweep; counts calls so cache-vs-SSH is provable. */
+    readMacInventory: async () => { fakeBridge.sweeps += 1; return fakeBridge.nextInventory; },
+    // Pure functions reused from the real bridge (no processes involved).
+    resolveInventoryProfiles: realBridge.resolveInventoryProfiles,
+    profileSlug: realBridge.profileSlug,
+    mirrorToMac: async () => ({ mirrored: true }),
+  };
+  const macApp = express();
+  macApp.use(express.json());
+  setupCredentialRoutes(macApp, {
+    requireAuth: (req, res, next) => next(),
+    getStore: () => ({ settings: {}, updateSettings: () => {} }),
+    broadcast: (type, data) => macEvents.push({ type, data }),
+    structuredError: (res, statusCode, errorCode, message, retryable = false) =>
+      res.status(statusCode).json({ error: errorCode, code: statusCode, message, retryable: !!retryable }),
+    manager: macManager,
+    macBridge: fakeBridge,
+  });
+  const macListener = macApp.listen(0, '127.0.0.1');
+  await new Promise((resolve) => macListener.once('listening', resolve));
+  delete process.env.CWM_CRED_DISABLE_MAC; // fake bridge only; restored below
+
+  await test('GET mac-state before any sweep: cache null, stale true, zero SSH', async () => {
+    const r = await req(macListener, 'GET', '/api/credentials/mac-state');
+    assertEqual(r.status, 200, 'body=' + r.raw);
+    assertEqual(r.body.available, true);
+    assertEqual(r.body.state, null);
+    assertEqual(r.body.stale, true);
+    assertEqual(fakeBridge.sweeps, 0, 'GET never triggers a sweep');
+  });
+
+  await test('POST mac-state/refresh: ONE sweep, slug match, strictly-newer sync-back, sanitized broadcast', async () => {
+    const MAC_LIVE_AT = 'at-MACLIVE-SWEEP';
+    fakeBridge.nextInventory = {
+      reachable: true,
+      activeName: 'mac-main',
+      profileNames: ['mac-main', 'stray'],
+      liveCredText: JSON.stringify({ claudeAiOauth: { accessToken: MAC_LIVE_AT, refreshToken: 'rt-MACLIVE-SWEEP', expiresAt: macStoredExp + HOUR_MS } }),
+      identity: { email: 'macmain@example.com', accountUuid: UUID_MAC },
+    };
+    const r = await req(macListener, 'POST', '/api/credentials/mac-state/refresh', { body: {} });
+    assertEqual(r.status, 200, 'body=' + r.raw);
+    assertEqual(fakeBridge.sweeps, 1, 'exactly ONE ssh round trip per refresh');
+    assertEqual(r.body.available, true);
+    assertEqual(r.body.stale, false);
+    assertEqual(r.body.state.reachable, true);
+    assertEqual(r.body.state.activeName, 'mac-main');
+    assertEqual(r.body.state.activeProfileId, UUID_MAC, 'Mac-active profile matched by slug');
+    assertEqual(r.body.state.profiles.length, 2);
+    assertEqual(r.body.state.profiles[0].profileId, UUID_MAC);
+    assertEqual(r.body.state.profiles[1].profileId, null, 'unmatched remote profile maps to null');
+    // SECURITY: the Mac live token text stays in Node memory only.
+    assert(r.raw.indexOf(MAC_LIVE_AT) === -1, 'Mac live access token leaked into the route response');
+    assert(r.raw.indexOf('liveCredText') === -1, 'liveCredText key leaked into the route response');
+    assertNoTokenMaterial(r.raw, 'mac-state refresh');
+    // The matched Mac-active account adopted the strictly-newer tokens.
+    const snap = macManager.readSnapshot(UUID_MAC);
+    assertEqual(snap.credentials.accessToken, MAC_LIVE_AT, 'sync-back adopted the fresher Mac tokens');
+    assertEqual(snap.tokenState, 'ok');
+    // Broadcast carries the sanitized cache only (names and uuids).
+    const ev = macEvents.find((e) => e.type === 'credentials:mac');
+    assert(ev, 'credentials:mac broadcast fired');
+    const evRaw = JSON.stringify(ev);
+    assert(evRaw.indexOf(MAC_LIVE_AT) === -1 && evRaw.indexOf('liveCredText') === -1
+      && evRaw.indexOf('accessToken') === -1, 'broadcast payload sanitized');
+    // GET now serves the cache without another sweep.
+    const g = await req(macListener, 'GET', '/api/credentials/mac-state');
+    assertEqual(g.body.state.activeProfileId, UUID_MAC);
+    assertEqual(g.body.stale, false, 'fresh cache is not stale');
+    assertEqual(fakeBridge.sweeps, 1, 'GET served from cache, no extra sweep');
+  });
+
+  await test('POST mac-state/refresh with an offline Mac: HTTP 200, reachable:false state', async () => {
+    fakeBridge.nextInventory = { reachable: false, activeName: null, profileNames: [], liveCredText: null, identity: null, error: 'ssh timed out' };
+    const r = await req(macListener, 'POST', '/api/credentials/mac-state/refresh', { body: {} });
+    assertEqual(r.status, 200, 'offline is a STATE, not an error status');
+    assertEqual(r.body.state.reachable, false);
+    assertEqual(r.body.state.activeProfileId, null);
+    assert(r.body.state.error && r.body.state.error.indexOf('timed out') !== -1, 'error detail surfaced');
+  });
+
+  // Restore the env gate so nothing after this point could ever touch a
+  // real bridge, then drop the sub-app.
+  process.env.CWM_CRED_DISABLE_MAC = '1';
+  macListener.close();
 
   // ─── Full-stream token-material sweep ─────────────────────────────────
   await test('no SSE event ever carried token material', async () => {

@@ -133,6 +133,11 @@ class CWMApp {
    *  fill, MID up to and including HIGH the amber fill, above HIGH red. */
   static USAGE_PCT_MID = 60;
   static USAGE_PCT_HIGH = 85;
+  /** Mac inventory cache staleness threshold; mirrors the server's
+   *  MAC_STATE_TTL_MS. When the cached sweep is older than this, opening
+   *  the account panel fires one live probe (a single SSH round trip
+   *  server-side); anything fresher is served from the cache with no SSH. */
+  static MAC_STATE_STALE_MS = 5 * 60 * 1000;
 
   constructor() {
     // ─── State ─────────────────────────────────────────────────
@@ -179,7 +184,10 @@ class CWMApp {
       // activeId: profileId of the machine-wide active login. stagedId: the
       // row the user selected but has not saved yet. mac: { configured,
       // enabled, host, user } for the Mac mirror checkbox visibility.
-      credentials: { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null },
+      // macState: sanitized Mac inventory cache from /api/credentials/
+      // mac-state ({checkedAt, reachable, activeName, activeProfileId,
+      // profiles}); macStale mirrors the server's TTL verdict.
+      credentials: { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false },
       settings: Object.assign({
         paneColorHighlights: true,
         activityIndicators: true,
@@ -333,6 +341,7 @@ class CWMApp {
       accountPanelList: document.getElementById('account-panel-list'),
       accountRefreshBtn: document.getElementById('account-refresh-btn'),
       accountMacConfigBtn: document.getElementById('account-mac-config-btn'),
+      accountMachines: document.getElementById('account-machines'),
       accountSaveBtn: document.getElementById('account-save-btn'),
       accountCancelBtn: document.getElementById('account-cancel-btn'),
       accountMacToggle: document.getElementById('account-mac-toggle'),
@@ -2317,7 +2326,7 @@ class CWMApp {
     this._stopAccountTick();
     this._closeAccountPanel();
     if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = true;
-    this.state.credentials = { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null };
+    this.state.credentials = { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false };
     // The usage meter lives outside the switcher subtree, so re-render it
     // against the now-empty roster to hide and clear its bars too.
     this.renderUsageMeter();
@@ -8158,8 +8167,13 @@ class CWMApp {
         }
       });
 
-      // Header + footer controls.
-      els.accountRefreshBtn.addEventListener('click', () => this.loadCredentials({ refresh: true }));
+      // Header + footer controls. Refresh covers BOTH machines: usage on
+      // the PC roster plus (when the bridge is enabled) one live Mac
+      // inventory probe, fired in parallel so neither waits on the other.
+      els.accountRefreshBtn.addEventListener('click', () => {
+        this.loadCredentials({ refresh: true });
+        if (this._macEnabled()) this.loadMacState({ probe: true });
+      });
       // Gear: Mac sync settings (enable/host/user/tool). This modal is the
       // no-code-edit path for pointing the bridge at a renamed Mac host.
       if (els.accountMacConfigBtn) {
@@ -8350,6 +8364,11 @@ class CWMApp {
     }
 
     if (!els.accountPanel || els.accountPanel.hidden) return;
+
+    // ── Machines strip (PC / Mac locations) ──
+    // Rendered on every open-panel repaint so roster loads, mac-state
+    // fetches, and credentials:mac SSE all refresh it from one path.
+    this.renderMachinesStrip();
 
     // ── Row list ──
     if (cred.loading && cred.list.length === 0) {
@@ -8900,6 +8919,145 @@ class CWMApp {
   }
 
   /**
+   * Whether the Mac credential bridge is configured AND enabled, from the
+   * roster response's mac summary. Gates the machines strip, the mac-state
+   * fetches, and (once shipped) the per-row MAC segments; while false the
+   * panel keeps today's zero-clutter single-machine layout.
+   * @returns {boolean} True when Mac state should be shown and probed.
+   */
+  _macEnabled() {
+    const mac = this.state.credentials.mac;
+    return !!(mac && mac.configured && mac.enabled);
+  }
+
+  /**
+   * Load the Mac inventory state for the machines strip. probe:false serves
+   * the server's cached sweep (GET, instant, zero SSH by construction);
+   * probe:true asks the server for ONE live inventory sweep (POST, a single
+   * SSH round trip on the server side). Never rejects; failures keep the
+   * previous state on screen because an offline or unreachable Mac is a
+   * STATE the strip renders, not an error to toast about.
+   * @param {object} [opts] - Options bag.
+   * @param {boolean} [opts.probe=false] - Force a live sweep instead of the cache.
+   * @returns {Promise<void>} Never rejects.
+   */
+  async loadMacState({ probe = false } = {}) {
+    const cred = this.state.credentials;
+    if (!this.els.accountSwitcher) return;
+    if (cred.macStateLoading) return;
+    cred.macStateLoading = true;
+    this.renderMachinesStrip();
+    try {
+      const resp = probe
+        ? await this._credApi('POST', '/api/credentials/mac-state/refresh', {})
+        : await this._credApi('GET', '/api/credentials/mac-state');
+      if (resp.ok && resp.data) {
+        if (resp.data.state !== undefined) cred.macState = resp.data.state || null;
+        cred.macStale = !!resp.data.stale;
+        if (resp.data.mac) cred.mac = resp.data.mac;
+      }
+    } catch (_) {
+      // Network failure or auth logout: keep whatever state was on screen.
+    } finally {
+      cred.macStateLoading = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Panel-open Mac freshness policy: hydrate from the server's cached sweep
+   * first (instant), then fire ONE live probe only when that cache is
+   * absent or older than MAC_STATE_STALE_MS. Mirrors the stale-usage
+   * auto-refresh so opening the panel never triggers SSH when the cache is
+   * fresh. Fire and forget; never blocks the panel.
+   * @returns {Promise<void>} Never rejects.
+   */
+  async _autoRefreshMacState() {
+    const cred = this.state.credentials;
+    if (!this._macEnabled()) return;
+    if (!cred.macState) {
+      await this.loadMacState(); // server cache first: instant, no SSH
+    }
+    const checkedAtMs = cred.macState && cred.macState.checkedAt
+      ? Date.parse(cred.macState.checkedAt) : NaN;
+    const fresh = Number.isFinite(checkedAtMs)
+      && (Date.now() - checkedAtMs) < CWMApp.MAC_STATE_STALE_MS;
+    if (!fresh || cred.macStale) this.loadMacState({ probe: true });
+  }
+
+  /**
+   * Render the machines strip (#account-machines): which account is live on
+   * which machine. Left pill is this PC with its active account's display
+   * name; right pill is the Mac with the matched profile's display name, or
+   * its offline / checking / unknown / not-configured state. Hidden
+   * entirely while the Mac bridge is disabled. Pure render from state
+   * (roster + macState); safe to call on every panel repaint.
+   * @returns {void}
+   */
+  renderMachinesStrip() {
+    const el = this.els.accountMachines;
+    if (!el) return;
+    const cred = this.state.credentials;
+    if (!this._macEnabled()) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const pcName = active ? this._accountDisplayName(active) : 'unknown';
+    const ms = cred.macState;
+    let macText = '';
+    let macClass = '';
+    let macTitle = '';
+    if (cred.macStateLoading && !ms) {
+      // First probe in flight: quiet pulse, never a spinner.
+      macText = 'checking';
+      macClass = 'is-checking';
+      macTitle = 'Probing the Mac over SSH.';
+    } else if (!ms) {
+      macText = 'unknown';
+      macClass = 'is-unknown';
+      macTitle = 'No Mac probe yet. Refresh to check.';
+    } else if (!ms.reachable) {
+      macText = 'offline';
+      macClass = 'is-offline';
+      macTitle = 'The Mac did not answer over SSH'
+        + (ms.checkedAt ? ' (checked ' + new Date(ms.checkedAt).toLocaleTimeString() + ')' : '') + '.';
+    } else {
+      const matched = ms.activeProfileId
+        ? cred.list.find(p => p.profileId === ms.activeProfileId) : null;
+      if (matched) {
+        macText = this._accountDisplayName(matched);
+        macClass = 'is-matched';
+      } else if (ms.activeName) {
+        // A profile is active on the Mac but no local snapshot matches its
+        // name; show the raw remote name so nothing is silently hidden.
+        macText = ms.activeName;
+        macClass = 'is-unmatched';
+        macTitle = 'The Mac runs a profile with no matching saved account here.';
+      } else {
+        macText = 'no profile';
+        macClass = 'is-none';
+        macTitle = 'The Mac is reachable but no claude-profile is active.';
+      }
+      if (!macTitle && ms.checkedAt) {
+        macTitle = 'Checked ' + new Date(ms.checkedAt).toLocaleTimeString() + '.';
+      }
+    }
+    el.innerHTML =
+      '<span class="machine-pill machine-pill-pc" title="Active on this PC">'
+        + '<span class="machine-pill-key">PC</span>'
+        + '<span class="machine-pill-val">' + this.escapeHtml(pcName) + '</span>'
+      + '</span>'
+      + '<span class="machine-pill machine-pill-mac ' + macClass + '"'
+        + (macTitle ? ' title="' + this.escapeHtml(macTitle) + '"' : '') + '>'
+        + '<span class="machine-pill-key">Mac</span>'
+        + '<span class="machine-pill-val">' + this.escapeHtml(macText) + '</span>'
+      + '</span>';
+    el.hidden = false;
+  }
+
+  /**
    * Commit the staged account: confirm, POST /api/credentials/apply (with
    * the Mac mirror flag when the checkbox is visible and checked), then
    * offer to restart running sessions so they pick up the new login.
@@ -9006,6 +9164,10 @@ class CWMApp {
     if (!cred.loading && cred.list.some(p => this._isUsageStale(p))) {
       this.loadCredentials({ refresh: true });
     }
+    // Mac freshness: hydrate from the server cache, then live-probe only
+    // when the last sweep is older than MAC_STATE_STALE_MS. No-op while
+    // the bridge is disabled.
+    this._autoRefreshMacState();
   }
 
   /**
@@ -10673,6 +10835,21 @@ class CWMApp {
           payload.profiles.forEach(p => {
             if (!cred.list.some(x => x.profileId === p.profileId)) cred.list.push(p);
           });
+          this.renderAccountSwitcher();
+        }
+        break;
+      }
+      case 'credentials:mac': {
+        // A Mac inventory sweep completed (this client's refresh or another
+        // client's). Payload is the sanitized cache: names and uuids ONLY,
+        // never token material (setMacState whitelists server-side). Adopt
+        // it and repaint the strip; the case MUST exist here or the default
+        // branch would turn every sweep into a full loadAll() reload.
+        const payload = (data && data.data) || {};
+        if (payload.state !== undefined) {
+          const cred = this.state.credentials;
+          cred.macState = payload.state || null;
+          cred.macStale = false;
           this.renderAccountSwitcher();
         }
         break;

@@ -67,6 +67,7 @@ function assertEqual(a, e, msg) {
 
 // ─── Fixture constants ──────────────────────────────────────────────────────
 const UUID_M = 'abcd1234-9999-8888-7777-666655554444';
+const UUID_2 = 'beefbeef-1111-2222-3333-666655554444';
 const CFG = { host: 'alloy', user: 'arthur', sshTimeoutSec: 8 };
 // Distinctive secret markers: the leak assertions grep for these.
 const AT_SECRET = 'at-BRIDGE-SECRET-001';
@@ -255,6 +256,86 @@ function assertNoSecretInArgv(calls, where) {
     assertEqual(bridge.profileSlug({}), 'profile');
     const long = bridge.profileSlug({ label: 'x'.repeat(120), accountUuid: UUID_M });
     assert(long.length <= 40, 'slug capped at 40');
+  });
+
+  // ─── readMacInventory (one-round-trip sweep parser) ─────────────────────
+
+  await test('readMacInventory happy path: ONE ssh call, four sections parsed', async () => {
+    const liveCred = '{"claudeAiOauth":{"accessToken":"at-MACLIVE-X","refreshToken":"rt-MACLIVE-X","expiresAt":123}}';
+    const stdout = 'work-laptop\n__CWM_S1__\nactive\nwork-laptop.credentials.json\npersonal.credentials.json\nnotes.txt\n__CWM_S2__\n'
+      + liveCred + '\n__CWM_S3__\n{"email":"mac@example.com","accountUuid":"' + UUID_M + '"}\n';
+    const fake = makeExecFake([{ stdout }]);
+    const inv = await bridge.readMacInventory(CFG, { execFileImpl: fake.impl });
+    assertEqual(fake.calls.length, 1, 'exactly ONE ssh round trip');
+    const remoteCmd = fake.calls[0].args[fake.calls[0].args.length - 1];
+    assert(remoteCmd.indexOf('.claude-profiles/active') !== -1, 'reads the active marker');
+    assert(remoteCmd.indexOf('ls -1') !== -1, 'lists installed profiles');
+    assert(remoteCmd.indexOf('.claude/.credentials.json') !== -1, 'reads the live token file');
+    assert(remoteCmd.indexOf('python3') !== -1, 'reads the (lagging) identity');
+    assertEqual(inv.reachable, true);
+    assertEqual(inv.activeName, 'work-laptop');
+    assertEqual(inv.profileNames.join(','), 'work-laptop,personal',
+      'suffix stripped; non-profile entries (active marker, stray files) ignored');
+    assertEqual(inv.liveCredText, liveCred, 'live token text verbatim (Node memory only)');
+    assertEqual(inv.identity.email, 'mac@example.com');
+    assertEqual(inv.identity.accountUuid, UUID_M);
+  });
+
+  await test('readMacInventory: exit 255 and timeout map to reachable:false', async () => {
+    const fake255 = makeExecFake([{ code: 255, stderr: 'ssh: no route to host' }]);
+    const r1 = await bridge.readMacInventory(CFG, { execFileImpl: fake255.impl });
+    assertEqual(r1.reachable, false);
+    assert(r1.error && r1.error.indexOf('no route') !== -1, 'stderr surfaced in error');
+    assertEqual(r1.liveCredText, null);
+    const fakeKill = makeExecFake([{ killed: true, signal: 'SIGTERM' }]);
+    const r2 = await bridge.readMacInventory(CFG, { execFileImpl: fakeKill.impl });
+    assertEqual(r2.reachable, false, 'timeout maps to unreachable');
+  });
+
+  await test('readMacInventory: missing and garbled sections degrade field by field', async () => {
+    // Nonzero exit (python3 failed: no ~/.claude.json) still parses the
+    // earlier sections; the compound exit code is just the LAST command's.
+    const fakePartial = makeExecFake([{ code: 1, stdout: 'p1\n__CWM_S1__\np1.credentials.json\n__CWM_S2__\n\n__CWM_S3__\n' }]);
+    const r1 = await bridge.readMacInventory(CFG, { execFileImpl: fakePartial.impl });
+    assertEqual(r1.reachable, true, 'non-255 exit still parses');
+    assertEqual(r1.activeName, 'p1');
+    assertEqual(r1.profileNames.join(','), 'p1');
+    assertEqual(r1.liveCredText, null, 'empty cred section reads as absent');
+    assertEqual(r1.identity, null, 'empty python section reads as no identity');
+    // Garbled python output degrades to identity null, everything else kept.
+    const fakeGarbled = makeExecFake([{ stdout: 'x\n__CWM_S1__\n__CWM_S2__\n{"claudeAiOauth":{}}\n__CWM_S3__\nnot json at all\n' }]);
+    const r2 = await bridge.readMacInventory(CFG, { execFileImpl: fakeGarbled.impl });
+    assertEqual(r2.identity, null);
+    assertEqual(r2.activeName, 'x');
+    assertEqual(r2.profileNames.length, 0);
+    // Separators missing entirely (truncated stream): no crash, empty fields.
+    const fakeTrunc = makeExecFake([{ stdout: 'just-noise' }]);
+    const r3 = await bridge.readMacInventory(CFG, { execFileImpl: fakeTrunc.impl });
+    assertEqual(r3.reachable, true);
+    assertEqual(r3.profileNames.length, 0);
+    assertEqual(r3.liveCredText, null);
+    // Invalid target never spawns anything (option-injection guard).
+    const fakeNever = makeExecFake([]);
+    const r4 = await bridge.readMacInventory({ host: '-evil', user: 'x' }, { execFileImpl: fakeNever.impl });
+    assertEqual(r4.reachable, false);
+    assertEqual(fakeNever.calls.length, 0, 'validation rejects before any spawn');
+  });
+
+  await test('resolveInventoryProfiles matches remote names to local snapshots by slug', () => {
+    const snapA = makeSnapshot(); // label 'Work Laptop' -> slug work-laptop
+    const snapB = makeSnapshot({ accountUuid: UUID_2, label: '', email: 'two@example.com' }); // slug = uuid8
+    const manager = { listSnapshots: () => [snapA, snapB] };
+    const inv = { activeName: 'work-laptop', profileNames: ['work-laptop', UUID_2.slice(0, 8), 'hand-made'] };
+    const m = bridge.resolveInventoryProfiles(manager, inv);
+    assertEqual(m.activeProfileId, UUID_M);
+    assertEqual(m.profiles.length, 3);
+    assertEqual(m.profiles[0].profileId, UUID_M);
+    assertEqual(m.profiles[1].profileId, UUID_2, 'uuid8 slug matched');
+    assertEqual(m.profiles[2].profileId, null, 'unmatched remote profile maps to null');
+    const none = bridge.resolveInventoryProfiles(manager, { activeName: 'ghost', profileNames: [] });
+    assertEqual(none.activeProfileId, null, 'unknown active name resolves to null');
+    const broken = bridge.resolveInventoryProfiles({ listSnapshots: () => { throw new Error('boom'); } }, inv);
+    assertEqual(broken.activeProfileId, null, 'unreadable store degrades to zero matches');
   });
 
   // ─── mirrorToMac (compat alias) end to end ──────────────────────────────

@@ -20,6 +20,10 @@
 // expectations without auto-restarting anything.
 const RESTART_NOTE = 'New sessions use this account immediately. Running sessions keep the previous account until restarted.';
 
+// A cached Mac inventory sweep older than this is reported as stale; the
+// frontend then auto-refreshes on panel open instead of trusting it.
+const MAC_STATE_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Register the credential switcher routes on the Express app.
  *
@@ -101,6 +105,97 @@ function setupCredentialRoutes(app, { requireAuth, getStore, broadcast, structur
     if (!macBridge || typeof macBridge.mirrorToMac !== 'function') return false;
     const mac = manager.getSettings().mac;
     return !!(mac.enabled && mac.host && mac.user);
+  }
+
+  /**
+   * Like macMirrorAvailable, but for the inventory sweep: also requires the
+   * bridge's readMacInventory and the manager's mac-state surface (both
+   * absent on older injected fakes, which then simply see the feature as
+   * unavailable instead of crashing a route).
+   *
+   * @returns {boolean}
+   */
+  function macStateAvailable() {
+    if (process.env.CWM_CRED_DISABLE_MAC === '1') return false;
+    if (!macBridge || typeof macBridge.readMacInventory !== 'function') return false;
+    if (typeof manager.runMacExclusive !== 'function' || typeof manager.setMacState !== 'function') return false;
+    const mac = manager.getSettings().mac;
+    return !!(mac.enabled && mac.host && mac.user);
+  }
+
+  /**
+   * Compute staleness of a cached sweep against MAC_STATE_TTL_MS. A missing
+   * cache or an unparseable timestamp reads as stale (the frontend then
+   * probes on next panel open).
+   *
+   * @param {object|null} state - Cached sweep from manager.getMacState().
+   * @returns {boolean} True when the cache should not be trusted.
+   */
+  function macStateIsStale(state) {
+    const checkedAtMs = state && state.checkedAt ? Date.parse(state.checkedAt) : NaN;
+    return !Number.isFinite(checkedAtMs) || (Date.now() - checkedAtMs) > MAC_STATE_TTL_MS;
+  }
+
+  /**
+   * Perform ONE Mac inventory sweep: read active name, installed profiles,
+   * live token text, and identity in a single SSH round trip; match names
+   * to local snapshots by slug; merge the Mac-active account's freshest
+   * tokens back into its snapshot; update the cache; and broadcast the
+   * sanitized result. Runs under the manager's Mac mutex so sweeps and
+   * profile applies can never interleave their SSH conversations, while
+   * the snapshot mutex is only taken for the short local merge.
+   *
+   * SECURITY: inv.liveCredText is consumed HERE (handed to syncBackFromMac)
+   * and never copied onto the returned/cached/broadcast state object.
+   *
+   * An unreachable Mac is a STATE, not an error: the sweep resolves with
+   * reachable:false and the route replies 200.
+   *
+   * @returns {Promise<object>} The sanitized, cached state object.
+   */
+  async function refreshMacState() {
+    const settings = manager.getSettings();
+    const cfg = { ...settings.mac, sshTimeoutSec: settings.sshTimeoutSec };
+    const state = await manager.runMacExclusive(async () => {
+      const inv = await macBridge.readMacInventory(cfg);
+      const nowIso = new Date().toISOString();
+      if (!inv || !inv.reachable) {
+        return {
+          checkedAt: nowIso,
+          reachable: false,
+          activeName: null,
+          activeProfileId: null,
+          profiles: [],
+          ...(inv && inv.error ? { error: inv.error } : {}),
+        };
+      }
+      const matched = (typeof macBridge.resolveInventoryProfiles === 'function')
+        ? macBridge.resolveInventoryProfiles(manager, inv)
+        : { activeProfileId: null, profiles: [] };
+      if (matched.activeProfileId && inv.liveCredText && typeof manager.syncBackFromMac === 'function') {
+        // Adopt the Mac's freshest rotated tokens for the matched active
+        // account (strictly-newer merge; never regresses a fresher local
+        // snapshot). Best effort: a merge failure must not fail the sweep.
+        try { await manager.syncBackFromMac(matched.activeProfileId, inv.liveCredText); } catch (_) { /* sweep continues */ }
+      }
+      // Keep the persisted Mac-active hint honest with observed reality:
+      // the sweep is the ground truth for what the Mac is running.
+      if (typeof manager.setMacActiveHint === 'function') {
+        try { manager.setMacActiveHint(matched.activeProfileId || null); } catch (_) { /* hint is advisory */ }
+      }
+      return {
+        checkedAt: nowIso,
+        reachable: true,
+        activeName: inv.activeName || null,
+        activeProfileId: matched.activeProfileId || null,
+        profiles: matched.profiles || [],
+      };
+    });
+    const cached = manager.setMacState(state);
+    // Names and uuids only; the setMacState whitelist guarantees no secret
+    // field can exist on this payload.
+    safeBroadcast('credentials:mac', { state: cached });
+    return cached;
   }
 
   // ─── GET /api/credentials ─────────────────────────────────────────────
@@ -285,6 +380,48 @@ function setupCredentialRoutes(app, { requireAuth, getStore, broadcast, structur
       // whole credentialSwitcher object is merged and rewritten here.
       store.updateSettings({ credentialSwitcher: { ...curAll, mac: next } });
       return res.json(next);
+    } catch (err) {
+      return mapError(res, err);
+    }
+  });
+
+  // ─── GET /api/credentials/mac-state ───────────────────────────────────
+  // Serve the CACHED result of the last Mac inventory sweep. NEVER triggers
+  // SSH; instant by construction. `stale` tells the client the cache is
+  // older than MAC_STATE_TTL_MS (or absent) and worth a refresh. `available`
+  // is false when the bridge is disabled/unconfigured so the client can
+  // hide the feature rather than show a permanently stale strip.
+  app.get('/api/credentials/mac-state', requireAuth, (req, res) => {
+    try {
+      const state = (typeof manager.getMacState === 'function') ? manager.getMacState() : null;
+      return res.json({
+        mac: macSummary(),
+        available: macStateAvailable(),
+        state: state || null,
+        stale: macStateIsStale(state),
+      });
+    } catch (err) {
+      return mapError(res, err);
+    }
+  });
+
+  // ─── POST /api/credentials/mac-state/refresh ──────────────────────────
+  // Perform ONE inventory sweep (single SSH round trip), sync the matched
+  // Mac-active account's tokens back, update the cache, and broadcast
+  // credentials:mac. An offline Mac is a 200 with reachable:false, never an
+  // error status: offline is a state the UI renders, not a failure.
+  app.post('/api/credentials/mac-state/refresh', requireAuth, async (req, res) => {
+    try {
+      if (!macStateAvailable()) {
+        return res.json({
+          mac: macSummary(),
+          available: false,
+          state: (typeof manager.getMacState === 'function') ? manager.getMacState() : null,
+          stale: true,
+        });
+      }
+      const state = await refreshMacState();
+      return res.json({ mac: macSummary(), available: true, state, stale: false });
     } catch (err) {
       return mapError(res, err);
     }

@@ -8399,6 +8399,91 @@ html {
   color: var(--text-muted);
 }
 
+/* ─── Machines strip (PC / Mac location summary) ─────────────────
+   Which account is live on which machine, under the panel header. Hidden
+   while the Mac bridge is disabled (renderMachinesStrip). Every color is a
+   semantic theme token so all 13 themes render it correctly. */
+.account-machines {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+/* Author display above beats the UA [hidden] rule; mirror the
+   .account-panel[hidden] guard so the hidden attribute always wins. */
+.account-machines[hidden] {
+  display: none;
+}
+
+.machine-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface0);
+  font-size: 10px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.machine-pill-key {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.machine-pill-val {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Separator dot between the machine key and its value. */
+.machine-pill-val::before {
+  content: '\00B7';
+  margin: 0 5px;
+  color: var(--overlay0);
+  font-weight: 400;
+}
+
+/* Mac pill states: offline / unknown / no-profile dim to secondary; an
+   unmatched remote profile flags amber; checking pulses gently (skeleton
+   rhythm, never a spinner, per the design system). */
+.machine-pill-mac.is-offline .machine-pill-val,
+.machine-pill-mac.is-unknown .machine-pill-val,
+.machine-pill-mac.is-none .machine-pill-val {
+  color: var(--overlay0);
+  font-weight: 400;
+}
+
+.machine-pill-mac.is-unmatched .machine-pill-val {
+  color: var(--yellow);
+}
+
+.machine-pill-mac.is-checking .machine-pill-val {
+  color: var(--overlay0);
+  font-weight: 400;
+  animation: machinePillPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes machinePillPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .machine-pill-mac.is-checking .machine-pill-val {
+    animation: none;
+  }
+}
+
 .account-panel-list {
   display: flex;
   flex-direction: column;

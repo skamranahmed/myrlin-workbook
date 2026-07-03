@@ -292,6 +292,16 @@ function createCredentialManager(opts = {}) {
   let _lastPollMtime = null;
   let _selfWriteUntil = 0;
   let _chain = Promise.resolve();
+  // Dedicated Mac operation chain. WHY a second mutex: Mac bridge calls ride
+  // on SSH round trips that can take seconds; holding the snapshot mutex
+  // (`_chain`) across them would freeze every credential operation (list,
+  // apply, rename) behind the network. Mac operations therefore serialize
+  // against EACH OTHER here, and take the snapshot mutex only for the short
+  // local read/merge portions.
+  let _macChain = Promise.resolve();
+  // In-memory cache of the last Mac inventory sweep (whitelisted fields
+  // only; never token material). Null until the first sweep completes.
+  let _macState = null;
 
   /**
    * Promise-chain mutex. Serializes every mutating operation so two GUI
@@ -304,6 +314,21 @@ function createCredentialManager(opts = {}) {
   function serialize(fn) {
     const run = _chain.then(() => fn());
     _chain = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /**
+   * Promise-chain mutex for Mac bridge operations (inventory sweeps and
+   * profile applies). Two Mac operations can never interleave their SSH
+   * conversations; see the _macChain WHY comment above. Errors propagate to
+   * the caller but never break the chain.
+   *
+   * @param {() => (Promise<*>|*)} fn - Mac operation to run exclusively.
+   * @returns {Promise<*>} Resolves/rejects with fn's outcome.
+   */
+  function runMacExclusive(fn) {
+    const run = _macChain.then(() => fn());
+    _macChain = run.then(() => undefined, () => undefined);
     return run;
   }
 
@@ -903,6 +928,108 @@ function createCredentialManager(opts = {}) {
   }
 
   /**
+   * Unlocked core of syncBackFromMac: merge the Mac's LIVE token file text
+   * into the matching local snapshot. The merge rule is identical to the PC
+   * rotation write-back (_syncActiveTokenToProfileUnlocked): credentials
+   * are adopted ONLY when the incoming expiresAt is STRICTLY newer than the
+   * stored one, so a stale Mac copy can never regress a fresher local
+   * snapshot. A live Mac login is definitive positive evidence, so the
+   * snapshot's tokenState is resurrected to ok either way.
+   *
+   * SECURITY: liveCredText is secret material. It is parsed here and
+   * written only into the 0600 snapshot file; it must never be logged,
+   * returned to a route, or stored anywhere else.
+   *
+   * @param {string} accountUuid - The local snapshot to merge into.
+   * @param {string} liveCredText - Raw Mac ~/.claude/.credentials.json text.
+   * @returns {{synced: boolean, resurrected: boolean, reason?: string}}
+   */
+  function _syncBackFromMacUnlocked(accountUuid, liveCredText) {
+    const out = { synced: false, resurrected: false };
+    if (!validateAccountUuid(accountUuid)) {
+      return { ...out, reason: 'invalid accountUuid' };
+    }
+    let oauth = null;
+    try {
+      const parsed = JSON.parse(String(liveCredText || ''));
+      oauth = parsed && parsed.claudeAiOauth;
+    } catch (_) {
+      oauth = null;
+    }
+    if (!oauth || typeof oauth !== 'object' || !oauth.accessToken) {
+      return { ...out, reason: 'unparseable live credential text' };
+    }
+    const existing = readSnapshot(accountUuid);
+    if (!existing) {
+      // Never fabricate a snapshot from Mac-side data alone: the identity
+      // half of the pair is not trustworthy from the Mac (it lags by
+      // design), so an unknown account is left for a proper PC capture.
+      return { ...out, reason: 'no local snapshot for that account' };
+    }
+    const incomingExp = Number(oauth.expiresAt) || 0;
+    const storedExp = existing.credentials ? Number(existing.credentials.expiresAt) || 0 : 0;
+    const patch = {};
+    if (incomingExp > storedExp) {
+      // Merge over the stored credentials so lean Mac copies cannot drop
+      // metadata fields (subscriptionType etc.); incoming fields win.
+      patch.credentials = { ...(existing.credentials || {}), ...oauth };
+      out.synced = true;
+    }
+    if (existing.tokenState !== TOKEN_STATE_OK) {
+      patch.tokenState = TOKEN_STATE_OK;
+      patch.lastRefreshError = null;
+      out.resurrected = true;
+    }
+    if (Object.keys(patch).length > 0) _mutateSnapshot(accountUuid, patch);
+    return out;
+  }
+
+  /**
+   * Read the cached result of the last Mac inventory sweep, or null when no
+   * sweep has completed since boot. Serving this cache is always instant
+   * and never triggers SSH; POST /api/credentials/mac-state/refresh is the
+   * only path that talks to the Mac.
+   *
+   * @returns {object|null} The cached state (whitelisted fields only).
+   */
+  function getMacState() {
+    return _macState;
+  }
+
+  /**
+   * Store the Mac inventory sweep result. The fields are WHITELISTED here
+   * (defense in depth): even if a future caller passed a raw inventory
+   * object, liveCredText or any other secret-bearing field could never ride
+   * into the cache that routes serialize.
+   *
+   * @param {object|null} state - Sweep result, or null to clear.
+   * @returns {object|null} The stored (sanitized) state.
+   */
+  function setMacState(state) {
+    if (!state || typeof state !== 'object') {
+      _macState = null;
+      return null;
+    }
+    _macState = {
+      checkedAt: typeof state.checkedAt === 'string' ? state.checkedAt : new Date(clock()).toISOString(),
+      reachable: !!state.reachable,
+      activeName: typeof state.activeName === 'string' ? state.activeName : null,
+      activeProfileId: (typeof state.activeProfileId === 'string' && validateAccountUuid(state.activeProfileId))
+        ? state.activeProfileId : null,
+      profiles: Array.isArray(state.profiles)
+        ? state.profiles
+          .filter((p) => p && typeof p === 'object' && typeof p.name === 'string')
+          .map((p) => ({
+            name: p.name,
+            profileId: (typeof p.profileId === 'string' && validateAccountUuid(p.profileId)) ? p.profileId : null,
+          }))
+        : [],
+      ...(state.error ? { error: String(state.error) } : {}),
+    };
+    return _macState;
+  }
+
+  /**
    * Unlocked core of captureCurrent: explicit snapshot of the live PC pair
    * (first run, post /login). Captured state is definitionally alive, so
    * tokenState is set to ok.
@@ -1384,6 +1511,12 @@ function createCredentialManager(opts = {}) {
     startCredentialWatcher,
     stopCredentialWatcher,
     syncActiveTokenToProfile: () => serialize(() => _syncActiveTokenToProfileUnlocked()),
+    // Mac bridge support: sync-back merge (short, snapshot-mutex guarded),
+    // the SSH-op mutex, and the sweep cache (never secret-bearing).
+    syncBackFromMac: (uuid, credText) => serialize(() => _syncBackFromMacUnlocked(uuid, credText)),
+    runMacExclusive,
+    getMacState,
+    setMacState,
     // Capture / seed / labels
     captureCurrent: (o) => serialize(() => _captureCurrentUnlocked(o)),
     seedFromClaudeSwap: (dir) => serialize(() => _seedFromClaudeSwapUnlocked(dir)),

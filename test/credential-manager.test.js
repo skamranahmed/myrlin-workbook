@@ -1087,6 +1087,81 @@ let stubBase = '';
     assertEqual(list2.profiles.find((p) => p.profileId === UUID_C).health, 'needs-attention');
   });
 
+  // ─── Mac bridge support: syncBackFromMac + mac-state cache ────────────────
+
+  await test('syncBackFromMac adopts ONLY strictly-newer credentials and resurrects tokenState', async () => {
+    const fx = makeFixture();
+    const storedExp = Date.now() + HOUR_MS;
+    fx.manager.saveSnapshot({
+      accountUuid: UUID_B,
+      email: EMAIL_B,
+      credentials: makeOauth('MACBASE', storedExp),
+      identity: makeIdentity(UUID_B, EMAIL_B),
+      tokenState: TOKEN_STATE_NEEDS_LOGIN, // presumed dead; the Mac proves otherwise
+    });
+    // Strictly newer: adopted, metadata merged, state resurrected.
+    const newer = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACNEW', refreshToken: 'rt-FIXTURE-MACNEW', expiresAt: storedExp + HOUR_MS } });
+    const r1 = await fx.manager.syncBackFromMac(UUID_B, newer);
+    assertEqual(r1.synced, true, 'strictly newer expiresAt adopted');
+    assertEqual(r1.resurrected, true, 'live Mac login resurrects needs_login');
+    const snap1 = fx.manager.readSnapshot(UUID_B);
+    assertEqual(snap1.credentials.accessToken, 'at-FIXTURE-MACNEW');
+    assertEqual(snap1.tokenState, TOKEN_STATE_OK);
+    assertEqual(snap1.credentials.subscriptionType, 'max', 'lean Mac copy cannot drop stored metadata (merge, not replace)');
+    // Equal expiresAt: NOT adopted (strictly newer only).
+    const equal = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACEQ', refreshToken: 'rt-x', expiresAt: storedExp + HOUR_MS } });
+    const r2 = await fx.manager.syncBackFromMac(UUID_B, equal);
+    assertEqual(r2.synced, false, 'equal expiresAt never regresses/overwrites');
+    assertEqual(fx.manager.readSnapshot(UUID_B).credentials.accessToken, 'at-FIXTURE-MACNEW');
+    // Older: NOT adopted.
+    const older = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACOLD', refreshToken: 'rt-y', expiresAt: storedExp - HOUR_MS } });
+    const r3 = await fx.manager.syncBackFromMac(UUID_B, older);
+    assertEqual(r3.synced, false, 'stale Mac copy never regresses a fresher snapshot');
+    // Unparseable text: structured no-op, never a throw.
+    const r4 = await fx.manager.syncBackFromMac(UUID_B, 'not json');
+    assertEqual(r4.synced, false);
+    assert(r4.reason, 'reason reported for unparseable text');
+    // Unknown account: never fabricates a snapshot from Mac-side data.
+    const r5 = await fx.manager.syncBackFromMac(UUID_C, newer);
+    assertEqual(r5.synced, false);
+    assertEqual(fx.manager.readSnapshot(UUID_C), null, 'no snapshot fabricated');
+  });
+
+  await test('setMacState whitelists fields (defense in depth) and getMacState serves the cache', async () => {
+    const fx = makeFixture();
+    assertEqual(fx.manager.getMacState(), null, 'null until the first sweep');
+    // Hostile input: secret-bearing fields must be dropped by the whitelist
+    // even if a future caller passed a raw inventory object by mistake.
+    const stored = fx.manager.setMacState({
+      checkedAt: '2026-07-03T10:00:00.000Z',
+      reachable: true,
+      activeName: 'work-laptop',
+      activeProfileId: UUID_B,
+      profiles: [
+        { name: 'work-laptop', profileId: UUID_B, liveCredText: 'SECRET' },
+        { name: 'stray', profileId: 'not-a-uuid!' },
+        'garbage-entry',
+      ],
+      liveCredText: 'at-FIXTURE-SECRET',
+      credentials: { accessToken: 'at-FIXTURE-SECRET' },
+    });
+    const raw = JSON.stringify(stored);
+    assert(raw.indexOf('SECRET') === -1, 'no secret value survives the whitelist');
+    assert(raw.indexOf('liveCredText') === -1, 'liveCredText key stripped');
+    assert(raw.indexOf('accessToken') === -1, 'accessToken key stripped');
+    assertEqual(stored.activeProfileId, UUID_B);
+    assertEqual(stored.profiles.length, 2, 'non-object entries dropped');
+    assertEqual(stored.profiles[0].profileId, UUID_B);
+    assertEqual(stored.profiles[1].profileId, null, 'invalid uuid normalized to null');
+    assertEqual(fx.manager.getMacState(), stored, 'cache served as stored');
+    // Invalid activeProfileId normalized to null; clear works.
+    const bad = fx.manager.setMacState({ reachable: false, activeProfileId: '../etc/passwd' });
+    assertEqual(bad.activeProfileId, null);
+    assert(bad.checkedAt, 'missing checkedAt stamped');
+    fx.manager.setMacState(null);
+    assertEqual(fx.manager.getMacState(), null, 'cache cleared');
+  });
+
   stubServer.close();
   console.log('  ' + '─'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');

@@ -5738,6 +5738,7 @@ const GLOBAL_EVENT_TYPES = new Set([
   'discover:refreshed', // Plan 22-03: fs.watch -> broadcast to all SSE clients
   'credentials:changed', // credential switcher: apply/capture/rename/delete
   'credentials:usage',   // credential switcher: usage refresh results
+  'credentials:mac',     // credential switcher: Mac inventory sweep results (names/uuids only)
 ]);
 
 /**

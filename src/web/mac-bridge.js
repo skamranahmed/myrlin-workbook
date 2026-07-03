@@ -176,6 +176,139 @@ async function readMacLiveState(cfg, opts = {}) {
   }
 }
 
+// Section separators for the one-round-trip inventory sweep. Unique tokens
+// (never plausible file content) so the parser can split the compound
+// command's stdout even when a section is empty or missing.
+const INV_SEP_1 = '__CWM_S1__';
+const INV_SEP_2 = '__CWM_S2__';
+const INV_SEP_3 = '__CWM_S3__';
+// Remote profile files are named <slug>.credentials.json; the inventory
+// parser strips this suffix to recover profile names.
+const PROFILE_FILE_SUFFIX = '.credentials.json';
+
+/**
+ * Split text at the FIRST occurrence of a separator token. Returns the
+ * before/after halves; a missing separator yields [text, null] so a
+ * truncated or garbled sweep degrades section by section instead of
+ * corrupting every field.
+ *
+ * @param {string} text - Input text.
+ * @param {string} sep - Separator token.
+ * @returns {[string, string|null]} Before and after (after null if absent).
+ */
+function _splitOnce(text, sep) {
+  const idx = text.indexOf(sep);
+  if (idx === -1) return [text, null];
+  return [text.slice(0, idx), text.slice(idx + sep.length)];
+}
+
+/**
+ * Read the Mac's full credential-profile inventory in ONE ssh round trip:
+ *   section 0: the active profile name (~/.claude-profiles/active). This is
+ *              the TRUE Mac-active signal; the Mac ~/.claude.json identity
+ *              deliberately lags (claude-profile never touches it).
+ *   section 1: ls of ~/.claude-profiles/ (installed profile files).
+ *   section 2: the live Mac token file (~/.claude/.credentials.json). This
+ *              is SECRET MATERIAL: it stays in Node memory only, is consumed
+ *              solely by syncBackFromMac, and must NEVER appear in any route
+ *              response, SSE payload, cache object, or log line.
+ *   section 3: the (lagging, informational) Mac identity via python3.
+ *
+ * Exit 255 or a timeout maps to { reachable: false } (offline is a state,
+ * not an error). Any other exit code still parses whatever arrived, because
+ * the compound command's exit status is just the LAST subcommand's status
+ * (python3 fails when ~/.claude.json is absent) and says nothing about the
+ * earlier sections. Never throws.
+ *
+ * @param {{host: string, user: string, sshTimeoutSec?: number}} cfg - Mac config.
+ * @param {{execFileImpl?: Function}} [opts] - Injection point for tests.
+ * @returns {Promise<{reachable: boolean, activeName: string|null, profileNames: string[], liveCredText: string|null, identity: {email: string|null, accountUuid: string|null}|null, error?: string}>}
+ */
+async function readMacInventory(cfg, opts = {}) {
+  const empty = { reachable: false, activeName: null, profileNames: [], liveCredText: null, identity: null };
+  try {
+    validateMacTarget(cfg);
+  } catch (err) {
+    return { ...empty, error: 'VALIDATION: ' + err.message };
+  }
+  const pyCode = "import json,os;a=json.load(open(os.path.expanduser('~/.claude.json'))).get('oauthAccount') or {};" +
+    "print(json.dumps({'email':a.get('emailAddress'),'accountUuid':a.get('accountUuid')}))";
+  const cmd = 'cat "$HOME/.claude-profiles/active" 2>/dev/null; echo ' + INV_SEP_1 + '; ' +
+    'ls -1 "$HOME/.claude-profiles/" 2>/dev/null; echo ' + INV_SEP_2 + '; ' +
+    'cat "$HOME/.claude/.credentials.json" 2>/dev/null; echo ' + INV_SEP_3 + '; ' +
+    'python3 -c "' + pyCode + '" 2>/dev/null';
+  const r = await sshExec(cfg, cmd, Number(cfg.sshTimeoutSec) || 8, opts);
+  if (r.code === 255 || r.timedOut) {
+    return { ...empty, error: (r.stderr || (r.timedOut ? 'ssh timed out' : 'ssh link error')).trim() };
+  }
+  const [activePart, rest1] = _splitOnce(String(r.stdout || ''), INV_SEP_1);
+  const [lsPart, rest2] = _splitOnce(rest1 == null ? '' : rest1, INV_SEP_2);
+  const [credPart, pyPart] = _splitOnce(rest2 == null ? '' : rest2, INV_SEP_3);
+
+  // Active name: first non-empty line of section 0 (the marker file is a
+  // single bare name; extra whitespace tolerated).
+  const activeName = activePart.split('\n').map((l) => l.trim()).find((l) => l) || null;
+
+  // Profile names: every *.credentials.json entry with the suffix stripped.
+  const profileNames = (rest1 == null ? '' : lsPart)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith(PROFILE_FILE_SUFFIX))
+    .map((l) => l.slice(0, -PROFILE_FILE_SUFFIX.length))
+    .filter((l) => l.length > 0);
+
+  // Live token file text: kept verbatim (whitespace-trimmed) for the
+  // strictly-newer merge in syncBackFromMac. Empty section means the file
+  // is absent or unreadable.
+  const credText = (rest2 == null ? '' : credPart).trim();
+  const liveCredText = credText ? credText : null;
+
+  // Identity: last non-empty line of the python section parsed as JSON.
+  let identity = null;
+  if (pyPart != null) {
+    const lines = pyPart.split('\n').map((l) => l.trim()).filter((l) => l);
+    if (lines.length > 0) {
+      try {
+        const parsed = JSON.parse(lines[lines.length - 1]);
+        if (parsed && typeof parsed === 'object') {
+          identity = { email: parsed.email || null, accountUuid: parsed.accountUuid || null };
+        }
+      } catch (_) {
+        identity = null; // garbled python output degrades to no identity
+      }
+    }
+  }
+  return { reachable: true, activeName, profileNames, liveCredText, identity };
+}
+
+/**
+ * Match a Mac inventory against the local snapshot store by profile slug.
+ * Every remote profile name is resolved to the local snapshot whose
+ * profileSlug(snapshot) equals it (null when nothing matches, e.g. a
+ * profile created on the Mac by hand). Duplicate slugs (two snapshots with
+ * the same label) resolve to the first snapshot encountered; slugs are
+ * derived from user labels, so collisions are user-visible and harmless
+ * here (both rows would show the same location pill).
+ *
+ * @param {object} manager - Credential manager instance (listSnapshots).
+ * @param {{activeName: string|null, profileNames: string[]}} inventory - From readMacInventory.
+ * @returns {{activeProfileId: string|null, profiles: Array<{name: string, profileId: string|null}>}}
+ */
+function resolveInventoryProfiles(manager, inventory) {
+  const bySlug = new Map();
+  try {
+    for (const snap of manager.listSnapshots()) {
+      const slug = profileSlug(snap);
+      if (!bySlug.has(slug)) bySlug.set(slug, snap.accountUuid);
+    }
+  } catch (_) { /* an unreadable store degrades to zero matches */ }
+  const names = (inventory && Array.isArray(inventory.profileNames)) ? inventory.profileNames : [];
+  const profiles = names.map((name) => ({ name, profileId: bySlug.get(name) || null }));
+  const activeName = inventory && inventory.activeName ? inventory.activeName : null;
+  const activeProfileId = activeName ? (bySlug.get(activeName) || null) : null;
+  return { activeProfileId, profiles };
+}
+
 /**
  * Build a shell-safe remote profile name from a snapshot: slugified label
  * (lowercase, runs of non-alphanumerics collapse to single hyphens, edges
@@ -307,6 +440,8 @@ module.exports = {
   sshExec,
   scpSend,
   readMacLiveState,
+  readMacInventory,
+  resolveInventoryProfiles,
   profileSlug,
   mirrorToMac,
 };
