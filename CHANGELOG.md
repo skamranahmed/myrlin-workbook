@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Read-only live session mirror (issue #10, Tier 1).** Right-click any discovered session in the sidebar and pick "Mirror Session" to watch its conversation stream live in a terminal-grid pane, without resuming or otherwise touching the session. Why: sessions started outside the workbook (another window, SSH, the Mac) were invisible until they finished; the only option was resuming them, which grabs the session lock and can derail the CLI driving it. The mirror tails the provider's transcript artifact (Claude project JSONL, Codex rollout JSONL) by byte offset, so a 1.86GB transcript costs a 2MB tail read, never a full scan.
+  - **Backend (`src/web/mirror-service.js`)**: refcounted watcher registry keyed by `provider:providerSessionId`; one `JsonlTailer` per key no matter how many tabs watch it. Named limits: 2MB history window, 10 concurrent watchers (409 past that), 60s idle grace after the last close (a page refresh keeps the warm watcher), 8192-char message text cap (SSE frames stay small), and a sweep that unsubscribes devices whose SSE client vanished so a killed tab can never pin a watcher forever. Truncated/rotated transcripts broadcast `mirror:reset` and re-seed from the new tail; a deleted transcript broadcasts `mirror:closed` and tears down.
+  - **API**: `POST /api/mirror/open` (returns history + byte offsets + a live flag), `POST /api/mirror/close`, `GET /api/mirror/history` (stateless "Load earlier" paging window). All auth-gated; provider ids validated with the same pattern as session creation, session ids as `[a-zA-Z0-9_-]{1,256}`.
+  - **SSE scoping**: `mirror:*` events are delivered ONLY to the SSE clients whose `deviceId` opened that mirror, never globally. Why: a busy session emits bursts of transcript lines and broadcasting them to every connected client would melt mobile connections; scoping also keeps one tab's mirror from echoing into another.
+  - **Frontend (`src/web/public/mirror-view.js`)**: new `mirror` pane view type. Provider-accented header with a live dot, user bubbles / assistant blocks / collapsed tool rows, pinned-bottom autoscroll that never yanks a user out of scrollback, Load-earlier with scroll anchoring, skeleton loading rows, and every transcript string escaped (tool output inside transcripts is treated as hostile HTML). Each browser tab carries a per-tab `deviceId` (sessionStorage) appended to the SSE URL and mirror calls; SSE reconnects idempotently re-open active mirrors so no lines are lost across a drop. Mirror panes persist in the pane layout and re-open on restore and tab-group switches.
+  - **Duplicate-free sequencing**: history snapshots and live batches tile by byte offset (`prevOffset`/`offset` on every batch, tailer drained before each history snapshot); the client skips already-covered batches and falls back to one idempotent re-open on a detected gap.
+- **Live dot on discovered sessions (issue #10, Phase 0).** Sidebar session rows show a green pulse when the session's transcript was written within the last 2 minutes (`live` + `lastActiveMs` fields on `/api/discover` records, threshold `CWM_LIVE_THRESHOLD_MS`). The tooltip states this is an mtime heuristic ("transcript recently written"), not proof a process is running, so a hung CLI is not misrepresented. Archived threads are never marked live. The dot's pulse is disabled under `prefers-reduced-motion`.
+
+### Testing
+
+- New hermetic suites (sandboxed `CWM_DATA_DIR`, tmpdir JSONL fixtures, fake registry providers, fast injected timings; every watcher disposed in `finally` so `npm test` can never hang on `fs.watch` handles): `test/mirror-service.test.js` (open/close refcounts, batched broadcasts with contiguous offsets, watcher limit, truncate reset, gap-free `readEarlier` paging, text cap, vanished-subscriber sweep, disposeAll) and `test/mirror-routes.test.js` (route happy paths, 400/404/409 error mapping, input validation, auth gate, SSE `deviceId` scoping proof, and the Phase 0 `groupProviderSessionsForUI` live-flag matrix: fresh/stale/archived/missing mtimes).
+- `test/run.js` now also registers the Tier 1 foundation suites that shipped standalone (`jsonl-tailer`, `claude-mirror-parse`, `codex-mirror-parse`), so the byte-offset tailer and both provider `parseLine` contracts run in CI with everything else.
+
+### Notes
+
+- Tier 2 (fork a mirrored session into an interactive one via the provider's resume/fork capability; `supportsForkResume` is already exported by both providers) and Tier 3 (multi-client presence badges showing who else is mirroring) are deliberately deferred follow-ups; the read-only pane ships first.
+
 ## [1.2.0-alpha.15] - 2026-07-03
 
 ### Added
