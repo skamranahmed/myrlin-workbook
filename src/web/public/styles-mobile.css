@@ -1156,6 +1156,23 @@
     min-height: 44px;
   }
 
+  /* Machine segments (PC/MAC) get comfier touch targets in the sheet;
+     same states and tokens as desktop (mobile parity for the per-machine
+     staging flow). */
+  .account-seg {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  /* Machines strip: a touch more breathing room inside the sheet. */
+  .account-machines {
+    padding: 10px 16px;
+  }
+
+  .account-pending-line {
+    font-size: 12px;
+  }
+
   /* Footer buttons: full-width, stacked, Save on top (column-reverse
      mirrors the .modal-footer treatment near the top of this file). */
   .account-panel-actions {

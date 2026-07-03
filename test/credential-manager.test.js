@@ -1087,6 +1087,164 @@ let stubBase = '';
     assertEqual(list2.profiles.find((p) => p.profileId === UUID_C).health, 'needs-attention');
   });
 
+  // ─── Mac bridge support: syncBackFromMac + mac-state cache ────────────────
+
+  await test('syncBackFromMac adopts ONLY strictly-newer credentials and resurrects tokenState', async () => {
+    const fx = makeFixture();
+    const storedExp = Date.now() + HOUR_MS;
+    fx.manager.saveSnapshot({
+      accountUuid: UUID_B,
+      email: EMAIL_B,
+      credentials: makeOauth('MACBASE', storedExp),
+      identity: makeIdentity(UUID_B, EMAIL_B),
+      tokenState: TOKEN_STATE_NEEDS_LOGIN, // presumed dead; the Mac proves otherwise
+    });
+    // Strictly newer: adopted, metadata merged, state resurrected.
+    const newer = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACNEW', refreshToken: 'rt-FIXTURE-MACNEW', expiresAt: storedExp + HOUR_MS } });
+    const r1 = await fx.manager.syncBackFromMac(UUID_B, newer);
+    assertEqual(r1.synced, true, 'strictly newer expiresAt adopted');
+    assertEqual(r1.resurrected, true, 'live Mac login resurrects needs_login');
+    const snap1 = fx.manager.readSnapshot(UUID_B);
+    assertEqual(snap1.credentials.accessToken, 'at-FIXTURE-MACNEW');
+    assertEqual(snap1.tokenState, TOKEN_STATE_OK);
+    assertEqual(snap1.credentials.subscriptionType, 'max', 'lean Mac copy cannot drop stored metadata (merge, not replace)');
+    // Equal expiresAt: NOT adopted (strictly newer only).
+    const equal = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACEQ', refreshToken: 'rt-x', expiresAt: storedExp + HOUR_MS } });
+    const r2 = await fx.manager.syncBackFromMac(UUID_B, equal);
+    assertEqual(r2.synced, false, 'equal expiresAt never regresses/overwrites');
+    assertEqual(fx.manager.readSnapshot(UUID_B).credentials.accessToken, 'at-FIXTURE-MACNEW');
+    // Older: NOT adopted.
+    const older = JSON.stringify({ claudeAiOauth: { accessToken: 'at-FIXTURE-MACOLD', refreshToken: 'rt-y', expiresAt: storedExp - HOUR_MS } });
+    const r3 = await fx.manager.syncBackFromMac(UUID_B, older);
+    assertEqual(r3.synced, false, 'stale Mac copy never regresses a fresher snapshot');
+    // Unparseable text: structured no-op, never a throw.
+    const r4 = await fx.manager.syncBackFromMac(UUID_B, 'not json');
+    assertEqual(r4.synced, false);
+    assert(r4.reason, 'reason reported for unparseable text');
+    // Unknown account: never fabricates a snapshot from Mac-side data.
+    const r5 = await fx.manager.syncBackFromMac(UUID_C, newer);
+    assertEqual(r5.synced, false);
+    assertEqual(fx.manager.readSnapshot(UUID_C), null, 'no snapshot fabricated');
+  });
+
+  await test('setMacState whitelists fields (defense in depth) and getMacState serves the cache', async () => {
+    const fx = makeFixture();
+    assertEqual(fx.manager.getMacState(), null, 'null until the first sweep');
+    // Hostile input: secret-bearing fields must be dropped by the whitelist
+    // even if a future caller passed a raw inventory object by mistake.
+    const stored = fx.manager.setMacState({
+      checkedAt: '2026-07-03T10:00:00.000Z',
+      reachable: true,
+      activeName: 'work-laptop',
+      activeProfileId: UUID_B,
+      profiles: [
+        { name: 'work-laptop', profileId: UUID_B, liveCredText: 'SECRET' },
+        { name: 'stray', profileId: 'not-a-uuid!' },
+        'garbage-entry',
+      ],
+      liveCredText: 'at-FIXTURE-SECRET',
+      credentials: { accessToken: 'at-FIXTURE-SECRET' },
+    });
+    const raw = JSON.stringify(stored);
+    assert(raw.indexOf('SECRET') === -1, 'no secret value survives the whitelist');
+    assert(raw.indexOf('liveCredText') === -1, 'liveCredText key stripped');
+    assert(raw.indexOf('accessToken') === -1, 'accessToken key stripped');
+    assertEqual(stored.activeProfileId, UUID_B);
+    assertEqual(stored.profiles.length, 2, 'non-object entries dropped');
+    assertEqual(stored.profiles[0].profileId, UUID_B);
+    assertEqual(stored.profiles[1].profileId, null, 'invalid uuid normalized to null');
+    assertEqual(fx.manager.getMacState(), stored, 'cache served as stored');
+    // Invalid activeProfileId normalized to null; clear works.
+    const bad = fx.manager.setMacState({ reachable: false, activeProfileId: '../etc/passwd' });
+    assertEqual(bad.activeProfileId, null);
+    assert(bad.checkedAt, 'missing checkedAt stamped');
+    fx.manager.setMacState(null);
+    assertEqual(fx.manager.getMacState(), null, 'cache cleared');
+  });
+
+  await test('Mac-active lineage hint: set/get, settingsPatcher persistence, restart survival, junk rejection', async () => {
+    // Mutable settings object doubling as the "store": the patcher writes
+    // into it, exactly like the server's store.updateSettings wiring.
+    const settings = {};
+    const patches = [];
+    const fx = makeFixture({
+      settings,
+      managerOpts: {
+        settingsPatcher: (patch) => { patches.push(patch); Object.assign(settings, patch); },
+      },
+    });
+    assertEqual(fx.manager.getMacActiveHint(), null, 'no hint by default');
+    assertEqual(fx.manager.setMacActiveHint(UUID_B), UUID_B);
+    assertEqual(fx.manager.getMacActiveHint(), UUID_B);
+    assertEqual(patches.length, 1, 'hint persisted through the patcher');
+    assertEqual(patches[0].macActiveProfileId, UUID_B);
+    // "Restart": a NEW manager over the same settings reads the persisted hint.
+    const fx2 = makeFixture({ settings });
+    assertEqual(fx2.manager.getMacActiveHint(), UUID_B, 'hint survives a manager restart via settings');
+    // Junk normalizes to null (never a path-unsafe value near uuids).
+    assertEqual(fx.manager.setMacActiveHint('../etc/passwd'), null);
+    assertEqual(fx.manager.getMacActiveHint(), null);
+    assertEqual(patches[patches.length - 1].macActiveProfileId, null);
+    // A manager WITHOUT a patcher still works session-only.
+    const fx3 = makeFixture();
+    fx3.manager.setMacActiveHint(UUID_C);
+    assertEqual(fx3.manager.getMacActiveHint(), UUID_C, 'memory-only hint without a patcher');
+  });
+
+  await test('LINEAGE GATE PROOF: a Mac-active EXPIRED account triggers ZERO token-endpoint calls', async () => {
+    resetStub();
+    const fx = makeFixture(); // live PC account is A; B is inactive here
+    // Expired inactive snapshot: WITHOUT the hint this is exactly the shape
+    // that triggers refreshInactiveToken (proven by the contrast below).
+    fx.manager.saveSnapshot({
+      accountUuid: UUID_B,
+      email: EMAIL_B,
+      credentials: makeOauth('MACEXP', Date.now() - HOUR_MS),
+      identity: makeIdentity(UUID_B, EMAIL_B),
+      tokenState: TOKEN_STATE_OK,
+    });
+    fx.manager.setMacActiveHint(UUID_B);
+    // Phase 1: no refresher registered (Mac offline scenario). The gate
+    // must skip the round entirely: no token call, no usage call, and the
+    // account must NOT be marked dead (the Mac owns its lineage).
+    const snap1 = await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(stub.tokenHits, 0, 'ZERO token-endpoint calls for the Mac-active account');
+    assertEqual(stub.usageHits, 0, 'expired stored token is never used for usage either');
+    assertEqual(snap1.tokenState, TOKEN_STATE_OK, 'never marked dead by the gate');
+    assertEqual(snap1.credentials.accessToken, 'at-FIXTURE-MACEXP', 'credentials untouched');
+    // Phase 2: refresher registered (Mac reachable). The pre-pull adopts
+    // the Mac's fresh rotation via syncBackFromMac; usage is then fetched
+    // READ-ONLY with the adopted token; the token endpoint stays silent.
+    let refresherCalls = 0;
+    const freshText = JSON.stringify({ claudeAiOauth: {
+      accessToken: 'at-FIXTURE-MACFRESH',
+      refreshToken: 'rt-FIXTURE-MACFRESH',
+      expiresAt: Date.now() + 6 * HOUR_MS,
+    } });
+    fx.manager.setMacStateRefresher(async () => {
+      refresherCalls += 1;
+      await fx.manager.syncBackFromMac(UUID_B, freshText);
+    });
+    const snap2 = await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(refresherCalls, 1, 'expired Mac-active account pulls fresh Mac state first');
+    assertEqual(stub.tokenHits, 0, 'STILL zero token-endpoint calls after the Mac pull');
+    assertEqual(stub.usageHits, 1, 'usage fetched read-only with the adopted token');
+    assertEqual(stub.lastUsageAuth, 'Bearer at-FIXTURE-MACFRESH', 'the ADOPTED Mac token was used');
+    assert(snap2.usage, 'usage stored');
+    assertEqual(snap2.credentials.refreshToken, 'rt-FIXTURE-MACFRESH', 'Mac rotation adopted, not re-rotated');
+    // Fresh token now: the refresher must NOT fire again (no pointless SSH).
+    await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(refresherCalls, 1, 'unexpired Mac-active account skips the pre-pull');
+    assertEqual(stub.tokenHits, 0, 'still zero');
+    // CONTRAST: clear the hint and expire the snapshot again; the exact
+    // same shape now DOES refresh, proving the gate (not the fixture) is
+    // what prevented the token calls above.
+    fx.manager.setMacActiveHint(null);
+    fx.manager.saveSnapshot({ accountUuid: UUID_B, credentials: makeOauth('MACEXP2', Date.now() - HOUR_MS) });
+    await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(stub.tokenHits, 1, 'without the hint the same expired shape refreshes (contrast)');
+  });
+
   stubServer.close();
   console.log('  ' + '─'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');
