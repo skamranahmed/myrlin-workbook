@@ -109,6 +109,13 @@ class CWMApp {
    *  so several sessions finishing together produce one ding, not a burst. */
   static CHIME_COOLDOWN_MS = 5000;
 
+  /** Git panel/pane auto-refresh cadence. Raised from 10s because every poll
+   *  runs `git status`, which on Windows spawns a git.exe plus a conhost; a 10s
+   *  loop that also ran in background tabs produced a constant terminal-flash
+   *  and steady process churn. Paired with a document.hidden guard at each
+   *  timer site so a hidden tab polls not at all. */
+  static GIT_PANEL_POLL_MS = 30000;
+
   // ── Credential switcher constants (design doc sections 6.2 and 6.4) ──
   /** Usage cache staleness threshold; mirrors the server's usageCacheMinutes
    *  default (10 min). Stale rows dim their countdown and trigger one
@@ -5579,11 +5586,15 @@ class CWMApp {
     if (name === 'td') this.renderTasksTdPanel();
     if (name === 'git') {
       this.renderTasksGitPanel();
-      // Start auto-refresh every 10 seconds while git tab is active
+      // Auto-refresh while the git tab is active, but skip entirely when the
+      // browser tab is hidden. Each refresh runs `git status` (a git.exe +
+      // conhost spawn on Windows); polling a background tab every 10s flashed
+      // terminals and churned processes for no visible benefit.
       if (this._gitRefreshTimer) clearInterval(this._gitRefreshTimer);
       this._gitRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
         if (this._activeTasksTab === 'git') this.renderTasksGitPanel();
-      }, 10000);
+      }, CWMApp.GIT_PANEL_POLL_MS);
     } else {
       // Clear git refresh timer when switching away from git tab
       if (this._gitRefreshTimer) {
@@ -12924,7 +12935,13 @@ class CWMApp {
     switch (viewType) {
       case 'tasks-git':
         await this.renderTasksGitPanel(container);
-        this._paneRefreshTimers[slotIdx] = setInterval(() => this.renderTasksGitPanel(container), 10000);
+        // Same guard as the git tasks tab: never poll while the browser tab is
+        // hidden, and use the shared, less-aggressive cadence, so a parked
+        // git pane stops spawning git.exe + conhost every 10s on Windows.
+        this._paneRefreshTimers[slotIdx] = setInterval(() => {
+          if (document.hidden) return;
+          this.renderTasksGitPanel(container);
+        }, CWMApp.GIT_PANEL_POLL_MS);
         break;
       case 'tasks-td':
         await this.renderTasksTdPanel(container);
