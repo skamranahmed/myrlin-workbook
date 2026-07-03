@@ -228,6 +228,8 @@ class JsonlTailer {
     this._checking = false;
     /** @type {boolean} A change arrived while a read was in flight. */
     this._recheck = false;
+    /** @type {Promise<void>|null} In-flight read pipeline, memoized so drain() can await it. */
+    this._checkPromise = null;
 
     /** @type {number} Consecutive checks that observed ENOENT. */
     this._missingChecks = 0;
@@ -334,19 +336,53 @@ class JsonlTailer {
   }
 
   /**
+   * Public catch-up barrier (issue #10 Phase 3). Resolves once every byte
+   * present in the file at call time has been read and delivered through
+   * onLines. MirrorService.open() awaits this on repeat opens BEFORE taking
+   * a fresh readTailWindow snapshot, so the window's endOffset is always
+   * >= the tailer's broadcast offset and the client-side offset-dedupe can
+   * skip already-seen batches instead of resyncing.
+   *
+   * Never throws (delegates to _check, which swallows internally).
+   *
+   * @returns {Promise<void>} Settles after the in-flight (or newly started)
+   *   read pipeline finishes its final pass.
+   */
+  async drain() {
+    await this._check();
+  }
+
+  /**
    * Serialized entry point for "the file may have changed". Guarantees only
    * one read pipeline runs at a time; changes that arrive mid-read set a
    * recheck flag and are handled immediately after, so no event is lost.
    * Never throws (a tailer tick must never take the server down).
    *
+   * Returns the in-flight pipeline promise so drain() is a REAL barrier:
+   * when a check is already running, the recheck flag makes that pipeline
+   * do one more pass, and awaiting the shared promise resolves only after
+   * that extra pass completes. (Previously a concurrent call resolved
+   * immediately, which would have made drain() a lie.)
+   *
    * @returns {Promise<void>}
    */
-  async _check() {
-    if (this._stopped) return;
+  _check() {
+    if (this._stopped) return Promise.resolve();
     if (this._checking) {
       this._recheck = true;
-      return;
+      return this._checkPromise || Promise.resolve();
     }
+    this._checkPromise = this._runCheckLoop();
+    return this._checkPromise;
+  }
+
+  /**
+   * The actual read loop behind _check. Split out so _check can memoize the
+   * in-flight promise for drain(). Never rejects.
+   *
+   * @returns {Promise<void>}
+   */
+  async _runCheckLoop() {
     this._checking = true;
     try {
       do {
@@ -359,6 +395,7 @@ class JsonlTailer {
       // rejection inside a timer callback.
     } finally {
       this._checking = false;
+      this._checkPromise = null;
     }
   }
 
