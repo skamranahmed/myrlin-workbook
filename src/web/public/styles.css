@@ -8559,7 +8559,9 @@ html {
 
 .account-usage-row {
   display: grid;
-  grid-template-columns: 28px 64px 30px 1fr;
+  /* Key column widened from 28px for the per-model rows ('Fable' is 5 mono
+     chars); every row shares the width so the bars stay column-aligned. */
+  grid-template-columns: 34px 64px 30px 1fr;
   gap: 6px;
   align-items: center;
   font-size: 10px;
@@ -8748,6 +8750,117 @@ html {
   display: none;
 }
 
+/* ─── Per-model usage meter (header top-right) ───────────────────
+   Compact stacked bars for the ACTIVE account: Session (5h), the true
+   account-wide cooldown, plus Opus and Fable, which the API only exposes
+   as WEEKLY-scoped limits. Each bar shows utilization percent and the
+   exact local reset time; tooltips restate the window scope so the weekly
+   per-model data is never read as hourly. All colors are semantic theme
+   tokens so the meter holds up across all 13 themes, light ones included. */
+
+.usage-meter {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+/* Author display above beats the UA [hidden] rule; mirror the
+   .account-panel[hidden] guard so the hidden attribute always wins. */
+.usage-meter[hidden] {
+  display: none;
+}
+
+.usage-meter-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage-meter-row {
+  display: grid;
+  /* key / track / percent / local reset time. Fixed columns keep the three
+     bars visually aligned; the reset column sizes to its own text. */
+  grid-template-columns: 30px 60px 30px auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--overlay0);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-meter-key {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.usage-meter-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface0);
+  overflow: hidden;
+}
+
+.usage-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Same semantic thresholds as .account-usage-fill (design 6.3): green
+   below 60, amber 60 to 85, red above 85. Classes come from
+   _usageFillClass so the two surfaces can never drift. */
+.usage-meter-fill.u-low { background: var(--green); }
+.usage-meter-fill.u-mid { background: var(--yellow); }
+.usage-meter-fill.u-high { background: var(--red); }
+
+.usage-meter-pct {
+  text-align: right;
+}
+
+.usage-meter-reset {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+/* Usage cache older than the server TTL: dim the reset texts, matching the
+   chip meta's is-stale treatment. */
+.usage-meter.is-stale .usage-meter-reset {
+  opacity: 0.55;
+}
+
+/* Desktop width ladder for the meter (mirrors the account chip ladder
+   above): the reset times are the first casualty (tooltips and the panel
+   still carry them), and below 1280px the whole meter yields to the tab
+   row (the data remains one chip-click away in the panel). min-width 769px
+   keeps these rules off phones, where the header-right rail is hidden and
+   the bottom-sheet mirror takes over. */
+@media (min-width: 769px) and (max-width: 1599px) {
+  #usage-meter .usage-meter-reset {
+    display: none;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1279px) {
+  .usage-meter {
+    display: none;
+  }
+}
+
+/* Bottom-sheet mirror of the meter: desktop hides it (the header widget
+   plus the per-row usage lines already cover desktop); the phone media
+   query in styles-mobile.css shows it inside the account sheet. */
+.account-panel-meter {
+  display: none;
+}
+
 /* Motion preferences: no enter transform/opacity animation and no bar
    width transitions when the user asks for reduced motion. */
 @media (prefers-reduced-motion: reduce) {
@@ -8755,6 +8868,9 @@ html {
     animation: none;
   }
   .account-usage-fill {
+    transition: none;
+  }
+  .usage-meter-fill {
     transition: none;
   }
   .account-chip.is-applying .account-chip-avatar {

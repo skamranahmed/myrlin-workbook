@@ -536,9 +536,16 @@ function createCredentialManager(opts = {}) {
 
   /**
    * Sanitize the raw usage-endpoint response to the stored shape:
-   * five_hour/seven_day {utilization, resets_at} plus a sanitized limits[]
-   * array. Null-tolerant everywhere; endpoint drift degrades to nulls,
-   * never to a crash.
+   * five_hour/seven_day {utilization, resets_at}, optional per-model weekly
+   * windows (seven_day_opus / seven_day_sonnet, usually null upstream), plus
+   * a sanitized limits[] array. Per-model breakdown: 'weekly_scoped' limit
+   * rows carry an OBJECT scope whose scope.model.display_name is the model
+   * name (e.g. 'Opus', 'Fable'); that display name is extracted onto
+   * row.model so the UI can render per-model meters. String scopes are kept
+   * as row.scope (legacy shape). The raw scope object itself is NEVER
+   * stored (whitelist discipline; only the display name survives).
+   * Null-tolerant everywhere; endpoint drift degrades to nulls, never to a
+   * crash.
    *
    * @param {object|null} raw - Parsed usage response body.
    * @returns {object|null} Stored usage shape, or null.
@@ -557,6 +564,13 @@ function createCredentialManager(opts = {}) {
       seven_day: pickWindow(raw.seven_day),
       fetchedAt: new Date(clock()).toISOString(),
     };
+    // Top-level per-model weekly windows. The endpoint sends these as null
+    // for most accounts; capture them only when present and object-shaped so
+    // the stored snapshot stays lean and old snapshots keep their shape.
+    const sevenDayOpus = pickWindow(raw.seven_day_opus);
+    if (sevenDayOpus) usage.seven_day_opus = sevenDayOpus;
+    const sevenDaySonnet = pickWindow(raw.seven_day_sonnet);
+    if (sevenDaySonnet) usage.seven_day_sonnet = sevenDaySonnet;
     if (Array.isArray(raw.limits)) {
       usage.limits = raw.limits
         .filter((l) => l && typeof l === 'object')
@@ -568,7 +582,16 @@ function createCredentialManager(opts = {}) {
           if (typeof l.severity === 'string') row.severity = l.severity;
           if (typeof l.resets_at === 'string') row.resets_at = l.resets_at;
           if (typeof l.is_active === 'boolean') row.is_active = l.is_active;
-          if (typeof l.scope === 'string') row.scope = l.scope;
+          if (typeof l.scope === 'string') {
+            row.scope = l.scope;
+          } else if (l.scope && typeof l.scope === 'object'
+            && l.scope.model && typeof l.scope.model === 'object'
+            && typeof l.scope.model.display_name === 'string') {
+            // Object scope: the per-model breakdown. Extract ONLY the
+            // display name; a malformed scope (missing model or a non-string
+            // display_name) degrades to no model field, never a throw.
+            row.model = l.scope.model.display_name;
+          }
           return row;
         });
     }

@@ -128,6 +128,11 @@ class CWMApp {
    *  echoes of this client's own mutation (apply/rename/capture) and are
    *  not toasted as remote changes. */
   static CRED_SELF_ACTION_MS = 8000;
+  /** Usage bar fill thresholds (design 6.3, shared by the account panel
+   *  mini-bars and the header usage meter): below MID renders the green
+   *  fill, MID up to and including HIGH the amber fill, above HIGH red. */
+  static USAGE_PCT_MID = 60;
+  static USAGE_PCT_HIGH = 85;
 
   constructor() {
     // ─── State ─────────────────────────────────────────────────
@@ -331,6 +336,11 @@ class CWMApp {
       accountCancelBtn: document.getElementById('account-cancel-btn'),
       accountMacToggle: document.getElementById('account-mac-toggle'),
       accountMacCheckbox: document.getElementById('account-mac-checkbox'),
+      // Per-model usage meter (header top-right widget + the mobile mirror
+      // rendered inside the account bottom sheet). See renderUsageMeter().
+      usageMeter: document.getElementById('usage-meter'),
+      usageMeterBars: document.getElementById('usage-meter-bars'),
+      accountPanelMeter: document.getElementById('account-panel-meter'),
 
       // Sessions
       sessionPanelTitle: document.getElementById('session-panel-title'),
@@ -2307,6 +2317,9 @@ class CWMApp {
     this._closeAccountPanel();
     if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = true;
     this.state.credentials = { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null };
+    // The usage meter lives outside the switcher subtree, so re-render it
+    // against the now-empty roster to hide and clear its bars too.
+    this.renderUsageMeter();
     this.disconnectSSE();
     this.showLogin();
   }
@@ -8314,6 +8327,11 @@ class CWMApp {
     }
     if (els.accountChip) els.accountChip.classList.toggle('is-applying', cred.applying);
 
+    // Header usage meter rides the exact same render path as the chip so it
+    // updates on initial load, refresh-usage, account switches, and both
+    // credentials:* SSE broadcasts without any extra wiring.
+    this.renderUsageMeter();
+
     // Panel applying state is synced even while hidden so a panel closed
     // mid-apply can never get stuck inert.
     if (els.accountPanel) {
@@ -8396,13 +8414,23 @@ class CWMApp {
     else if (email) secondary = (p.profileId || '').slice(0, 8) + ' unnamed';
 
     let usageHtml = '';
+    // Per-model weekly windows (Opus / Fable) come from the weekly_scoped
+    // limits (see _accountModelWindow). Computed before the branch so an
+    // account with ONLY model-scoped data still renders usage rows.
+    const opusWin = this._accountModelWindow(p, 'Opus');
+    const fableWin = this._accountModelWindow(p, 'Fable');
     if (isDead) {
       usageHtml = '<span class="account-row-dead-note">needs re-login (stored token is dead)</span>';
-    } else if (p.usage && (p.usage.five_hour || p.usage.seven_day)) {
+    } else if (p.usage && (p.usage.five_hour || p.usage.seven_day || opusWin || fableWin)) {
       const stale = this._isUsageStale(p) ? ' is-stale' : '';
+      // Model rows render with absolute=true: Arthur wants the exact local
+      // reset time for per-model cooldowns, and these windows are WEEKLY
+      // scoped (a countdown in minutes would read as an hourly window).
       usageHtml = `<span class="account-usage${stale}">`
         + this._accountUsageRowHtml('5h', p.usage.five_hour, false)
         + this._accountUsageRowHtml('week', p.usage.seven_day, true)
+        + (opusWin ? this._accountUsageRowHtml('Opus', opusWin, true, 'Opus weekly usage') : '')
+        + (fableWin ? this._accountUsageRowHtml('Fable', fableWin, true, 'Fable weekly usage') : '')
         + '</span>';
     } else {
       usageHtml = '<span class="account-usage-unavailable">usage unavailable</span>';
@@ -8439,31 +8467,193 @@ class CWMApp {
   }
 
   /**
-   * Build one usage mini-bar row (5h or week): 4px track, colored fill,
-   * percent, and the reset text. Reset spans carry data-reset-at (and
-   * data-absolute for the weekly line) so the 60s tick can update the
-   * countdown text in place without a focus-stealing re-render.
-   * @param {string} keyLabel - Short window label shown left ('5h' or 'week').
+   * Build one usage mini-bar row (5h, week, or a per-model weekly window):
+   * 4px track, colored fill, percent, and the reset text. Reset spans carry
+   * data-reset-at (and data-absolute for absolute lines) so the 60s tick
+   * can update the countdown text in place without a focus-stealing
+   * re-render.
+   * @param {string} keyLabel - Short window label shown left ('5h', 'week', 'Opus', 'Fable').
    * @param {object|null} u - { utilization, resets_at } window object, or null.
    * @param {boolean} absolute - Render the reset as an absolute day/time.
+   * @param {string} [titleText] - Optional hover tooltip prefix; the exact local
+   *   reset time is appended so hover always carries the full story.
    * @returns {string} Row HTML, or '' when the window object is missing.
    */
-  _accountUsageRowHtml(keyLabel, u, absolute) {
+  _accountUsageRowHtml(keyLabel, u, absolute, titleText) {
     if (!u) return '';
     const pct = Math.max(0, Math.min(100, Math.round(Number(u.utilization) || 0)));
-    // Fill color thresholds per design 6.3: green below 60, yellow 60 to 85,
-    // red above 85.
-    const fillClass = pct > 85 ? 'u-high' : (pct >= 60 ? 'u-mid' : 'u-low');
+    const fillClass = this._usageFillClass(pct);
     const resetText = u.resets_at ? this._formatResetText(u.resets_at, absolute) : '';
     const resetAttrs = u.resets_at
       ? ` data-reset-at="${this.escapeHtml(u.resets_at)}"${absolute ? ' data-absolute="1"' : ''}`
       : '';
-    return `<span class="account-usage-row">
+    // Tooltips always spell out the EXACT local reset so a truncated inline
+    // reset text never hides the answer.
+    const titleAttr = titleText
+      ? ` title="${this.escapeHtml(titleText + (resetText ? '. ' + resetText : ''))}"`
+      : '';
+    return `<span class="account-usage-row"${titleAttr}>
       <span class="account-usage-key">${this.escapeHtml(keyLabel)}</span>
       <span class="account-usage-bar"><span class="account-usage-fill ${fillClass}" style="width:${pct}%"></span></span>
       <span class="account-usage-pct">${pct}%</span>
       <span class="account-usage-reset"${resetAttrs}>${this.escapeHtml(resetText)}</span>
     </span>`;
+  }
+
+  /**
+   * Map a clamped utilization percent to its fill-color class. Thresholds
+   * live in the USAGE_PCT_MID / USAGE_PCT_HIGH class constants (design 6.3:
+   * green below 60, amber 60 to 85, red above 85) and are shared by the
+   * account panel mini-bars and the header usage meter so the two surfaces
+   * can never drift apart.
+   * @param {number} pct - Utilization percent, already clamped to 0..100.
+   * @returns {'u-low'|'u-mid'|'u-high'} CSS fill class.
+   */
+  _usageFillClass(pct) {
+    if (pct > CWMApp.USAGE_PCT_HIGH) return 'u-high';
+    if (pct >= CWMApp.USAGE_PCT_MID) return 'u-mid';
+    return 'u-low';
+  }
+
+  /**
+   * Extract one per-model usage window from a profile row. Primary source:
+   * the sanitized usage.limits[] rows where kind === 'weekly_scoped' and
+   * row.model matches the requested model name case-insensitively (the
+   * server maps scope.model.display_name onto row.model). Fallback: the
+   * top-level usage.seven_day_<model> window (e.g. seven_day_opus), which
+   * the endpoint sometimes populates instead. Both sources are WEEKLY
+   * windows; there is no per-model hourly data upstream, which is why every
+   * caller renders these with absolute reset times and weekly-labelled
+   * tooltips. Null-tolerant: malformed rows or missing usage return null.
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @param {string} modelName - Model display name to look up (e.g. 'Opus', 'Fable').
+   * @returns {{utilization: number|null, resets_at: string|null}|null} Normalized window, or null.
+   */
+  _accountModelWindow(p, modelName) {
+    const usage = p && p.usage;
+    if (!usage || !modelName) return null;
+    const want = String(modelName).toLowerCase();
+    if (Array.isArray(usage.limits)) {
+      const row = usage.limits.find((l) => l && typeof l === 'object'
+        && l.kind === 'weekly_scoped'
+        && typeof l.model === 'string'
+        && l.model.toLowerCase() === want);
+      if (row && (typeof row.percent === 'number' || typeof row.resets_at === 'string')) {
+        return {
+          utilization: typeof row.percent === 'number' ? row.percent : null,
+          resets_at: typeof row.resets_at === 'string' ? row.resets_at : null,
+        };
+      }
+    }
+    // Top-level fallback (seven_day_opus / seven_day_sonnet today; the
+    // generic key means a future seven_day_<model> works without edits).
+    const fb = usage['seven_day_' + want];
+    if (fb && typeof fb === 'object'
+      && (typeof fb.utilization === 'number' || typeof fb.resets_at === 'string')) {
+      return {
+        utilization: typeof fb.utilization === 'number' ? fb.utilization : null,
+        resets_at: typeof fb.resets_at === 'string' ? fb.resets_at : null,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Build one compact meter bar row for the header usage meter (and its
+   * mobile mirror in the account sheet): short key, thin filled track,
+   * percent, and the EXACT local reset time (absolute, never a countdown,
+   * per Arthur's "exactly what time locally it will reset"). The reset span
+   * carries data-reset-at + data-absolute so the shared 60s tick refreshes
+   * it in place (matters at the moment a window rolls over to 'Resetting...').
+   * @param {string} keyLabel - Bar label ('5h', 'Opus', 'Fable').
+   * @param {object|null} u - { utilization, resets_at } window, or null.
+   * @param {string} titleText - Tooltip prefix stating the window scope
+   *   (session vs weekly); the local reset time is appended.
+   * @returns {string} Row HTML, or '' when the window object is missing.
+   */
+  _usageMeterRowHtml(keyLabel, u, titleText) {
+    if (!u) return '';
+    const pct = Math.max(0, Math.min(100, Math.round(Number(u.utilization) || 0)));
+    const fillClass = this._usageFillClass(pct);
+    const resetText = u.resets_at ? this._formatResetText(u.resets_at, true) : '';
+    const resetAttrs = u.resets_at
+      ? ` data-reset-at="${this.escapeHtml(u.resets_at)}" data-absolute="1"`
+      : '';
+    const titleAttr = titleText
+      ? ` title="${this.escapeHtml(titleText + (resetText ? '. ' + resetText : ''))}"`
+      : '';
+    return `<span class="usage-meter-row"${titleAttr}>
+      <span class="usage-meter-key">${this.escapeHtml(keyLabel)}</span>
+      <span class="usage-meter-bar"><span class="usage-meter-fill ${fillClass}" style="width:${pct}%"></span></span>
+      <span class="usage-meter-pct">${pct}%</span>
+      <span class="usage-meter-reset"${resetAttrs}>${this.escapeHtml(resetText)}</span>
+    </span>`;
+  }
+
+  /**
+   * Build the full bar stack for one profile's usage meter: the Session
+   * (5h) bar, which is the true account-wide cooldown, plus Opus and Fable
+   * bars sourced from their WEEKLY-scoped limits. Each bar carries its own
+   * exact local reset time; the tooltips name the window scope explicitly
+   * so weekly per-model data is never mislabelled as hourly. Bars with no
+   * data are simply omitted (no placeholders, no spinners).
+   * @param {object} p - Safe profile row (normally the ACTIVE account).
+   * @returns {string} Concatenated bar rows, or '' when no window has data.
+   */
+  _usageMeterBarsHtml(p) {
+    if (!p || !p.usage) return '';
+    const session = p.usage.five_hour || null;
+    const opusWin = this._accountModelWindow(p, 'Opus');
+    const fableWin = this._accountModelWindow(p, 'Fable');
+    return (session ? this._usageMeterRowHtml('5h', session, 'Session (5h) usage') : '')
+      + (opusWin ? this._usageMeterRowHtml('Opus', opusWin, 'Opus weekly usage') : '')
+      + (fableWin ? this._usageMeterRowHtml('Fable', fableWin, 'Fable weekly usage') : '');
+  }
+
+  /**
+   * Render the per-model usage meter for the ACTIVE account into both
+   * mounts: the header top-right widget (#usage-meter, desktop) and the
+   * account bottom-sheet mirror (#account-panel-meter, phone widths; CSS
+   * decides which mount is visible so both stay populated from one render).
+   * Hidden entirely when there is no active account, the active account is
+   * dead, or no usage window has data yet (never a spinner; the roster
+   * skeleton already covers first load). Called from renderAccountSwitcher
+   * so every chip update path (load, refresh, switch, SSE) repaints it.
+   * @returns {void}
+   */
+  renderUsageMeter() {
+    const els = this.els;
+    if (!els.usageMeter && !els.accountPanelMeter) return;
+    const cred = this.state.credentials;
+    const active = cred.list.find(x => x.profileId === cred.activeId) || null;
+    // A dead active account has no meaningful usage; hide rather than show
+    // stale bars that cannot refresh.
+    const usable = active && this.accountHealth(active) !== 'needs-re-login';
+    const barsHtml = usable ? this._usageMeterBarsHtml(active) : '';
+    const stale = usable ? this._isUsageStale(active) : false;
+    if (els.usageMeter) {
+      if (barsHtml) {
+        if (els.usageMeterBars) els.usageMeterBars.innerHTML = barsHtml;
+        els.usageMeter.hidden = false;
+        els.usageMeter.classList.toggle('is-stale', stale);
+      } else {
+        if (els.usageMeterBars) els.usageMeterBars.innerHTML = '';
+        els.usageMeter.hidden = true;
+      }
+    }
+    if (els.accountPanelMeter) {
+      if (barsHtml) {
+        // The sheet mirror adds a one-line scope note because touch devices
+        // have no hover tooltips to carry the weekly-vs-session nuance.
+        els.accountPanelMeter.innerHTML = barsHtml
+          + '<span class="account-panel-meter-note">5h is the session window. Opus and Fable are weekly limits.</span>';
+        els.accountPanelMeter.hidden = false;
+        els.accountPanelMeter.classList.toggle('is-stale', stale);
+      } else {
+        els.accountPanelMeter.innerHTML = '';
+        els.accountPanelMeter.hidden = true;
+      }
+    }
   }
 
   /**
@@ -8838,15 +9028,20 @@ class CWMApp {
 
   /**
    * Re-render every visible reset countdown in place. Updates textContent
-   * on the data-reset-at spans (chip meta + open panel rows) instead of a
-   * full re-render, so keyboard focus and scroll position are preserved.
+   * on the data-reset-at spans (chip meta + open panel rows + the header
+   * usage meter) instead of a full re-render, so keyboard focus and scroll
+   * position are preserved. The meter mounts live outside the switcher
+   * subtree, so they are ticked as their own scopes with the same guard
+   * (skip while hidden; absolute texts only change at the reset moment).
    * @returns {void}
    */
   _tickAccountCountdowns() {
-    const sw = this.els.accountSwitcher;
-    if (!sw || sw.hidden) return;
-    sw.querySelectorAll('[data-reset-at]').forEach(el => {
-      el.textContent = this._formatResetText(el.dataset.resetAt, el.dataset.absolute === '1');
+    const scopes = [this.els.accountSwitcher, this.els.usageMeter, this.els.accountPanelMeter];
+    scopes.forEach(scope => {
+      if (!scope || scope.hidden) return;
+      scope.querySelectorAll('[data-reset-at]').forEach(el => {
+        el.textContent = this._formatResetText(el.dataset.resetAt, el.dataset.absolute === '1');
+      });
     });
   }
 

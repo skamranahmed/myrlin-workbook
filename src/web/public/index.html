@@ -122,6 +122,11 @@
               <span>Claude account</span>
               <button class="btn btn-ghost btn-icon btn-sm" id="account-refresh-btn" title="Refresh usage">&#8635;</button>
             </div>
+            <!-- Mobile mirror of the header usage meter (active account's
+                 Session/Opus/Fable bars). Populated by renderUsageMeter();
+                 desktop hides it via CSS because the header widget and the
+                 per-row usage lines already cover desktop. -->
+            <div class="account-panel-meter" id="account-panel-meter" hidden></div>
             <div class="account-panel-list" id="account-panel-list"></div>
             <div class="account-panel-footer">
               <label class="account-mac-toggle" id="account-mac-toggle" hidden>
@@ -189,6 +194,14 @@
       </div>
 
       <div class="header-right">
+        <!-- Per-model usage meter for the ACTIVE account: Session (5h) bar
+             (the true cooldown) plus Opus and Fable bars from their
+             WEEKLY-scoped limits, each with its exact local reset time.
+             Starts hidden; renderUsageMeter() unhides it once usage data
+             exists (rides the same render path as the account chip). -->
+        <div class="usage-meter" id="usage-meter" hidden>
+          <div class="usage-meter-bars" id="usage-meter-bars" role="group" aria-label="Account usage"></div>
+        </div>
         <button class="btn btn-ghost btn-icon update-btn" id="update-btn" title="Check for updates" hidden>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M8 1v6m0 0l2.5-2.5M8 7L5.5 4.5M2 10l.8 2.4c.2.6.8 1.1 1.5 1.1h7.4c.7 0 1.3-.4 1.5-1.1L14 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
