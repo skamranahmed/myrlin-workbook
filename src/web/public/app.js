@@ -8750,7 +8750,8 @@ class CWMApp {
   /**
    * Create the mobile backdrop behind the bottom sheet (dim, tap to close).
    * Created lazily on open and removed on close; styles-mobile.css shows it
-   * only at phone widths, so on desktop it exists but renders nothing.
+   * only at phone widths, so on desktop it exists but renders nothing (a
+   * desktop base rule also forces display:none so it takes zero layout space).
    * @returns {void}
    */
   _ensureAccountBackdrop() {
@@ -8758,7 +8759,20 @@ class CWMApp {
     const bd = document.createElement('div');
     bd.className = 'account-panel-backdrop';
     bd.addEventListener('click', () => this._closeAccountPanel());
-    document.body.appendChild(bd);
+    // Mount the backdrop inside the account switcher (the panel's own parent),
+    // NOT document.body. WHY: on mobile, .app is position:fixed (styles.css
+    // "app never exceeds viewport" rule), and a fixed element ALWAYS forms a
+    // stacking context. The panel lives inside .app, so a body-level backdrop
+    // is a sibling of .app and paints over the entire .app subtree (backdrop
+    // z-index 10000 beats .app's effective z-index auto), dimming the sheet and
+    // stealing every tap even though the header is lifted to z-index 10001,
+    // because that lift only reorders inside .app and cannot escape it. Placing
+    // the backdrop beside the panel puts both in the SAME (header) stacking
+    // context, where panel z-index 10001 > backdrop z-index 10000 is a direct,
+    // robust comparison that no longer depends on .app's stacking context. Falls
+    // back to <body> if the switcher element is somehow missing.
+    const mount = (this.els && this.els.accountSwitcher) || document.body;
+    mount.appendChild(bd);
     this._accountBackdrop = bd;
   }
 

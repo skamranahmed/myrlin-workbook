@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0-alpha.13] - 2026-07-02
+
+### Fixed
+
+- **Mobile account switcher sheet is no longer greyed out and unselectable.** On a phone, tapping the top-left account chip opened the bottom sheet but the whole sheet appeared dimmed and no row could be tapped. Root cause: on mobile `.app` is `position: fixed`, and a fixed-position element ALWAYS forms a stacking context, so the account panel (which lives inside the header inside `.app`) was trapped inside `.app`. The dim backdrop was appended to `document.body`, a sibling of `.app`, at `z-index: 10000`; because `.app` sits at effective `z-index: auto` in the root, the backdrop painted over the entire `.app` subtree including the panel, and the `body.account-sheet-open .app-header { z-index: 10001 }` lift could not help because that lift only reorders things WITHIN `.app`. A hit-test at a row centre confirmed every tap was landing on the backdrop, not the row. The fix mounts the backdrop INSIDE `.account-switcher` (the panel's own parent) so the backdrop and panel share the header's stacking context, where `panel z-index 10001 > backdrop z-index 10000` is a direct, robust comparison that no longer depends on `.app`'s stacking behaviour. A desktop base rule forces the backdrop to `display: none` so the switcher-nested element stays inert on desktop (the mobile media query still shows it as a full-viewport dim at phone widths). Verified across a 390px mobile viewport (rows hittable, tap stages a healthy row and enables Save, backdrop-tap and Cancel close the sheet) and a 1280px desktop viewport (dropdown still anchored under the chip, no backdrop, rows clickable), so desktop behaviour is unchanged.
+
 ## [1.2.0-alpha.12] - 2026-07-02
 
 ### Added

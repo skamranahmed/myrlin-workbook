@@ -8344,6 +8344,17 @@ html {
   display: none;
 }
 
+/* Desktop guard for the mobile bottom-sheet backdrop. It is created on every
+   panel open and, as of the trapped-stacking fix, mounts INSIDE
+   .account-switcher (see _ensureAccountBackdrop) so it shares the panel's
+   stacking context on phones. On desktop the dropdown has no backdrop, so this
+   forces it inert with zero layout impact. The mobile @media rule in
+   styles-mobile.css (loaded after this file) overrides this back to
+   display:block at phone widths. */
+.account-panel-backdrop {
+  display: none;
+}
+
 @keyframes account-panel-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
