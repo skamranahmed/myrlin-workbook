@@ -182,12 +182,13 @@ class CWMApp {
       // Credential switcher (Claude account roster; design doc section 6.2).
       // list: safe projection rows from GET /api/credentials (never tokens).
       // activeId: profileId of the machine-wide active login. stagedId: the
-      // row the user selected but has not saved yet. mac: { configured,
-      // enabled, host, user } for the Mac mirror checkbox visibility.
+      // row selected for the PC but not saved yet; stagedMacId: the row
+      // selected for the MAC (independent per machine). mac: { configured,
+      // enabled, host, user } summary gating every Mac surface.
       // macState: sanitized Mac inventory cache from /api/credentials/
       // mac-state ({checkedAt, reachable, activeName, activeProfileId,
       // profiles}); macStale mirrors the server's TTL verdict.
-      credentials: { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false },
+      credentials: { list: [], activeId: null, stagedId: null, stagedMacId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false },
       settings: Object.assign({
         paneColorHighlights: true,
         activityIndicators: true,
@@ -344,8 +345,9 @@ class CWMApp {
       accountMachines: document.getElementById('account-machines'),
       accountSaveBtn: document.getElementById('account-save-btn'),
       accountCancelBtn: document.getElementById('account-cancel-btn'),
-      accountMacToggle: document.getElementById('account-mac-toggle'),
-      accountMacCheckbox: document.getElementById('account-mac-checkbox'),
+      // Footer pending per-machine lines (PC: / Mac:); replaces the retired
+      // "Also apply on Mac Mini" checkbox from the mirror-checkbox era.
+      accountPending: document.getElementById('account-pending'),
       // Per-model usage meter (header top-right widget + the mobile mirror
       // rendered inside the account bottom sheet). See renderUsageMeter().
       usageMeter: document.getElementById('usage-meter'),
@@ -2326,7 +2328,7 @@ class CWMApp {
     this._stopAccountTick();
     this._closeAccountPanel();
     if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = true;
-    this.state.credentials = { list: [], activeId: null, stagedId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false };
+    this.state.credentials = { list: [], activeId: null, stagedId: null, stagedMacId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false };
     // The usage meter lives outside the switcher subtree, so re-render it
     // against the now-empty roster to hide and clear its bars too.
     this.renderUsageMeter();
@@ -8144,6 +8146,17 @@ class CWMApp {
           this.captureCurrentAccount();
           return;
         }
+        const seg = e.target.closest('.account-seg');
+        if (seg) {
+          // Machine segments stage per machine and must never trigger the
+          // whole-row PC staging underneath them.
+          e.stopPropagation();
+          const segRow = seg.closest('.account-row');
+          if (!segRow || !segRow.dataset.profileId || segRow.getAttribute('aria-disabled') === 'true') return;
+          if (seg.dataset.machine === 'mac') this.stageMacAccount(segRow.dataset.profileId);
+          else this.stageAccount(segRow.dataset.profileId);
+          return;
+        }
         const row = e.target.closest('.account-row');
         if (row && row.dataset.profileId && row.getAttribute('aria-disabled') !== 'true') {
           this.stageAccount(row.dataset.profileId);
@@ -8181,14 +8194,15 @@ class CWMApp {
       }
       els.accountCancelBtn.addEventListener('click', () => {
         this.state.credentials.stagedId = null;
+        this.state.credentials.stagedMacId = null;
         this._closeAccountPanel();
         this.renderAccountSwitcher();
       });
       els.accountSaveBtn.addEventListener('click', () => this.applyStagedAccount());
-      els.accountMacCheckbox.addEventListener('change', (e) => {
-        // Persist the mirror choice so it survives reloads (design 6.2).
-        localStorage.setItem('cwm_credMirrorMac', e.target.checked ? '1' : '0');
-      });
+      // The old "Also apply on Mac Mini" checkbox is retired: per-row MAC
+      // segments stage the Mac independently now. Clear its stale
+      // localStorage key so no future code can ever misread it.
+      try { localStorage.removeItem('cwm_credMirrorMac'); } catch (_) { /* storage may be unavailable */ }
 
       // Outside click closes. composedPath() is checked instead of a plain
       // contains() because staging re-renders the list synchronously,
@@ -8308,6 +8322,12 @@ class CWMApp {
     if (cred.stagedId && (cred.stagedId === cred.activeId || !cred.list.some(p => p.profileId === cred.stagedId))) {
       cred.stagedId = null;
     }
+    // Mac staging hygiene: only the vanished-row case here; the staged-row-
+    // became-Mac-active case is handled by the credentials:mac SSE (the
+    // roster response carries no Mac state).
+    if (cred.stagedMacId && !cred.list.some(p => p.profileId === cred.stagedMacId)) {
+      cred.stagedMacId = null;
+    }
     if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = false;
     this._startAccountTick();
     this.renderAccountSwitcher();
@@ -8394,13 +8414,29 @@ class CWMApp {
     }
 
     // ── Footer ──
-    const macVisible = !!(cred.mac && cred.mac.configured && cred.mac.enabled);
-    if (els.accountMacToggle) els.accountMacToggle.hidden = !macVisible;
-    if (macVisible && els.accountMacCheckbox) {
-      els.accountMacCheckbox.checked = localStorage.getItem('cwm_credMirrorMac') === '1';
+    // Pending per-machine lines: exactly what Save will do, one line per
+    // machine. A staged row equal to that machine's current active account
+    // is a no-op and renders nothing.
+    const pcPendingRow = (cred.stagedId && cred.stagedId !== cred.activeId)
+      ? cred.list.find(p => p.profileId === cred.stagedId) : null;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    const macPendingRow = (cred.stagedMacId && cred.stagedMacId !== macActiveId)
+      ? cred.list.find(p => p.profileId === cred.stagedMacId) : null;
+    if (els.accountPending) {
+      const lines = [];
+      if (pcPendingRow) {
+        lines.push('<span class="account-pending-line"><span class="account-pending-key">PC:</span>'
+          + this.escapeHtml(this._accountDisplayName(pcPendingRow)) + '</span>');
+      }
+      if (macPendingRow) {
+        lines.push('<span class="account-pending-line"><span class="account-pending-key">Mac:</span>'
+          + this.escapeHtml(this._accountDisplayName(macPendingRow)) + '</span>');
+      }
+      els.accountPending.innerHTML = lines.join('');
+      els.accountPending.hidden = lines.length === 0;
     }
     if (els.accountSaveBtn) {
-      els.accountSaveBtn.disabled = !(cred.stagedId && cred.stagedId !== cred.activeId) || cred.applying;
+      els.accountSaveBtn.disabled = !(pcPendingRow || macPendingRow) || cred.applying;
       els.accountSaveBtn.textContent = cred.applying ? 'Applying' : 'Save';
     }
     // Footer fully disabled during the first-load skeleton state (6.4) and
@@ -8473,6 +8509,11 @@ class CWMApp {
       : '';
 
     const sideBits = [];
+    // Per-machine location segments (PC / MAC) render before the pill and
+    // pencil; empty string while the Mac bridge is disabled, keeping the
+    // classic single-machine layout byte for byte.
+    const segments = this._machineSegmentsHtml(p);
+    if (segments) sideBits.push(segments);
     if (isActive) sideBits.push('<span class="account-active-pill">ACTIVE</span>');
     else if (!isDead) sideBits.push('<span class="account-row-radio" aria-hidden="true"></span>');
     sideBits.push(`<button type="button" class="account-row-edit" title="Rename" aria-label="Rename ${this.escapeHtml(name)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg></button>`);
@@ -8489,6 +8530,53 @@ class CWMApp {
       </span>
       <span class="account-row-side">${sideBits.join('')}</span>
     </div>`;
+  }
+
+  /**
+   * Build the PC / MAC location segments for one account row. PC: filled
+   * when active on this machine, staged ring when selected for the PC.
+   * MAC states from the last inventory sweep: filled (is-on) = active on
+   * the Mac, outline (is-installed) = profile present but not active,
+   * dimmed (is-absent) = not on the Mac, dotted (is-unknown) = no sweep
+   * yet or Mac unreachable; staged ring when selected for the Mac. Each
+   * segment is a button because the two machines stage INDEPENDENTLY.
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @returns {string} Segments HTML, or '' while the Mac bridge is disabled.
+   */
+  _machineSegmentsHtml(p) {
+    if (!this._macEnabled()) return '';
+    const cred = this.state.credentials;
+    const ms = cred.macState;
+    const pcActive = p.profileId === cred.activeId;
+    const pcStaged = p.profileId === cred.stagedId;
+    let macClass = 'is-unknown';
+    let macTitle = 'Mac state unknown. Refresh to probe.';
+    if (ms && ms.reachable) {
+      if (ms.activeProfileId === p.profileId) {
+        macClass = 'is-on';
+        macTitle = 'Active on the Mac';
+      } else if ((ms.profiles || []).some(x => x && x.profileId === p.profileId)) {
+        macClass = 'is-installed';
+        macTitle = 'Installed on the Mac (not active). Click to activate it there on Save.';
+      } else {
+        macClass = 'is-absent';
+        macTitle = 'Not on the Mac. Click to send and activate it there on Save.';
+      }
+    } else if (ms && !ms.reachable) {
+      macTitle = 'Mac offline; state unknown. Staging still works and applies when it answers.';
+    }
+    const macStaged = p.profileId === cred.stagedMacId;
+    const pcTitle = pcActive ? 'Active on this PC' : 'Click to make it active on this PC on Save.';
+    return '<span class="account-row-machines">'
+      + '<button type="button" class="account-seg account-seg-pc '
+        + (pcActive ? 'is-on' : 'is-installed') + (pcStaged && !pcActive ? ' is-staged' : '')
+        + '" data-machine="pc" title="' + this.escapeHtml(pcTitle)
+        + '" aria-pressed="' + (pcActive || pcStaged ? 'true' : 'false') + '">PC</button>'
+      + '<button type="button" class="account-seg account-seg-mac '
+        + macClass + (macStaged ? ' is-staged' : '')
+        + '" data-machine="mac" title="' + this.escapeHtml(macTitle + (macStaged ? ' Staged: applied on Save.' : ''))
+        + '" aria-pressed="' + (macClass === 'is-on' || macStaged ? 'true' : 'false') + '">MAC</button>'
+      + '</span>';
   }
 
   /**
@@ -8767,6 +8855,34 @@ class CWMApp {
       const escaped = (window.CSS && CSS.escape) ? CSS.escape(profileId) : profileId;
       const rowEl = this.els.accountPanelList.querySelector(`.account-row[data-profile-id="${escaped}"]`);
       if (rowEl) rowEl.focus({ preventScroll: true });
+    } catch (_) {
+      // Focus restoration is cosmetic; never fatal.
+    }
+  }
+
+  /**
+   * Stage an account for the MAC on the next Save, independently of the PC
+   * staging. Staging the Mac-active row, or re-clicking the row already
+   * staged, clears the Mac selection (toggle = "keep current"). Dead rows
+   * are never stageable: the bridge refuses to ship a dead token anyway.
+   * @param {string} profileId - accountUuid of the clicked row's account.
+   * @returns {void}
+   */
+  stageMacAccount(profileId) {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const p = cred.list.find(x => x.profileId === profileId);
+    if (!p) return;
+    if (this.accountHealth(p) === 'needs-re-login') return;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    cred.stagedMacId = (cred.stagedMacId === profileId || profileId === macActiveId) ? null : profileId;
+    this.renderAccountSwitcher();
+    // The re-render rebuilt the rows; put keyboard focus back on the MAC
+    // segment the user acted on so tab order continues where it was.
+    try {
+      const escaped = (window.CSS && CSS.escape) ? CSS.escape(profileId) : profileId;
+      const segEl = this.els.accountPanelList.querySelector(`.account-row[data-profile-id="${escaped}"] .account-seg-mac`);
+      if (segEl) segEl.focus({ preventScroll: true });
     } catch (_) {
       // Focus restoration is cosmetic; never fatal.
     }
@@ -9058,44 +9174,57 @@ class CWMApp {
   }
 
   /**
-   * Commit the staged account: confirm, POST /api/credentials/apply (with
-   * the Mac mirror flag when the checkbox is visible and checked), then
-   * offer to restart running sessions so they pick up the new login.
-   * While the request is in flight the panel is inert and Save reads
-   * "Applying" (no spinner, per design system rules). Failure keeps the
-   * panel open with the staged selection intact.
+   * Commit the staged selections, machine by machine: confirm once with a
+   * PC:/Mac: summary, POST /api/credentials/apply (legacy {profileId} body
+   * when only the PC is staged so old servers keep working; the {pc, mac}
+   * shape otherwise), then toast each machine's outcome from the response's
+   * `machines` object and offer a session restart only when the PC login
+   * actually changed. While the request is in flight the panel is inert
+   * and Save reads "Applying" (no spinner, per design system rules). A
+   * failed machine keeps its staged selection so Save can retry it; a
+   * succeeded machine clears its own.
    * @returns {Promise<void>}
    */
   async applyStagedAccount() {
     const cred = this.state.credentials;
     if (cred.applying) return;
-    const target = cred.list.find(p => p.profileId === cred.stagedId);
-    if (!target || cred.stagedId === cred.activeId) return;
+    const pcTargetRow = (cred.stagedId && cred.stagedId !== cred.activeId)
+      ? cred.list.find(p => p.profileId === cred.stagedId) : null;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    const macTargetRow = (cred.stagedMacId && cred.stagedMacId !== macActiveId)
+      ? cred.list.find(p => p.profileId === cred.stagedMacId) : null;
+    if (!pcTargetRow && !macTargetRow) return;
 
-    const name = this._accountDisplayName(target);
     // Restart semantics note from the design doc (section 4.3), surfaced in
     // the confirm so the user knows running sessions keep the old login.
+    // Only relevant when the PC login itself changes.
     const restartNote = 'New sessions use this account immediately. Running Claude sessions keep the previous account until restarted.';
+    const parts = [];
+    if (pcTargetRow) {
+      parts.push(`PC: <strong>${this.escapeHtml(this._accountDisplayName(pcTargetRow))}</strong> (${this.escapeHtml(pcTargetRow.email || 'no email on record')})`);
+    }
+    if (macTargetRow) {
+      parts.push(`Mac: <strong>${this.escapeHtml(this._accountDisplayName(macTargetRow))}</strong> (${this.escapeHtml(macTargetRow.email || 'no email on record')})`);
+    }
     const confirmed = await this.showConfirmModal({
       title: 'Switch Claude account?',
-      message: `Switch to <strong>${this.escapeHtml(name)}</strong> (${this.escapeHtml(target.email || 'no email on record')})?<br><br>${restartNote}`,
+      message: parts.join('<br>') + (pcTargetRow ? `<br><br>${restartNote}` : ''),
       confirmText: 'Switch',
     });
     if (!confirmed) return;
 
-    // Mirror choice: the checkbox is only shown when the Mac bridge is
-    // configured AND enabled; otherwise mirrorToMac is always false.
-    const macAvailable = !!(cred.mac && cred.mac.configured && cred.mac.enabled);
-    const mirrorToMac = macAvailable && !!(this.els.accountMacCheckbox && this.els.accountMacCheckbox.checked);
+    // Body shape: legacy {profileId} when only the PC is staged (old
+    // servers understand it; new servers treat it identically), the
+    // {pc, mac} per-machine shape whenever the Mac is involved.
+    const body = macTargetRow
+      ? { ...(pcTargetRow ? { pc: pcTargetRow.profileId } : {}), mac: macTargetRow.profileId }
+      : { profileId: pcTargetRow.profileId, mirrorToMac: false };
 
     cred.applying = true;
     this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
     this.renderAccountSwitcher();
     try {
-      const resp = await this._credApi('POST', '/api/credentials/apply', {
-        profileId: target.profileId,
-        mirrorToMac,
-      });
+      const resp = await this._credApi('POST', '/api/credentials/apply', body);
       if (!resp.ok) {
         // structuredError shape { error, code, message, retryable }: the
         // human message is the toast. Panel stays open, staging preserved.
@@ -9104,25 +9233,56 @@ class CWMApp {
         return;
       }
       const result = resp.data || {};
-      cred.activeId = result.activeProfileId || target.profileId;
-      cred.stagedId = null;
-      cred.applying = false;
-      this._closeAccountPanel();
-      this.renderAccountSwitcher();
-      this.showToast(
-        result.alreadyActive ? `${name} was already the active account` : `Switched Claude account to ${name}`,
-        'success'
-      );
-      // Mac mirror problems ride in the response as a warning; the PC apply
-      // itself succeeded, so this is a separate warning-level toast.
-      if (result.mac && result.mac.attempted && !result.mac.mirrored) {
+      const machines = result.machines || {};
+      // Per-machine outcomes, with a fallback for old servers that predate
+      // `machines`: synthesize the PC outcome from the legacy fields.
+      const pcOut = machines.pc
+        || (pcTargetRow ? { requested: true, applied: !!result.applied, alreadyActive: !!result.alreadyActive } : null);
+      const macOut = machines.mac || null;
+      let pcApplied = false;
+      if (pcTargetRow && pcOut) {
+        const name = this._accountDisplayName(pcTargetRow);
+        if (pcOut.applied || pcOut.alreadyActive) {
+          cred.activeId = pcTargetRow.profileId;
+          cred.stagedId = null;
+          pcApplied = pcOut.applied === true;
+          this.showToast(
+            pcOut.alreadyActive ? `${name} was already active on the PC` : `PC switched to ${name}`,
+            'success'
+          );
+        } else {
+          // Failed PC apply keeps its staged selection for a retry.
+          this.showToast(`PC switch failed: ${pcOut.message || pcOut.error || 'unknown error'}`, 'error');
+        }
+      }
+      if (macTargetRow && macOut) {
+        const name = this._accountDisplayName(macTargetRow);
+        if (macOut.applied) {
+          cred.stagedMacId = null;
+          this.showToast(`Mac switched to ${name}`, 'success');
+          if (macOut.warning) this.showToast(`Mac note: ${macOut.warning}`, 'warning');
+        } else {
+          this.showToast(`Mac switch failed: ${macOut.message || macOut.error || 'unknown error'}`, 'error');
+        }
+      } else if (macTargetRow && !macOut) {
+        // Old server without per-machine apply support.
+        this.showToast('This server does not support Mac apply yet; update the workbook server and retry.', 'warning');
+      }
+      // Legacy mirror warning path (old servers, mirror-checkbox era).
+      if (!macOut && result.mac && result.mac.attempted && !result.mac.mirrored) {
         this.showToast(`Mac mirror failed: ${result.mac.message || result.mac.error || 'unknown error'}`, 'warning');
       }
-      // Background roster refresh (isActive flags, usage, mac state).
+      cred.applying = false;
+      // Close only when nothing is left staged; otherwise stay open so the
+      // failed machine can be retried or restaged.
+      const allDone = (!pcTargetRow || cred.stagedId === null) && (!macTargetRow || cred.stagedMacId === null);
+      if (allDone) this._closeAccountPanel();
+      this.renderAccountSwitcher();
+      // Background roster refresh (isActive flags, usage, mac summary).
       this.loadCredentials();
       // Offer the restart; never auto-restart (design decision 10.9). The
       // skipConfirm flag avoids a double prompt: this modal IS the confirm.
-      if (!result.alreadyActive) {
+      if (pcApplied) {
         const restart = await this.showConfirmModal({
           title: 'Restart sessions?',
           message: 'Restart running sessions now so they pick up the new login?',
@@ -10850,6 +11010,13 @@ class CWMApp {
           const cred = this.state.credentials;
           cred.macState = payload.state || null;
           cred.macStale = false;
+          // Staging hygiene: the staged Mac row just became Mac-active
+          // (this client's Save or another client's), so the selection is
+          // now a no-op and clears.
+          if (cred.macState && cred.macState.activeProfileId
+            && cred.stagedMacId === cred.macState.activeProfileId) {
+            cred.stagedMacId = null;
+          }
           this.renderAccountSwitcher();
         }
         break;

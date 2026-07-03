@@ -1162,6 +1162,89 @@ let stubBase = '';
     assertEqual(fx.manager.getMacState(), null, 'cache cleared');
   });
 
+  await test('Mac-active lineage hint: set/get, settingsPatcher persistence, restart survival, junk rejection', async () => {
+    // Mutable settings object doubling as the "store": the patcher writes
+    // into it, exactly like the server's store.updateSettings wiring.
+    const settings = {};
+    const patches = [];
+    const fx = makeFixture({
+      settings,
+      managerOpts: {
+        settingsPatcher: (patch) => { patches.push(patch); Object.assign(settings, patch); },
+      },
+    });
+    assertEqual(fx.manager.getMacActiveHint(), null, 'no hint by default');
+    assertEqual(fx.manager.setMacActiveHint(UUID_B), UUID_B);
+    assertEqual(fx.manager.getMacActiveHint(), UUID_B);
+    assertEqual(patches.length, 1, 'hint persisted through the patcher');
+    assertEqual(patches[0].macActiveProfileId, UUID_B);
+    // "Restart": a NEW manager over the same settings reads the persisted hint.
+    const fx2 = makeFixture({ settings });
+    assertEqual(fx2.manager.getMacActiveHint(), UUID_B, 'hint survives a manager restart via settings');
+    // Junk normalizes to null (never a path-unsafe value near uuids).
+    assertEqual(fx.manager.setMacActiveHint('../etc/passwd'), null);
+    assertEqual(fx.manager.getMacActiveHint(), null);
+    assertEqual(patches[patches.length - 1].macActiveProfileId, null);
+    // A manager WITHOUT a patcher still works session-only.
+    const fx3 = makeFixture();
+    fx3.manager.setMacActiveHint(UUID_C);
+    assertEqual(fx3.manager.getMacActiveHint(), UUID_C, 'memory-only hint without a patcher');
+  });
+
+  await test('LINEAGE GATE PROOF: a Mac-active EXPIRED account triggers ZERO token-endpoint calls', async () => {
+    resetStub();
+    const fx = makeFixture(); // live PC account is A; B is inactive here
+    // Expired inactive snapshot: WITHOUT the hint this is exactly the shape
+    // that triggers refreshInactiveToken (proven by the contrast below).
+    fx.manager.saveSnapshot({
+      accountUuid: UUID_B,
+      email: EMAIL_B,
+      credentials: makeOauth('MACEXP', Date.now() - HOUR_MS),
+      identity: makeIdentity(UUID_B, EMAIL_B),
+      tokenState: TOKEN_STATE_OK,
+    });
+    fx.manager.setMacActiveHint(UUID_B);
+    // Phase 1: no refresher registered (Mac offline scenario). The gate
+    // must skip the round entirely: no token call, no usage call, and the
+    // account must NOT be marked dead (the Mac owns its lineage).
+    const snap1 = await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(stub.tokenHits, 0, 'ZERO token-endpoint calls for the Mac-active account');
+    assertEqual(stub.usageHits, 0, 'expired stored token is never used for usage either');
+    assertEqual(snap1.tokenState, TOKEN_STATE_OK, 'never marked dead by the gate');
+    assertEqual(snap1.credentials.accessToken, 'at-FIXTURE-MACEXP', 'credentials untouched');
+    // Phase 2: refresher registered (Mac reachable). The pre-pull adopts
+    // the Mac's fresh rotation via syncBackFromMac; usage is then fetched
+    // READ-ONLY with the adopted token; the token endpoint stays silent.
+    let refresherCalls = 0;
+    const freshText = JSON.stringify({ claudeAiOauth: {
+      accessToken: 'at-FIXTURE-MACFRESH',
+      refreshToken: 'rt-FIXTURE-MACFRESH',
+      expiresAt: Date.now() + 6 * HOUR_MS,
+    } });
+    fx.manager.setMacStateRefresher(async () => {
+      refresherCalls += 1;
+      await fx.manager.syncBackFromMac(UUID_B, freshText);
+    });
+    const snap2 = await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(refresherCalls, 1, 'expired Mac-active account pulls fresh Mac state first');
+    assertEqual(stub.tokenHits, 0, 'STILL zero token-endpoint calls after the Mac pull');
+    assertEqual(stub.usageHits, 1, 'usage fetched read-only with the adopted token');
+    assertEqual(stub.lastUsageAuth, 'Bearer at-FIXTURE-MACFRESH', 'the ADOPTED Mac token was used');
+    assert(snap2.usage, 'usage stored');
+    assertEqual(snap2.credentials.refreshToken, 'rt-FIXTURE-MACFRESH', 'Mac rotation adopted, not re-rotated');
+    // Fresh token now: the refresher must NOT fire again (no pointless SSH).
+    await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(refresherCalls, 1, 'unexpired Mac-active account skips the pre-pull');
+    assertEqual(stub.tokenHits, 0, 'still zero');
+    // CONTRAST: clear the hint and expire the snapshot again; the exact
+    // same shape now DOES refresh, proving the gate (not the fixture) is
+    // what prevented the token calls above.
+    fx.manager.setMacActiveHint(null);
+    fx.manager.saveSnapshot({ accountUuid: UUID_B, credentials: makeOauth('MACEXP2', Date.now() - HOUR_MS) });
+    await fx.manager.updateSnapshotUsage(UUID_B, { force: true });
+    assertEqual(stub.tokenHits, 1, 'without the hint the same expired shape refreshes (contrast)');
+  });
+
   stubServer.close();
   console.log('  ' + '─'.repeat(70));
   console.log('  Results: ' + passed + ' passed, ' + failed + ' failed');

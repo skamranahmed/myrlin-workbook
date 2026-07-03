@@ -8794,20 +8794,111 @@ html {
   padding: 10px 12px;
 }
 
-.account-mac-toggle {
+/* Pending per-machine selections in the footer (PC: / Mac: lines). The
+   old .account-mac-toggle checkbox styles retired with the checkbox: the
+   per-row MAC segments stage the Mac independently now. */
+.account-pending {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  cursor: pointer;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.account-mac-toggle input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--mauve);
+.account-pending[hidden] {
+  display: none;
+}
+
+.account-pending-line {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.account-pending-key {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: 5px;
+}
+
+/* ─── Per-row machine segments (PC / MAC) ────────────────────────
+   Where each account lives and where it is staged to go; the two machines
+   stage independently and Save applies each on its own. States:
+   filled (is-on) = active there; outline (is-installed) = present but not
+   active; dimmed (is-absent) = not there; dotted (is-unknown) = no sweep
+   yet or the Mac is unreachable; is-staged = selected for that machine.
+   Semantic tokens only, so all 13 themes render correctly. */
+.account-row-machines {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 2px;
+}
+
+.account-seg {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--overlay0);
+  background: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.account-seg.is-on {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--base);
+}
+
+.account-seg.is-installed {
+  border-color: var(--overlay1);
+  color: var(--text-secondary);
+}
+
+.account-seg.is-absent {
+  opacity: 0.45;
+}
+
+.account-seg.is-unknown {
+  border-style: dotted;
+  opacity: 0.6;
+}
+
+.account-seg.is-staged {
+  border-color: var(--mauve);
+  color: var(--mauve);
+  box-shadow: 0 0 0 1px var(--mauve) inset;
+  opacity: 1;
+}
+
+.account-seg:hover {
+  background: var(--surface1);
+  color: var(--text);
+  opacity: 1;
+}
+
+.account-seg.is-on:hover {
+  background: var(--mauve);
+  color: var(--base);
+}
+
+.account-seg:focus-visible {
+  outline: 1px solid var(--overlay1);
+  outline-offset: 1px;
+}
+
+/* Dead rows keep the segments visible as location info, but inert. */
+.account-row.is-dead .account-seg {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .account-panel-actions {

@@ -368,6 +368,84 @@ function assertNoSecretInArgv(calls, where) {
     const useCall = fake.calls.find((c) => c.cmd === 'ssh' && c.args[c.args.length - 1].indexOf(' use ') !== -1);
     assert(useCall, 'claude-profile use step ran');
     assert(useCall.options.timeout >= 45000, 'use step gets the 45s floor');
+    // Pre-use sync-back: the Mac-active profile (same slug) was matched and
+    // its live token text handed to syncBackFromMac before the switch.
+    assertEqual(manager.syncBacks.length, 1, 'pre-use sync-back ran once');
+    assertEqual(manager.syncBacks[0].uuid, UUID_M, 'synced the matched Mac-active account');
+    assert(manager.syncBacks[0].credText.indexOf('at-MACLIVE') !== -1, 'sync-back received the live Mac token text');
+    // Lineage hint: a verified apply records the Mac-active account.
+    assertEqual(manager.hints.length, 1, 'hint recorded exactly once');
+    assertEqual(manager.hints[0], UUID_M, 'hint points at the applied account');
+  });
+
+  // ─── installProfileOnMac / applyProfileOnMac split ──────────────────────
+
+  await test('installProfileOnMac: scp + install ONLY, no use, no verify, no hint', async () => {
+    const manager = makeManagerStub(makeSnapshot());
+    const fake = makeExecFake((call) => {
+      if (call.cmd === 'scp') return {};
+      if (call.args[call.args.length - 1].indexOf('mkdir -p') !== -1) return {};
+      return {};
+    });
+    const r = await bridge.installProfileOnMac(manager, CFG, UUID_M, { execFileImpl: fake.impl });
+    assertEqual(r.installed, true, JSON.stringify(r));
+    assertEqual(r.name, 'work-laptop', 'slug name returned');
+    assertNoSecretInArgv(fake.calls, 'installProfileOnMac');
+    const scpCall = fake.calls.find((c) => c.cmd === 'scp');
+    assert(scpCall && scpCall.scpPayload && scpCall.scpPayload.indexOf(AT_SECRET) !== -1,
+      'secret payload traveled inside the scp temp file');
+    assert(!fs.existsSync(scpCall.scpSourcePath), 'local temp file deleted in finally');
+    assert(!fake.calls.some((c) => c.cmd === 'ssh' && c.args[c.args.length - 1].indexOf(' use ') !== -1),
+      'install NEVER activates (no claude-profile use)');
+    assert(!fake.calls.some((c) => c.cmd === 'ssh' && c.args[c.args.length - 1].indexOf('__CWM_S1__') !== -1),
+      'install performs no inventory sweep');
+    assertEqual(manager.hints.length, 0, 'install never records a lineage hint');
+    assertEqual(manager.syncBacks.length, 0, 'install never syncs back');
+    // Gates shared with the apply path.
+    const dead = await bridge.installProfileOnMac(makeManagerStub(makeSnapshot({ tokenState: 'needs_login' })), CFG, UUID_M, { execFileImpl: makeExecFake([]).impl });
+    assertEqual(dead.installed, false);
+    assertEqual(dead.error, 'MAC_TOKEN_DEAD');
+  });
+
+  await test('applyProfileOnMac: unmatched Mac-active profile warns and is never clobbered silently', async () => {
+    const manager = makeManagerStub(makeSnapshot());
+    const fake = makeExecFake((call) => {
+      if (call.cmd === 'scp') return {};
+      const remoteCmd = call.args[call.args.length - 1];
+      if (remoteCmd.indexOf('__CWM_S1__') !== -1) {
+        // Mac runs a profile that matches NO local snapshot.
+        return { stdout: 'hand-made\n__CWM_S1__\nhand-made.credentials.json\n__CWM_S2__\n{"claudeAiOauth":{"accessToken":"at-MACLIVE-STRANGER"}}\n__CWM_S3__\n' };
+      }
+      if (remoteCmd.indexOf('mkdir -p') !== -1) return {};
+      if (remoteCmd.indexOf(' use ') !== -1) return { stdout: 'switched\n' };
+      if (remoteCmd.indexOf('cmp -s') !== -1) return { stdout: 'work-laptop\nCWM_MATCH\n' };
+      return {};
+    });
+    const r = await bridge.applyProfileOnMac(manager, CFG, UUID_M, { execFileImpl: fake.impl });
+    assertEqual(r.mirrored, true, JSON.stringify(r));
+    assertEqual(r.name, 'work-laptop');
+    assert(r.warning && r.warning.indexOf('hand-made') !== -1, 'warning names the unknown Mac profile');
+    assertEqual(manager.syncBacks.length, 0, 'no sync-back for an unmatched profile (identity unknown)');
+    assertEqual(manager.hints.length, 1, 'hint still recorded for the verified apply');
+    assertEqual(manager.hints[0], UUID_M);
+  });
+
+  await test('applyProfileOnMac: unreachable pre-sync degrades to a warning, apply proceeds', async () => {
+    const manager = makeManagerStub(makeSnapshot());
+    const fake = makeExecFake((call) => {
+      if (call.cmd === 'scp') return {};
+      const remoteCmd = call.args[call.args.length - 1];
+      if (remoteCmd.indexOf('__CWM_S1__') !== -1) return { code: 255, stderr: 'no route' };
+      if (remoteCmd.indexOf('mkdir -p') !== -1) return {};
+      if (remoteCmd.indexOf(' use ') !== -1) return { stdout: 'switched\n' };
+      if (remoteCmd.indexOf('cmp -s') !== -1) return { stdout: 'work-laptop\nCWM_MATCH\n' };
+      return {};
+    });
+    const r = await bridge.applyProfileOnMac(manager, CFG, UUID_M, { execFileImpl: fake.impl });
+    assertEqual(r.mirrored, true, JSON.stringify(r));
+    assert(r.warning && /could not read the mac state/i.test(r.warning), 'pre-sync failure surfaces as a warning');
+    assertEqual(manager.syncBacks.length, 0);
+    assertNoSecretInArgv(fake.calls, 'applyProfileOnMac');
   });
 
   await test('mirrorToMac gates: missing snapshot, dead token, no credentials', async () => {

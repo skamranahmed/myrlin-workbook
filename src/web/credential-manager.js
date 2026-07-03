@@ -87,6 +87,10 @@ const DEFAULT_CRED_SETTINGS = Object.freeze({
   sshTimeoutSec: 8,
   backupKeep: 20,
   claudeSwapSeedDir: '',
+  // Lineage hint: the accountUuid live on the Mac (null = none known).
+  // Persisted so the usage poller's lineage gate survives restarts; see
+  // setMacActiveHint and the gate in _updateSnapshotUsageUnlocked.
+  macActiveProfileId: null,
 });
 
 // ─── Module-level pure helpers (exported for tests and reuse) ───────────────
@@ -265,6 +269,9 @@ function _formatStamp(epochMs) {
  * @param {number} [opts.refreshTimeoutMs] - Refresh HTTP timeout. Default
  *   REFRESH_TIMEOUT_MS (15000). Injectable for hermetic timeout tests.
  * @param {object} [opts.log] - Logger with warn/error/log. Default console.
+ * @param {(patch: object) => void} [opts.settingsPatcher] - Optional write-back
+ *   for manager-owned settings (the Mac-active lineage hint). Wired to the
+ *   store by the server; absent in most tests (hint stays in memory).
  * @returns {object} The manager API (see the design section 3.1 table).
  */
 function createCredentialManager(opts = {}) {
@@ -273,6 +280,11 @@ function createCredentialManager(opts = {}) {
   const accountsDir = opts.accountsDir || path.join(getDataDir(), 'claude-accounts');
   const backupsDir = path.join(accountsDir, '..', 'claude-accounts-backups');
   const settingsProvider = typeof opts.settingsProvider === 'function' ? opts.settingsProvider : () => ({});
+  // Optional write-back for manager-owned settings (currently only the
+  // Mac-active lineage hint). Injected by the server so the manager never
+  // learns store internals; absent in most tests, where the hint then
+  // lives in memory for the manager's lifetime.
+  const settingsPatcher = typeof opts.settingsPatcher === 'function' ? opts.settingsPatcher : null;
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const usageUrl = opts.usageUrl || process.env.CWM_CRED_USAGE_URL || ANTHROPIC_USAGE_URL;
   const tokenUrl = opts.tokenUrl || process.env.CWM_CRED_TOKEN_URL || ANTHROPIC_TOKEN_URL;
@@ -302,6 +314,14 @@ function createCredentialManager(opts = {}) {
   // In-memory cache of the last Mac inventory sweep (whitelisted fields
   // only; never token material). Null until the first sweep completes.
   let _macState = null;
+  // Session copy of the Mac-active lineage hint. undefined = not read yet
+  // (fall back to persisted settings); null = known none; string = uuid.
+  let _macActiveHint;
+  // Callback that pulls fresh Mac state (one inventory sweep + sync-back).
+  // Registered by the routes layer, because the manager requiring the
+  // bridge directly would create a circular require (the bridge already
+  // requires this module for serializeCredentialsFile).
+  let _macStateRefresher = null;
 
   /**
    * Promise-chain mutex. Serializes every mutating operation so two GUI
@@ -830,6 +850,32 @@ function createCredentialManager(opts = {}) {
       return snap;
     }
 
+    // ─── LINEAGE GATE (Mac-active account) ───
+    // WHY: when this account is live on the Mac, the MAC's own Claude Code
+    // owns the refresh-token lineage: it rotates the pair on its schedule,
+    // and the OAuth server revokes the OLD refresh token the moment a new
+    // one is issued. If the PC's background usage polling refreshed here,
+    // the PC would steal that lineage and the Mac's stored pair would die
+    // on its next rotation (~12h), silently logging the Mac out. So the
+    // Mac-active account NEVER calls refreshInactiveToken from this
+    // machine. Usage is fetched strictly read-only with the stored access
+    // token; when that token is expired, the serialized wrapper has
+    // already tried to adopt fresher tokens from the Mac itself
+    // (readMacInventory + syncBackFromMac via _pullMacActiveStateIfNeeded).
+    // Still-expired here means the Mac is offline or has not rotated yet:
+    // skip the round entirely, with ZERO token-endpoint calls.
+    if (getMacActiveHint() === snap.accountUuid) {
+      const storedToken = (snap.credentials && snap.credentials.accessToken) ? snap.credentials.accessToken : null;
+      if (!storedToken || _isAccessTokenExpired(snap.credentials, now)) {
+        return snap; // read-only policy: never refresh, never mark dead
+      }
+      const usage = await fetchUsage(storedToken);
+      if (usage) {
+        snap = _mutateSnapshot(accountUuid, { usage, tokenState: TOKEN_STATE_OK, lastRefreshError: null });
+      }
+      return snap;
+    }
+
     // Inactive account.
     let accessToken = snap.credentials ? snap.credentials.accessToken : null;
     if (_isAccessTokenExpired(snap.credentials, now)) {
@@ -1027,6 +1073,91 @@ function createCredentialManager(opts = {}) {
       ...(state.error ? { error: String(state.error) } : {}),
     };
     return _macState;
+  }
+
+  /**
+   * Read the Mac-active lineage hint: the accountUuid believed to be LIVE
+   * on the Mac right now, or null when none is known. Session memory wins;
+   * otherwise the persisted settings value is used (so the lineage gate
+   * survives server restarts). Invalid stored values read as null.
+   *
+   * @returns {string|null} The Mac-active accountUuid, or null.
+   */
+  function getMacActiveHint() {
+    if (_macActiveHint !== undefined) return _macActiveHint;
+    const v = getSettings().macActiveProfileId;
+    _macActiveHint = (typeof v === 'string' && validateAccountUuid(v)) ? v : null;
+    return _macActiveHint;
+  }
+
+  /**
+   * Record which account is live on the Mac (null clears it). Set by a
+   * successful applyProfileOnMac and corrected by every inventory sweep
+   * (observed reality wins). Persisted via settingsPatcher when the server
+   * wired one; persistence failure degrades to session-only memory, which
+   * is still enough for the lineage gate until the next restart.
+   *
+   * WHY this exists: the account live on the Mac has its refresh-token
+   * lineage OWNED by the Mac's own Claude Code. The PC must never rotate
+   * that pair (the OAuth server kills the old refresh token the moment a
+   * new one is issued, which would silently log the Mac out within ~12h).
+   *
+   * @param {string|null} uuid - Mac-active accountUuid, or null for none.
+   * @returns {string|null} The normalized stored value.
+   */
+  function setMacActiveHint(uuid) {
+    const v = (typeof uuid === 'string' && validateAccountUuid(uuid)) ? uuid : null;
+    _macActiveHint = v;
+    if (settingsPatcher) {
+      try {
+        settingsPatcher({ macActiveProfileId: v });
+      } catch (err) {
+        log.warn('[Credentials] persisting the Mac-active hint failed (kept in memory): ' + ((err && err.message) || err));
+      }
+    }
+    return v;
+  }
+
+  /**
+   * Register the "pull fresh Mac state" callback (one inventory sweep plus
+   * sync-back). The routes layer owns it because the manager cannot
+   * require the bridge (circular require). Pass null to unregister.
+   *
+   * @param {Function|null} fn - Async refresher, or null.
+   * @returns {void}
+   */
+  function setMacStateRefresher(fn) {
+    _macStateRefresher = (typeof fn === 'function') ? fn : null;
+  }
+
+  /**
+   * Pre-step for updateSnapshotUsage, run OUTSIDE both mutexes: when the
+   * requested account is the Mac-active one and its stored access token
+   * has expired, pull fresh Mac state first (the Mac may have rotated the
+   * pair; adopting it gives the usage fetch a working token WITHOUT ever
+   * touching the token endpoint).
+   *
+   * WHY outside the mutexes: the refresher takes the Mac mutex and then
+   * (inside syncBackFromMac) the snapshot mutex. Awaiting it while already
+   * holding the snapshot mutex would deadlock the manager, so this runs
+   * before serialize() enqueues the locked usage update. Best effort: any
+   * failure leaves the lineage gate to skip the round instead.
+   *
+   * @param {string} accountUuid - The profileId about to be usage-polled.
+   * @returns {Promise<void>} Never rejects.
+   */
+  async function _pullMacActiveStateIfNeeded(accountUuid) {
+    try {
+      if (!validateAccountUuid(accountUuid)) return;
+      if (getMacActiveHint() !== accountUuid) return;
+      const snap = readSnapshot(accountUuid);
+      if (!snap || !snap.credentials) return;
+      if (!_isAccessTokenExpired(snap.credentials, clock())) return;
+      if (!_macStateRefresher) return;
+      await _macStateRefresher();
+    } catch (err) {
+      log.warn('[Credentials] Mac pre-pull skipped: ' + ((err && err.message) || err));
+    }
   }
 
   /**
@@ -1512,11 +1643,15 @@ function createCredentialManager(opts = {}) {
     stopCredentialWatcher,
     syncActiveTokenToProfile: () => serialize(() => _syncActiveTokenToProfileUnlocked()),
     // Mac bridge support: sync-back merge (short, snapshot-mutex guarded),
-    // the SSH-op mutex, and the sweep cache (never secret-bearing).
+    // the SSH-op mutex, the sweep cache (never secret-bearing), the
+    // Mac-active lineage hint, and the routes-registered state refresher.
     syncBackFromMac: (uuid, credText) => serialize(() => _syncBackFromMacUnlocked(uuid, credText)),
     runMacExclusive,
     getMacState,
     setMacState,
+    getMacActiveHint,
+    setMacActiveHint,
+    setMacStateRefresher,
     // Capture / seed / labels
     captureCurrent: (o) => serialize(() => _captureCurrentUnlocked(o)),
     seedFromClaudeSwap: (dir) => serialize(() => _seedFromClaudeSwapUnlocked(dir)),
@@ -1524,7 +1659,14 @@ function createCredentialManager(opts = {}) {
     // Network
     fetchUsage,
     refreshInactiveToken,
-    updateSnapshotUsage: (uuid, o) => serialize(() => _updateSnapshotUsageUnlocked(uuid, o)),
+    // Usage update. The Mac pre-pull runs BEFORE the snapshot mutex is
+    // taken (see _pullMacActiveStateIfNeeded: awaiting the refresher while
+    // holding the snapshot mutex would deadlock, because the refresher's
+    // sync-back needs that same mutex).
+    updateSnapshotUsage: async (uuid, o) => {
+      await _pullMacActiveStateIfNeeded(uuid);
+      return serialize(() => _updateSnapshotUsageUnlocked(uuid, o));
+    },
     // Apply transaction
     backupLiveFile,
     applyCredential: (uuid) => serialize(() => _applyCredentialUnlocked(uuid)),

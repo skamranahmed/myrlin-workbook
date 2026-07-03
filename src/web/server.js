@@ -378,6 +378,14 @@ const credentialMacBridge = require('./mac-bridge');
 const { setupCredentialRoutes } = require('./credential-routes');
 const credentialManager = createCredentialManager({
   settingsProvider: () => (getStore().settings || {}).credentialSwitcher || {},
+  // Write-back for manager-owned settings (the Mac-active lineage hint):
+  // shallow-merges the patch into settings.credentialSwitcher so the hint
+  // survives restarts without the manager knowing store internals.
+  settingsPatcher: (patch) => {
+    const store = getStore();
+    const cur = (store.settings && store.settings.credentialSwitcher) || {};
+    store.updateSettings({ credentialSwitcher: { ...cur, ...(patch || {}) } });
+  },
 });
 setupCredentialRoutes(app, {
   requireAuth,

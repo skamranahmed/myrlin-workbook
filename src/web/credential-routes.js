@@ -242,57 +242,177 @@ function setupCredentialRoutes(app, { requireAuth, getStore, broadcast, structur
     }
   });
 
+  /**
+   * Optimistically update the mac-state cache after a VERIFIED Mac apply
+   * and broadcast it. The apply itself just verified the active marker and
+   * the live token file over SSH, so this cache write reflects observed
+   * reality without spending a second round trip on a full sweep.
+   *
+   * @param {string} profileId - The accountUuid now active on the Mac.
+   * @param {string} [name] - The remote profile slug (from the bridge result).
+   * @returns {void}
+   */
+  function noteMacApplied(profileId, name) {
+    if (typeof manager.setMacState !== 'function') return;
+    const prev = (typeof manager.getMacState === 'function' && manager.getMacState()) || null;
+    let profiles = (prev && Array.isArray(prev.profiles)) ? prev.profiles.slice() : [];
+    let slug = name || null;
+    if (!slug && macBridge && typeof macBridge.profileSlug === 'function') {
+      try {
+        const snap = manager.readSnapshot(profileId);
+        if (snap) slug = macBridge.profileSlug(snap);
+      } catch (_) { slug = null; }
+    }
+    if (slug) {
+      // The applied profile is now both installed and active; replace any
+      // stale mapping for that remote name.
+      profiles = profiles.filter((p) => p && p.name !== slug);
+      profiles.push({ name: slug, profileId });
+    }
+    const cached = manager.setMacState({
+      checkedAt: new Date().toISOString(),
+      reachable: true,
+      activeName: slug,
+      activeProfileId: profileId,
+      profiles,
+    });
+    safeBroadcast('credentials:mac', { state: cached });
+  }
+
   // ─── POST /api/credentials/apply ──────────────────────────────────────
-  // The swap. PC apply first (transactional, section 3.2); optional Mac
-  // mirror second. Mirror failures NEVER fail the route once the PC apply
-  // succeeded; they ride in the `mac` object as a warning.
+  // The swap, per machine. Two accepted body shapes:
+  //   legacy: { profileId, mirrorToMac? } - PC apply plus optional Mac
+  //           mirror of the SAME profile; behavior, statuses, and response
+  //           fields unchanged (old clients keep working byte for byte).
+  //   new:    { pc?: profileId, mac?: profileId } - each machine applied
+  //           INDEPENDENTLY; a Mac-only body skips the PC transaction
+  //           entirely, and a Mac failure NEVER rolls back a successful PC
+  //           apply. In this shape per-machine failures ride in `machines`
+  //           with HTTP 200 (the other machine may have succeeded), except
+  //           when only one machine was requested and its apply threw, in
+  //           which case the historical error statuses are kept.
+  // PC always runs first so the Mac push ships the freshest PC state.
   app.post('/api/credentials/apply', requireAuth, async (req, res) => {
     const body = req.body || {};
-    const profileId = body.profileId;
-    if (typeof profileId !== 'string' || !profileId) {
-      return structuredError(res, 400, 'VALIDATION', 'profileId must be a non-empty string', false);
+    const legacy = body.profileId !== undefined;
+    let pcTarget = null;
+    let macTarget = null;
+    if (legacy) {
+      if (typeof body.profileId !== 'string' || !body.profileId) {
+        return structuredError(res, 400, 'VALIDATION', 'profileId must be a non-empty string', false);
+      }
+      pcTarget = body.profileId;
+      macTarget = body.mirrorToMac === true ? body.profileId : null;
+    } else {
+      if (body.pc !== undefined) {
+        if (typeof body.pc !== 'string' || !body.pc) {
+          return structuredError(res, 400, 'VALIDATION', 'pc must be a non-empty profileId string', false);
+        }
+        pcTarget = body.pc;
+      }
+      if (body.mac !== undefined) {
+        if (typeof body.mac !== 'string' || !body.mac) {
+          return structuredError(res, 400, 'VALIDATION', 'mac must be a non-empty profileId string', false);
+        }
+        macTarget = body.mac;
+      }
+      if (!pcTarget && !macTarget) {
+        return structuredError(res, 400, 'VALIDATION', 'Provide profileId (legacy) or at least one of pc / mac', false);
+      }
     }
-    let result;
-    try {
-      result = await manager.applyCredential(profileId);
-    } catch (err) {
-      return mapError(res, err);
-    }
-    let mac = { attempted: false, mirrored: false };
-    if (result.applied && body.mirrorToMac === true && macMirrorAvailable()) {
-      const settings = manager.getSettings();
-      const cfg = { ...settings.mac, sshTimeoutSec: settings.sshTimeoutSec };
+
+    // ── PC transaction first (the Mac never gates it) ──
+    let result = { applied: false, alreadyActive: false, email: '' };
+    let pcMachine = null;
+    if (pcTarget) {
       try {
-        const m = await macBridge.mirrorToMac(manager, cfg, profileId);
-        mac = {
-          attempted: true,
-          mirrored: !!(m && m.mirrored),
-          ...(m && m.error ? { error: m.error } : {}),
-          ...(m && m.message ? { message: m.message } : {}),
-          ...(m && m.warning ? { warning: m.warning } : {}),
+        result = await manager.applyCredential(pcTarget);
+        pcMachine = {
+          requested: true,
+          applied: !!result.applied,
+          alreadyActive: !!result.alreadyActive,
+          profileId: pcTarget,
+          ...(result.warning ? { warning: result.warning } : {}),
         };
       } catch (err) {
-        mac = { attempted: true, mirrored: false, error: 'MAC_UNREACHABLE', message: (err && err.message) || 'mirror failed' };
+        if (legacy || !macTarget) return mapError(res, err); // historical statuses
+        // Both machines requested: report the PC failure per-machine and
+        // continue to the INDEPENDENT Mac apply.
+        pcMachine = {
+          requested: true,
+          applied: false,
+          alreadyActive: false,
+          profileId: pcTarget,
+          error: (err && typeof err.code === 'string') ? err.code : 'CRED_INTERNAL',
+          message: (err && err.message) || 'PC apply failed',
+        };
       }
-    } else if (result.applied && body.mirrorToMac === true) {
-      mac = { attempted: false, mirrored: false, message: 'Mac mirror is not configured or is disabled.' };
     }
+
+    // ── Mac apply second; failures ride in the response, never a rollback ──
+    let mac = { attempted: false, mirrored: false }; // legacy summary field
+    let macMachine = null;
+    // Legacy semantics preserved exactly: the mirror only ever ran after a
+    // successful PC apply (alreadyActive skipped it). The new shape applies
+    // the Mac independently of the PC outcome.
+    const macWanted = !!macTarget && (legacy ? !!result.applied : true);
+    if (macWanted && macMirrorAvailable()) {
+      const settings = manager.getSettings();
+      const cfg = { ...settings.mac, sshTimeoutSec: settings.sshTimeoutSec };
+      // Prefer the explicit install+activate entry point; fall back to the
+      // mirrorToMac alias for older injected fakes.
+      const applyFn = (typeof macBridge.applyProfileOnMac === 'function')
+        ? macBridge.applyProfileOnMac : macBridge.mirrorToMac;
+      // The Mac mutex keeps this apply's SSH conversation from ever
+      // interleaving with an inventory sweep's.
+      const runEx = (typeof manager.runMacExclusive === 'function')
+        ? manager.runMacExclusive : ((fn) => fn());
+      let m;
+      try {
+        m = await runEx(() => applyFn(manager, cfg, macTarget));
+      } catch (err) {
+        m = { mirrored: false, error: 'MAC_UNREACHABLE', message: (err && err.message) || 'mirror failed' };
+      }
+      mac = {
+        attempted: true,
+        mirrored: !!(m && m.mirrored),
+        ...(m && m.error ? { error: m.error } : {}),
+        ...(m && m.message ? { message: m.message } : {}),
+        ...(m && m.warning ? { warning: m.warning } : {}),
+      };
+      macMachine = {
+        requested: true,
+        applied: !!(m && m.mirrored),
+        profileId: macTarget,
+        ...(m && m.error ? { error: m.error } : {}),
+        ...(m && m.message ? { message: m.message } : {}),
+        ...(m && m.warning ? { warning: m.warning } : {}),
+      };
+      if (m && m.mirrored) noteMacApplied(macTarget, m.name);
+    } else if (macWanted) {
+      mac = { attempted: false, mirrored: false, message: 'Mac mirror is not configured or is disabled.' };
+      macMachine = { requested: true, applied: false, profileId: macTarget, error: 'MAC_DISABLED', message: mac.message };
+    }
+
     if (result.applied) {
-      // Broadcast AFTER the PC commit, regardless of mirror outcome.
+      // Broadcast AFTER the PC commit, regardless of the Mac outcome.
       safeBroadcast('credentials:changed', {
-        activeProfileId: profileId,
+        activeProfileId: pcTarget,
         email: result.email || '',
         appliedAt: new Date().toISOString(),
         mac: { attempted: mac.attempted, mirrored: mac.mirrored },
       });
     }
     return res.json({
+      // Legacy top-level fields: PC-centric, unchanged for old clients.
       applied: !!result.applied,
       alreadyActive: !!result.alreadyActive,
-      activeProfileId: profileId,
+      activeProfileId: pcTarget || manager.getActiveAccountUuid() || null,
       restartNote: RESTART_NOTE,
       ...(result.warning ? { warning: result.warning } : {}),
       mac,
+      // Per-machine outcomes (new shape); null = machine not requested.
+      machines: { pc: pcMachine, mac: macMachine },
     });
   });
 
@@ -426,6 +546,19 @@ function setupCredentialRoutes(app, { requireAuth, getStore, broadcast, structur
       return mapError(res, err);
     }
   });
+
+  // ─── Lineage-gate support (manager <-> bridge decoupling) ─────────────
+  // The manager's usage poller needs "pull fresh Mac state" (one sweep +
+  // sync-back) when the Mac-active account's stored access token has
+  // expired, but it cannot require the bridge itself (circular require:
+  // the bridge already requires credential-manager). Register the sweep
+  // here instead; it no-ops whenever the bridge is disabled/unconfigured.
+  if (typeof manager.setMacStateRefresher === 'function') {
+    manager.setMacStateRefresher(async () => {
+      if (!macStateAvailable()) return null;
+      return refreshMacState();
+    });
+  }
 }
 
 module.exports = { setupCredentialRoutes };

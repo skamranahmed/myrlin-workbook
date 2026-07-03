@@ -545,12 +545,16 @@ function openSSE(server) {
   const fakeBridge = {
     sweeps: 0,
     nextInventory: null,
+    applies: [],
+    nextApply: { mirrored: true, name: 'mac-main' },
     /** Scripted inventory sweep; counts calls so cache-vs-SSH is provable. */
     readMacInventory: async () => { fakeBridge.sweeps += 1; return fakeBridge.nextInventory; },
     // Pure functions reused from the real bridge (no processes involved).
     resolveInventoryProfiles: realBridge.resolveInventoryProfiles,
     profileSlug: realBridge.profileSlug,
-    mirrorToMac: async () => ({ mirrored: true }),
+    /** Scripted Mac apply; records the target so routing is provable. */
+    applyProfileOnMac: async (mgr, cfg, uuid) => { fakeBridge.applies.push(uuid); return fakeBridge.nextApply; },
+    mirrorToMac: async (mgr, cfg, uuid) => { fakeBridge.applies.push(uuid); return fakeBridge.nextApply; },
   };
   const macApp = express();
   macApp.use(express.json());
@@ -617,6 +621,12 @@ function openSSE(server) {
     assertEqual(fakeBridge.sweeps, 1, 'GET served from cache, no extra sweep');
   });
 
+  await test('mac-state/refresh records the Mac-active lineage hint from observed reality', async () => {
+    // The previous sweep matched UUID_MAC as Mac-active; the hint must
+    // mirror it so the usage poller's lineage gate engages.
+    assertEqual(macManager.getMacActiveHint(), UUID_MAC, 'sweep recorded the lineage hint');
+  });
+
   await test('POST mac-state/refresh with an offline Mac: HTTP 200, reachable:false state', async () => {
     fakeBridge.nextInventory = { reachable: false, activeName: null, profileNames: [], liveCredText: null, identity: null, error: 'ssh timed out' };
     const r = await req(macListener, 'POST', '/api/credentials/mac-state/refresh', { body: {} });
@@ -624,6 +634,116 @@ function openSSE(server) {
     assertEqual(r.body.state.reachable, false);
     assertEqual(r.body.state.activeProfileId, null);
     assert(r.body.state.error && r.body.state.error.indexOf('timed out') !== -1, 'error detail surfaced');
+    assertEqual(macManager.getMacActiveHint(), UUID_MAC, 'an offline sweep never clears the hint (it says nothing about the Mac)');
+  });
+
+  // ─── Per-machine apply ({pc, mac} body shape) on the fake-bridge app ───
+  const UUID_PC2 = 'cdcdcd00-1111-2222-3333-555555555507';
+  macManager.saveSnapshot({
+    accountUuid: UUID_PC2,
+    email: 'pctarget@example.com',
+    label: 'PC Target',
+    credentials: makeOauth('PC2', Date.now() + 6 * HOUR_MS),
+    identity: makeIdentity(UUID_PC2, 'pctarget@example.com'),
+    tokenState: 'ok',
+  });
+  const macCredPath = path.join(macClaudeDir, '.credentials.json');
+
+  await test('apply {pc, mac}: both machines applied independently, machines shape returned', async () => {
+    fakeBridge.applies.length = 0;
+    fakeBridge.nextApply = { mirrored: true, name: 'mac-main' };
+    const evBefore = macEvents.length;
+    const r = await req(macListener, 'POST', '/api/credentials/apply', { body: { pc: UUID_PC2, mac: UUID_MAC } });
+    assertEqual(r.status, 200, 'body=' + r.raw);
+    assertNoTokenMaterial(r.raw, 'apply {pc,mac}');
+    // Legacy top-level fields stay PC-centric.
+    assertEqual(r.body.applied, true);
+    assertEqual(r.body.activeProfileId, UUID_PC2);
+    // Per-machine outcomes.
+    assert(r.body.machines, 'machines object present');
+    assertEqual(r.body.machines.pc.applied, true);
+    assertEqual(r.body.machines.pc.profileId, UUID_PC2);
+    assertEqual(r.body.machines.mac.applied, true);
+    assertEqual(r.body.machines.mac.profileId, UUID_MAC);
+    // The PC transaction really ran (live fixture files swapped).
+    const liveCred = JSON.parse(fs.readFileSync(macCredPath, 'utf-8')).claudeAiOauth;
+    assertEqual(liveCred.accessToken, 'at-ROUTEFIX-PC2', 'PC live token swapped');
+    // The Mac apply was routed to the bridge with the right target.
+    assertEqual(fakeBridge.applies.length, 1);
+    assertEqual(fakeBridge.applies[0], UUID_MAC);
+    // Verified Mac apply updates the cache optimistically + broadcasts.
+    const st = macManager.getMacState();
+    assertEqual(st.activeProfileId, UUID_MAC, 'mac-state cache reflects the verified apply');
+    assertEqual(st.reachable, true);
+    assert(st.profiles.some((p) => p.name === 'mac-main' && p.profileId === UUID_MAC), 'applied profile listed as installed');
+    const macEv = macEvents.slice(evBefore).find((e) => e.type === 'credentials:mac');
+    assert(macEv, 'credentials:mac broadcast after the Mac apply');
+    const changedEv = macEvents.slice(evBefore).find((e) => e.type === 'credentials:changed');
+    assert(changedEv && changedEv.data.activeProfileId === UUID_PC2, 'credentials:changed broadcast after the PC commit');
+    assertNoTokenMaterial(JSON.stringify(macEvents), 'sub-app broadcast stream');
+  });
+
+  await test('apply {pc, mac}: a Mac failure NEVER rolls back the successful PC apply', async () => {
+    fakeBridge.applies.length = 0;
+    fakeBridge.nextApply = { mirrored: false, error: 'MAC_UNREACHABLE', message: 'ssh dropped mid-apply' };
+    const r = await req(macListener, 'POST', '/api/credentials/apply', { body: { pc: UUID_MAC, mac: UUID_MAC } });
+    assertEqual(r.status, 200, 'Mac failure is reported, never an error status once the PC applied: ' + r.raw);
+    assertEqual(r.body.machines.pc.applied, true, 'PC applied');
+    assertEqual(r.body.machines.mac.applied, false, 'Mac failed');
+    assertEqual(r.body.machines.mac.error, 'MAC_UNREACHABLE');
+    assert(r.body.machines.mac.message.indexOf('ssh dropped') !== -1, 'bridge message surfaced');
+    // Legacy summary field mirrors the failure for old clients.
+    assertEqual(r.body.mac.attempted, true);
+    assertEqual(r.body.mac.mirrored, false);
+    // The PC swap SURVIVED the Mac failure (no rollback).
+    const liveCred = JSON.parse(fs.readFileSync(macCredPath, 'utf-8')).claudeAiOauth;
+    assertEqual(liveCred.accessToken, 'at-MACLIVE-SWEEP', 'PC now runs the UUID_MAC snapshot (adopted Mac tokens), not rolled back');
+  });
+
+  await test('apply {mac} only: PC transaction skipped entirely', async () => {
+    fakeBridge.applies.length = 0;
+    fakeBridge.nextApply = { mirrored: true, name: 'pc-target' };
+    const before = fs.readFileSync(macCredPath, 'utf-8');
+    const r = await req(macListener, 'POST', '/api/credentials/apply', { body: { mac: UUID_PC2 } });
+    assertEqual(r.status, 200, 'body=' + r.raw);
+    assertEqual(r.body.applied, false, 'no PC apply happened');
+    assertEqual(r.body.machines.pc, null, 'PC not requested');
+    assertEqual(r.body.machines.mac.applied, true);
+    assertEqual(r.body.activeProfileId, UUID_MAC, 'activeProfileId reports the CURRENT PC active account');
+    assertEqual(fs.readFileSync(macCredPath, 'utf-8'), before, 'PC live files byte-identical (untouched)');
+    assertEqual(fakeBridge.applies.length, 1);
+    assertEqual(fakeBridge.applies[0], UUID_PC2);
+  });
+
+  await test('apply body validation: empty body and junk pc/mac values 400', async () => {
+    const empty = await req(macListener, 'POST', '/api/credentials/apply', { body: {} });
+    assertEqual(empty.status, 400);
+    assertEqual(empty.body.error, 'VALIDATION');
+    const junk = await req(macListener, 'POST', '/api/credentials/apply', { body: { pc: 42 } });
+    assertEqual(junk.status, 400);
+    const junkMac = await req(macListener, 'POST', '/api/credentials/apply', { body: { mac: '' } });
+    assertEqual(junkMac.status, 400);
+  });
+
+  await test('apply legacy shape still works and now carries machines too', async () => {
+    fakeBridge.applies.length = 0;
+    fakeBridge.nextApply = { mirrored: true, name: 'pc-target' };
+    // PC currently runs UUID_MAC; legacy-switch back to UUID_PC2 with mirror.
+    const r = await req(macListener, 'POST', '/api/credentials/apply', { body: { profileId: UUID_PC2, mirrorToMac: true } });
+    assertEqual(r.status, 200, 'body=' + r.raw);
+    assertEqual(r.body.applied, true);
+    assertEqual(r.body.activeProfileId, UUID_PC2);
+    assertEqual(r.body.mac.attempted, true, 'legacy mirror flag still routes to the Mac');
+    assertEqual(r.body.mac.mirrored, true);
+    assertEqual(r.body.machines.pc.applied, true, 'machines present for legacy callers too');
+    assertEqual(r.body.machines.mac.applied, true);
+    assertEqual(fakeBridge.applies[0], UUID_PC2, 'legacy mirror targets the SAME profile');
+    // Legacy alreadyActive: mirror is skipped exactly as before.
+    fakeBridge.applies.length = 0;
+    const again = await req(macListener, 'POST', '/api/credentials/apply', { body: { profileId: UUID_PC2, mirrorToMac: true } });
+    assertEqual(again.body.alreadyActive, true);
+    assertEqual(again.body.mac.attempted, false, 'legacy semantics: no mirror after alreadyActive');
+    assertEqual(fakeBridge.applies.length, 0, 'bridge never called');
   });
 
   // Restore the env gate so nothing after this point could ever touch a

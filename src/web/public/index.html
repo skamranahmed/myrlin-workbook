@@ -141,9 +141,12 @@
             <div class="account-machines" id="account-machines" hidden></div>
             <div class="account-panel-list" id="account-panel-list"></div>
             <div class="account-panel-footer">
-              <label class="account-mac-toggle" id="account-mac-toggle" hidden>
-                <input type="checkbox" id="account-mac-checkbox"> Also apply on Mac Mini
-              </label>
+              <!-- Pending per-machine selections (PC: / Mac: lines), filled
+                   by renderAccountSwitcher and hidden when nothing is
+                   staged. Replaces the retired "Also apply on Mac Mini"
+                   checkbox: the per-row MAC segments stage the Mac
+                   independently now. -->
+              <div class="account-pending" id="account-pending" hidden></div>
               <div class="account-panel-actions">
                 <button class="btn btn-ghost btn-sm" id="account-cancel-btn">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="account-save-btn" disabled>Save</button>
