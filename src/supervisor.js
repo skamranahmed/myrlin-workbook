@@ -55,7 +55,7 @@ if (process.argv.includes('--daemon')) {
       try {
         const { execSync: es } = require('child_process');
         const psCmd = `powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*supervisor.js*' -and $_.CommandLine -notlike '*--daemon*' } | Select-Object -ExpandProperty ProcessId"`;
-        const out = es(psCmd, { encoding: 'utf8', timeout: 10000 });
+        const out = es(psCmd, { encoding: 'utf8', timeout: 10000, windowsHide: true });
         const pids = out.trim().split('\n').map(l => l.trim()).filter(Boolean);
         if (pids.length > 0) {
           const pid = pids[pids.length - 1];
@@ -77,6 +77,7 @@ if (process.argv.includes('--daemon')) {
       stdio: ['ignore', out, err],
       detached: true,
       env: { ...process.env },
+      windowsHide: true, // no-op off Windows; keeps every spawn site uniform
     });
     fs.writeFileSync(pidFile, String(child.pid), 'utf8');
     child.unref();
@@ -156,6 +157,10 @@ function startChild() {
   child = spawn(process.execPath, ['--max-old-space-size=4096', guiScript, ...guiArgs], {
     stdio: 'inherit',
     env: { ...process.env, CWM_NO_OPEN: consecutiveRestarts > 0 ? '1' : '' },
+    // windowsHide: when the supervisor runs daemonized (windowless), the
+    // GUI child must not allocate a visible console. stdio 'inherit' still
+    // flows through inherited handles, so foreground output is unchanged.
+    windowsHide: true,
   });
 
   child.on('exit', (code, signal) => {

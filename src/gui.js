@@ -190,7 +190,8 @@ function openBrowser(url, callback) {
   } else {
     cmd = `xdg-open "${url}"`;
   }
-  exec(cmd, (err) => {
+  // windowsHide: the browser-open helper must never flash a console window
+  exec(cmd, { windowsHide: true }, (err) => {
     if (err && callback) callback(err);
     else if (err) console.log(`Could not auto-open browser. Visit ${url} manually.`);
   });
@@ -227,7 +228,8 @@ function openBrowserWithCDP(url, cdpPort) {
       openBrowser(url);
       return;
     }
-    exec(attempts[index], (err) => {
+    // windowsHide: fallback browser-open attempts must never flash a console
+    exec(attempts[index], { windowsHide: true }, (err) => {
       if (err) tryNext(index + 1);
     });
   }

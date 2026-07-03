@@ -84,6 +84,10 @@ function launchSession(sessionId) {
         stdio: 'ignore',
         cwd: workingDir,
         shell: false,
+        // windowsHide hides only this wrapper cmd.exe. The visible session
+        // window the user asked for is created by 'start' in its own new
+        // console (shown normally), so only the helper flash goes away.
+        windowsHide: true,
       });
     } else {
       // Linux/macOS/WSL: spawn a detached login shell
@@ -95,6 +99,7 @@ function launchSession(sessionId) {
         detached: true,
         stdio: 'ignore',
         cwd: workingDir,
+        windowsHide: true, // no-op off Windows; keeps every spawn site uniform
       });
     }
 
