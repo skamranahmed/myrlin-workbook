@@ -11646,3 +11646,37 @@ html {
   user-select: text;
   word-break: break-all;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   SESSION LIVENESS DOT (issue #10 Tier 1, Phase 0)
+   Green pulse on discovered-session rows whose transcript was
+   written within the server's LIVE_THRESHOLD_MS window (2 min
+   default). mtime heuristic: "recently wrote transcript", not
+   "process running". Theme-safe via var(--green); the pulse is
+   disabled under prefers-reduced-motion (opacity only, no ring).
+   ═══════════════════════════════════════════════════════════ */
+.session-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-right: 6px;
+  flex-shrink: 0;
+  animation: session-live-pulse 2s ease-in-out infinite;
+}
+@keyframes session-live-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+    opacity: 0.65;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-live-dot {
+    animation: none;
+  }
+}

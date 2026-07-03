@@ -12602,8 +12602,16 @@ class CWMApp {
         // Archived sessions (e.g. Codex archived_sessions/) get a muted
         // label so ended threads are visually distinct but still openable.
         const archivedBadge = s.archived ? '<span class="project-session-archived">archived</span>' : '';
-        return `<div class="project-session-item" draggable="true" data-session-name="${this.escapeHtml(sessName)}" data-project-path="${this.escapeHtml(p.realPath || '')}" data-project-encoded="${this.escapeHtml(encoded)}" data-provider="${projProvider}" title="${this.escapeHtml(tooltip)}">
-          <span class="project-session-name">${this.escapeHtml(displayName)}</span>
+        // Issue #10 Phase 0: green pulse dot on recently-active sessions.
+        // `live` is a server-side mtime heuristic (transcript written within
+        // the last 2 min), NOT proof a process is running; the tooltip copy
+        // says so to avoid overpromising. data-live also feeds the mirror
+        // context-menu affordance.
+        const liveDot = s.live
+          ? '<span class="session-live-dot" title="Active within last 2 min (transcript recently written; not proof a process is running)"></span>'
+          : '';
+        return `<div class="project-session-item" draggable="true" data-session-name="${this.escapeHtml(sessName)}" data-project-path="${this.escapeHtml(p.realPath || '')}" data-project-encoded="${this.escapeHtml(encoded)}" data-provider="${projProvider}" data-live="${s.live ? '1' : '0'}" title="${this.escapeHtml(tooltip)}">
+          ${liveDot}<span class="project-session-name">${this.escapeHtml(displayName)}</span>
           ${archivedBadge}
           ${sessSize ? `<span class="project-session-size">${sessSize}</span>` : ''}
           ${sessTime ? `<span class="project-session-time">${sessTime}</span>` : ''}
