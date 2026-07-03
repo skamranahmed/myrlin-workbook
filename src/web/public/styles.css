@@ -8383,6 +8383,22 @@ html {
   z-index: 1;
 }
 
+/* Header action cluster (refresh + Mac config gear). Keeps the two icon
+   buttons on one compact right-aligned rail inside the sticky header. */
+.account-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Hint paragraph at the top of the Mac sync settings modal. */
+.account-modal-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .account-panel-list {
   display: flex;
   flex-direction: column;

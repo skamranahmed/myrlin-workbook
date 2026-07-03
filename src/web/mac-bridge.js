@@ -49,6 +49,16 @@ const USE_TIMEOUT_FLOOR_SEC = 45;
 // ssh option ConnectTimeout is capped so a large exec budget does not also
 // stretch the TCP connect phase.
 const CONNECT_TIMEOUT_CAP_SEC = 10;
+// Host key policy for every ssh/scp invocation. WHY accept-new and not the
+// ssh default (ask): BatchMode=yes means ssh can never prompt, so a host
+// whose key is not yet in known_hosts (e.g. the Mac renamed from
+// arthurs-mac-mini to alloy) would hard-fail every connection forever.
+// accept-new performs trust-on-first-use, which is appropriate on the
+// private tailnet these hosts live on, while STILL failing loudly if a
+// previously known host presents a DIFFERENT key (the actual MITM signal).
+// NEVER weaken this to 'no': that would also accept changed keys and
+// silently swallow a real man-in-the-middle.
+const HOST_KEY_POLICY = 'accept-new';
 
 /**
  * Validate the ssh target. Throws on any charset violation or a leading
@@ -71,6 +81,19 @@ function validateMacTarget(cfg) {
 }
 
 /**
+ * Resolve the execFile implementation for one bridge call. Tests inject a
+ * fake through opts.execFileImpl so every bridge test is hermetic (zero
+ * real ssh/scp processes ever spawn in CI); production callers omit it and
+ * get the real child_process.execFile.
+ *
+ * @param {{execFileImpl?: Function}} [opts] - Per-call options bag.
+ * @returns {Function} An execFile-compatible function.
+ */
+function _resolveExecFile(opts) {
+  return (opts && typeof opts.execFileImpl === 'function') ? opts.execFileImpl : execFile;
+}
+
+/**
  * Run one remote command over ssh with BatchMode (never prompts) and
  * keep-alive options. Never throws; resolves a structured result. Exit
  * code 255 is ssh's own client/link error and maps to unreachable.
@@ -78,21 +101,23 @@ function validateMacTarget(cfg) {
  * @param {{host: string, user: string}} cfg - Validated mac config.
  * @param {string} remoteCommand - Command line for the remote shell.
  * @param {number} timeoutSec - Total execution budget in seconds.
+ * @param {{execFileImpl?: Function}} [opts] - Injection point for tests.
  * @returns {Promise<{code: number, stdout: string, stderr: string, timedOut: boolean}>}
  */
-function sshExec(cfg, remoteCommand, timeoutSec) {
+function sshExec(cfg, remoteCommand, timeoutSec, opts = {}) {
   return new Promise((resolve) => {
     const t = Math.max(1, Number(timeoutSec) || 8);
     const connectT = Math.min(t, CONNECT_TIMEOUT_CAP_SEC);
     const args = [
       '-o', 'ConnectTimeout=' + connectT,
       '-o', 'BatchMode=yes',
+      '-o', 'StrictHostKeyChecking=' + HOST_KEY_POLICY,
       '-o', 'ServerAliveInterval=5',
       '-o', 'ServerAliveCountMax=2',
       cfg.user + '@' + cfg.host,
       remoteCommand,
     ];
-    execFile('ssh', args, { timeout: t * 1000, windowsHide: true }, (err, stdout, stderr) => {
+    _resolveExecFile(opts)('ssh', args, { timeout: t * 1000, windowsHide: true }, (err, stdout, stderr) => {
       const timedOut = !!(err && (err.killed || err.signal === 'SIGTERM'));
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
       resolve({ code, stdout: String(stdout || ''), stderr: String(stderr || ''), timedOut });
@@ -108,18 +133,20 @@ function sshExec(cfg, remoteCommand, timeoutSec) {
  * @param {string} localPath - Local source file.
  * @param {string} remotePath - Remote destination path.
  * @param {number} timeoutSec - Total execution budget in seconds.
+ * @param {{execFileImpl?: Function}} [opts] - Injection point for tests.
  * @returns {Promise<boolean>} true on success.
  */
-function scpSend(cfg, localPath, remotePath, timeoutSec) {
+function scpSend(cfg, localPath, remotePath, timeoutSec, opts = {}) {
   return new Promise((resolve) => {
     const t = Math.max(1, Number(timeoutSec) || 8);
     const args = [
       '-o', 'ConnectTimeout=' + Math.min(t, CONNECT_TIMEOUT_CAP_SEC),
       '-o', 'BatchMode=yes',
+      '-o', 'StrictHostKeyChecking=' + HOST_KEY_POLICY,
       localPath,
       cfg.user + '@' + cfg.host + ':' + remotePath,
     ];
-    execFile('scp', args, { timeout: Math.max(t, 20) * 1000, windowsHide: true }, (err) => {
+    _resolveExecFile(opts)('scp', args, { timeout: Math.max(t, 20) * 1000, windowsHide: true }, (err) => {
       resolve(!err);
     });
   });
@@ -131,13 +158,14 @@ function scpSend(cfg, localPath, remotePath, timeoutSec) {
  * token file, so the Mac identity legitimately lags the mirrored token.
  *
  * @param {{host: string, user: string, sshTimeoutSec?: number}} cfg
+ * @param {{execFileImpl?: Function}} [opts] - Injection point for tests.
  * @returns {Promise<{email: string|null, accountUuid: string|null}|null>}
  */
-async function readMacLiveState(cfg) {
+async function readMacLiveState(cfg, opts = {}) {
   try { validateMacTarget(cfg); } catch (_) { return null; }
   const pyCode = "import json,os;a=json.load(open(os.path.expanduser('~/.claude.json'))).get('oauthAccount') or {};" +
     "print(json.dumps({'email':a.get('emailAddress'),'accountUuid':a.get('accountUuid')}))";
-  const r = await sshExec(cfg, 'python3 -c "' + pyCode + '"', Number(cfg.sshTimeoutSec) || 8);
+  const r = await sshExec(cfg, 'python3 -c "' + pyCode + '"', Number(cfg.sshTimeoutSec) || 8, opts);
   if (r.code !== 0) return null;
   try {
     const lines = r.stdout.trim().split('\n');
@@ -189,7 +217,7 @@ function profileSlug(snapshot) {
  * @param {string} accountUuid - The profileId to mirror.
  * @returns {Promise<{mirrored: boolean, error?: string, message?: string, warning?: string}>}
  */
-async function mirrorToMac(manager, cfg, accountUuid) {
+async function mirrorToMac(manager, cfg, accountUuid, opts = {}) {
   try {
     validateMacTarget(cfg);
   } catch (err) {
@@ -213,7 +241,7 @@ async function mirrorToMac(manager, cfg, accountUuid) {
   const remoteProfile = '$HOME/.claude-profiles/' + name + '.credentials.json';
   try {
     fs.writeFileSync(localTmp, payload, { mode: 0o600 });
-    const sent = await scpSend(cfg, localTmp, remoteTmp, timeoutSec);
+    const sent = await scpSend(cfg, localTmp, remoteTmp, timeoutSec, opts);
     if (!sent) {
       return { mirrored: false, error: 'MAC_UNREACHABLE', message: 'scp to ' + cfg.host + ' failed; check SSH connectivity (Tailscale up, key auth working).' };
     }
@@ -221,9 +249,9 @@ async function mirrorToMac(manager, cfg, accountUuid) {
     // ([a-z0-9-] slug, hex temp name), so no remote quoting can break.
     const install = await sshExec(cfg,
       'mkdir -p "$HOME/.claude-profiles" && mv ' + remoteTmp + ' "' + remoteProfile + '" && chmod 600 "' + remoteProfile + '"',
-      timeoutSec);
+      timeoutSec, opts);
     if (install.code !== 0) {
-      await sshExec(cfg, 'rm -f ' + remoteTmp, timeoutSec); // best-effort temp cleanup
+      await sshExec(cfg, 'rm -f ' + remoteTmp, timeoutSec, opts); // best-effort temp cleanup
       if (install.code === 255) {
         return { mirrored: false, error: 'MAC_UNREACHABLE', message: 'ssh to ' + cfg.host + ' failed: ' + (install.stderr || 'link error').trim() };
       }
@@ -232,7 +260,7 @@ async function mirrorToMac(manager, cfg, accountUuid) {
     const tool = (cfg.profileTool && String(cfg.profileTool).trim()) ? String(cfg.profileTool).trim() : DEFAULT_PROFILE_TOOL;
     const useRes = await sshExec(cfg,
       'export PATH="$HOME/.local/bin:$PATH"; ' + tool + ' use ' + name,
-      Math.max(timeoutSec, USE_TIMEOUT_FLOOR_SEC));
+      Math.max(timeoutSec, USE_TIMEOUT_FLOOR_SEC), opts);
     if (useRes.code === 255) {
       return { mirrored: false, error: 'MAC_UNREACHABLE', message: 'ssh to ' + cfg.host + ' dropped while applying: ' + (useRes.stderr || 'link error').trim() };
     }
@@ -247,7 +275,7 @@ async function mirrorToMac(manager, cfg, accountUuid) {
     // NOT compared; claude-profile does not touch it.)
     const verify = await sshExec(cfg,
       'cat "$HOME/.claude-profiles/active" 2>/dev/null; cmp -s "$HOME/.claude/.credentials.json" "' + remoteProfile + '" && echo CWM_MATCH',
-      timeoutSec);
+      timeoutSec, opts);
     let warning;
     if (verify.code === 255 || verify.timedOut) {
       warning = 'Mirror applied but the verification round trip could not connect; assume applied.';
@@ -259,7 +287,7 @@ async function mirrorToMac(manager, cfg, accountUuid) {
       }
     }
     if (cfg.postSwapCommand && String(cfg.postSwapCommand).trim()) {
-      const post = await sshExec(cfg, String(cfg.postSwapCommand), Math.max(timeoutSec, 30));
+      const post = await sshExec(cfg, String(cfg.postSwapCommand), Math.max(timeoutSec, 30), opts);
       if (post.code !== 0) {
         warning = (warning ? warning + ' ' : '') + 'postSwapCommand exited ' + post.code + '.';
       }

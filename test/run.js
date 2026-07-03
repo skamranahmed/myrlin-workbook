@@ -919,6 +919,7 @@ const standaloneTests = [
   'smooth-scroll.test.js',           // issue #41: xterm smoothScrollDuration capability gate, setting/reduced-motion resolution, mobile engine guard
   'credential-manager.test.js',      // credential switcher T1: snapshot store, rotation write-back, corrected token-state model, apply transaction
   'credential-routes.test.js',       // credential switcher T1: /api/credentials routes, SSE broadcasts, token-material leak gate
+  'mac-bridge.test.js',              // feat/mac-credential-sync: hermetic ssh/scp argv gate (accept-new, no token in argv), inventory parser, install/apply split
   'usage-meter.test.js',             // feat/usage-meter: per-model bars (Session/Opus/Fable), model-scope mapper wiring, absolute local resets
 ];
 

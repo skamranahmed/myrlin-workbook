@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Mac sync settings modal (gear in the account panel header).** The Mac mirror config (enable toggle, host, user, profile tool path, post-swap command) was previously reachable only via raw API calls, so retargeting the bridge after the Mac was renamed (`arthurs-mac-mini` is dead; the machine is now `alloy` / 100.111.181.106) required code or curl. A gear button (`#account-mac-config-btn`) now opens a modal bound to the existing `GET`/`PUT /api/credentials/mac-config` routes. Why: nothing credential-related may ever move to the Mac until the host is set and the feature is explicitly enabled here; this modal is that switch. Host and user stay charset-validated server-side (ssh option-injection guard).
+
+### Fixed
+
+- **SSH to a renamed or first-seen Mac host no longer hard-fails under BatchMode.** `ssh`/`scp` in the Mac bridge ran with `BatchMode=yes` (correct: a server must never sit on an interactive prompt) but without a host-key policy, so a host not yet in `known_hosts` (exactly what a rename to `alloy` produces) failed every connection forever with no way to accept the key. Both argv builders now pass `-o StrictHostKeyChecking=accept-new`: trust-on-first-use on the private tailnet, while a CHANGED key for a known host still fails loudly (the actual man-in-the-middle signal). Deliberately never `=no`, which would also accept changed keys.
+
+### Testing
+
+- New hermetic `test/mac-bridge.test.js`: every ssh/scp child process is replaced via the new `opts.execFileImpl` injection point, so zero real processes spawn. Locks the argv shape (accept-new present, `=no` absent, BatchMode, ConnectTimeout cap at 10s), exit-code mapping (255 = unreachable, 127 = tool missing, verify mismatch), and the load-bearing security property that token values and token key names never appear in any argv while the secret payload travels only inside the 0600 scp temp file that is deleted afterwards.
+
 ## [1.2.0-alpha.14] - 2026-07-03
 
 ### Added

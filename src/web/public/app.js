@@ -332,6 +332,7 @@ class CWMApp {
       accountPanel: document.getElementById('account-panel'),
       accountPanelList: document.getElementById('account-panel-list'),
       accountRefreshBtn: document.getElementById('account-refresh-btn'),
+      accountMacConfigBtn: document.getElementById('account-mac-config-btn'),
       accountSaveBtn: document.getElementById('account-save-btn'),
       accountCancelBtn: document.getElementById('account-cancel-btn'),
       accountMacToggle: document.getElementById('account-mac-toggle'),
@@ -8159,6 +8160,11 @@ class CWMApp {
 
       // Header + footer controls.
       els.accountRefreshBtn.addEventListener('click', () => this.loadCredentials({ refresh: true }));
+      // Gear: Mac sync settings (enable/host/user/tool). This modal is the
+      // no-code-edit path for pointing the bridge at a renamed Mac host.
+      if (els.accountMacConfigBtn) {
+        els.accountMacConfigBtn.addEventListener('click', () => this.openMacConfigModal());
+      }
       els.accountCancelBtn.addEventListener('click', () => {
         this.state.credentials.stagedId = null;
         this._closeAccountPanel();
@@ -8823,6 +8829,73 @@ class CWMApp {
     } catch (err) {
       if (err && err.message === 'Unauthorized') return;
       this.showToast('Capture failed: could not reach the server', 'error');
+    }
+  }
+
+  /**
+   * Open the Mac sync settings modal (gear in the account panel header):
+   * GET /api/credentials/mac-config, edit enable/host/user/profileTool/
+   * postSwapCommand in the shared prompt modal, PUT the result back, then
+   * refresh the roster so cred.mac (and the strip/segments) update. This is
+   * the no-code-edit affordance for retargeting the bridge (e.g. the Mac
+   * renamed from arthurs-mac-mini to alloy). Host and user are validated
+   * server-side against the ssh option-injection charset; the server's
+   * VALIDATION message is surfaced as the error toast.
+   * @returns {Promise<void>} Never rejects; failures toast.
+   */
+  async openMacConfigModal() {
+    let cfg = { enabled: false, host: '', user: '', profileTool: '', postSwapCommand: '' };
+    try {
+      const resp = await this._credApi('GET', '/api/credentials/mac-config');
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Could not load Mac config (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      cfg = { ...cfg, ...(resp.data || {}) };
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Could not load Mac config: server unreachable', 'error');
+      return;
+    }
+    const result = await this.showPromptModal({
+      title: 'Mac sync settings',
+      headerHtml: '<p class="account-modal-hint">Pushes the selected account to the Mac over SSH (key auth, Tailscale). '
+        + 'Nothing moves until this is enabled and Save is pressed in the account panel.</p>',
+      fields: [
+        { key: 'enabled', type: 'checkbox', label: 'Enable Mac credential sync', value: !!cfg.enabled },
+        { key: 'host', label: 'Mac host (Tailscale name or IP)', value: cfg.host || '', placeholder: 'alloy', required: true },
+        { key: 'user', label: 'SSH user', value: cfg.user || '', placeholder: 'arthur', required: true },
+        { key: 'profileTool', label: 'Profile tool path (optional)', value: cfg.profileTool || '', placeholder: '$HOME/.local/bin/claude-profile' },
+        { key: 'postSwapCommand', label: 'Post-swap command (optional)', value: cfg.postSwapCommand || '', placeholder: 'runs on the Mac after each swap' },
+      ],
+      confirmText: 'Save',
+    });
+    if (!result) return; // cancelled
+    const body = {
+      enabled: !!result.enabled,
+      host: String(result.host || '').trim(),
+      user: String(result.user || '').trim(),
+      profileTool: String(result.profileTool || '').trim(),
+      postSwapCommand: String(result.postSwapCommand || '').trim(),
+    };
+    try {
+      const resp = await this._credApi('PUT', '/api/credentials/mac-config', body);
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Saving Mac config failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this.showToast(body.enabled ? `Mac sync enabled (${body.user}@${body.host})` : 'Mac sync saved (disabled)', 'success');
+      // Roster reload refreshes cred.mac so the machines strip and MAC
+      // segments appear/disappear without a page reload.
+      await this.loadCredentials();
+      // Kick a live Mac probe when enabling (guarded: the probe method ships
+      // with the mac-state phase and this modal must never hard-depend on it).
+      if (body.enabled && typeof this.loadMacState === 'function') this.loadMacState({ probe: true });
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Saving Mac config failed: server unreachable', 'error');
     }
   }
 

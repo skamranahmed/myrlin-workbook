@@ -120,7 +120,14 @@
           <div class="account-panel" id="account-panel" role="listbox" hidden>
             <div class="account-panel-header">
               <span>Claude account</span>
-              <button class="btn btn-ghost btn-icon btn-sm" id="account-refresh-btn" title="Refresh usage">&#8635;</button>
+              <span class="account-panel-header-actions">
+                <button class="btn btn-ghost btn-icon btn-sm" id="account-refresh-btn" title="Refresh usage and Mac state">&#8635;</button>
+                <!-- Gear opens the Mac sync config modal (enable/host/user/tool);
+                     this is how the Mac target is set without code edits. -->
+                <button class="btn btn-ghost btn-icon btn-sm" id="account-mac-config-btn" title="Mac sync settings" aria-label="Mac sync settings">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </span>
             </div>
             <!-- Mobile mirror of the header usage meter (active account's
                  Session/Opus/Fable bars). Populated by renderUsageMeter();
