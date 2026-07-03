@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-03
+
+First stable release of the 1.2 line, consolidating 1.2.0-alpha.0 through 1.2.0-alpha.16. It supersedes 0.9.36 as the default (`@latest`) install. The detailed, root-cause-level per-alpha entries are retained below this section on purpose (they carry the WHY for every change); the list here is a curated rollup.
+
+### Added
+
+- **Multi-provider support.** A provider abstraction layer with first-class Claude Code and ChatGPT Codex providers (session discovery, search, transcript parsing, spawn/resume), so the workbench manages both CLIs side by side under one UI.
+- **Account switcher.** Manage multiple Claude accounts: snapshot each account's credentials, swap the active one, and see per-account usage and token state.
+- **Per-model usage meter.** Top-right Opus / Fable / session bars with exact local reset times, plus per-account usage rows in the switcher dropdown.
+- **Mac credential sync.** Choose which account lives on the PC, the Mac, or both, with a live Mac-state probe and a token-lineage safety guard that stops PC usage-polling from silently logging the Mac out.
+- **Read-only live session mirror (Tier 1).** Watch any discovered session's conversation stream live in a pane without resuming or touching it, plus a green liveness dot on sessions whose transcript was written in the last two minutes.
+- **Short-TTL git-conflict status cache** for the workspace conflict endpoint.
+
+### Changed
+
+- **Session model reorganized around the provider registry**; discovery, search, and cost tracking now flow through per-provider modules rather than Claude-only code paths.
+- **Tightened the npm publish allow-list (`files`)** so only product source ships; excluded a stale `src/web/public/.backup` asset directory from the tarball.
+
+### Fixed
+
+- **Notification storm on tab switch** (edge-triggered re-arm, replay suppression, refire cooldown, focus ack) so already-viewed panes stop re-dinging.
+- **Terminal text corruption and mobile-size leak on shared PTYs** (size ownership, no-op resize suppression, reset-before-replay) so a desktop pane is no longer scrunched after a phone views it.
+- **Windows console-window flashing:** a complete `windowsHide` sweep across every server-side child process (git, ssh/scp, cloudflared, resource probes, self-update, browser-open, the restart template).
+- **Paste on insecure LAN origins** (bracketed-paste isolation plus a secure-context clipboard fallback).
+- **Smooth terminal scrolling** (issue #41).
+- **Mobile UX:** scrollable tab bar and a selectable account bottom sheet.
+- **Search performance:** async, byte-tail reads with mtime ordering, eliminating multi-second hangs on large transcript corpora.
+
+### Security
+
+- Credential snapshots are stored `0600` under the gitignored data dir; token values are never serialized to browser clients (whitelisted projections only) and never passed in argv over SSH (secrets travel as `0600` temp files).
+- Removed an operator credential-extraction script from the published tarball via the `files` allow-list.
+
 ## [1.2.0-alpha.16] - 2026-07-03
 
 ### Added
