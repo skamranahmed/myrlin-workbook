@@ -923,6 +923,11 @@ const standaloneTests = [
   'usage-meter.test.js',             // feat/usage-meter: per-model bars (Session/Opus/Fable), model-scope mapper wiring, absolute local resets
   'windows-hide-sweep.test.js',  // chore/windowshide-sweep: every server-side child_process call site passes windowsHide (source gate)
   'git-conflict-cache.test.js',  // chore/windowshide-sweep: short-TTL git status cache hit/expiry/eager invalidation
+  'jsonl-tailer.test.js',            // issue #10 T1 P1: byte-offset tailer (watch+poll, UTF-8 carry, truncate reset, oversized sentinel) + readTailWindow
+  'claude-mirror-parse.test.js',     // issue #10 T1 P2: claude mirror.parseLine (pure, never throws, text cap, skip set)
+  'codex-mirror-parse.test.js',      // issue #10 T1 P2: codex parseLine extraction + parseTranscript parity on canonical fixtures
+  'mirror-service.test.js',          // issue #10 T1 P3: MirrorService open/close refcount, broadcast batching, limit, truncate reset, readEarlier paging
+  'mirror-routes.test.js',           // issue #10 T1 P0+P3: /api/mirror routes, SSE deviceId scoping, discovery live/lastActiveMs flags
 ];
 
 let standaloneFailed = 0;

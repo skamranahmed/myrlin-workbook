@@ -66,6 +66,14 @@ const KNOWN_ENVELOPE_TYPES = [
   'compacted',
 ];
 
+/**
+ * Maximum characters of text carried by one MirrorMessage (issue #10 Tier 1).
+ * Applied by parseLine when called with default options (the mirror path);
+ * parseTranscript opts out via {maxTextChars: Infinity} so the whole-file
+ * transcript view keeps its historical uncapped behavior.
+ */
+const MIRROR_MAX_TEXT_CHARS = 8192;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -268,6 +276,190 @@ function resolveRolloutPathManual(sessionsRoot, suffix) {
 }
 
 // ---------------------------------------------------------------------------
+// Public: parseLine (issue #10 Tier 1, provider mirror capability)
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {Object} MirrorMessage
+ * @property {'user'|'assistant'|'system'|'tool'} role  Who the entry belongs to.
+ * @property {string} text                              Display text (capped on the mirror path).
+ * @property {string|null} timestamp                    ISO timestamp when present on the line.
+ * @property {string|null} model                        Always null for Codex (rollouts do not record per-message models).
+ * @property {'text'|'tool_use'|'tool_result'|'system'} [kind]  Fine-grained rendering hint.
+ * @property {string} [toolName]                        Function name, present when kind === 'tool_use'.
+ * @property {boolean} [truncated]                      True when text was capped (only set when true).
+ */
+
+/**
+ * Apply the mirror text cap. Central choke point shared by every parseLine
+ * emit path so capping semantics stay identical across message kinds.
+ *
+ * @param {string} text - Uncapped text (may be empty).
+ * @param {number} maxChars - Cap in characters; Infinity disables capping.
+ * @returns {{text: string, truncated: boolean}}
+ */
+function capMirrorText(text, maxChars) {
+  const raw = typeof text === 'string' ? text : '';
+  if (maxChars !== Infinity && raw.length > maxChars) {
+    return { text: raw.slice(0, maxChars), truncated: true };
+  }
+  return { text: raw, truncated: false };
+}
+
+/**
+ * Assemble a MirrorMessage from its parts, setting the optional fields only
+ * when meaningful (toolName when present, truncated only when true).
+ *
+ * @param {'user'|'assistant'|'system'|'tool'} role
+ * @param {'text'|'tool_use'|'tool_result'|'system'} kind
+ * @param {string} text - Uncapped text.
+ * @param {string|null} timestamp
+ * @param {string|null} toolName - Only for kind 'tool_use'.
+ * @param {number} maxChars - Text cap (Infinity disables).
+ * @returns {MirrorMessage}
+ */
+function buildMirrorMessage(role, kind, text, timestamp, toolName, maxChars) {
+  const capped = capMirrorText(text, maxChars);
+  const msg = {
+    role: role,
+    text: capped.text,
+    timestamp: timestamp,
+    model: null,
+    kind: kind,
+  };
+  if (toolName) msg.toolName = toolName;
+  if (capped.truncated) msg.truncated = true;
+  return msg;
+}
+
+/**
+ * Parse ONE raw Codex rollout JSONL line into a MirrorMessage.
+ *
+ * Extraction of the per-line switch that previously lived inline in
+ * parseTranscript's loop (wrapEnvelope + the envelope switch); parseTranscript
+ * now delegates here per line so the two views can never drift. The emit set
+ * is UNCHANGED from the historical loop:
+ *
+ *   response_item.message              -> {role: normalizeRole(role), kind:'text'}
+ *   response_item.function_call        -> {role:'tool', kind:'tool_use', toolName,
+ *                                          text:'<name> <arguments>'}
+ *   response_item.function_call_output -> {role:'tool', kind:'tool_result', text:<output>}
+ *   compacted                          -> {role:'system', kind:'system', text:'[history fold]'}
+ *
+ * Skip set (returns null): session_meta, turn_context, event_msg (all
+ * subtypes), response_item.reasoning, unknown shapes, corrupt JSON, and the
+ * tailer's oversized-line sentinel (NUL-framed, never valid JSON).
+ *
+ * Pure, synchronous, never throws.
+ *
+ * @param {string} line - One raw JSONL line (no trailing newline).
+ * @param {Object} [opts]
+ * @param {number} [opts.maxTextChars=MIRROR_MAX_TEXT_CHARS] - Text cap per
+ *   message; pass Infinity to disable (parseTranscript does, to preserve its
+ *   historical uncapped output).
+ * @param {Object} [opts.meta] - Optional out-param. When the line was a
+ *   pre-0.45 bare-JSON shape that wrapped successfully, parseLine sets
+ *   meta.bareJson = true so parseTranscript can keep its once-per-file
+ *   warning without re-parsing the line.
+ * @returns {MirrorMessage|null}
+ */
+function parseLine(line, opts) {
+  try {
+    if (typeof line !== 'string' || line.length === 0) return null;
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const meta = options.meta && typeof options.meta === 'object' ? options.meta : null;
+    let maxChars = MIRROR_MAX_TEXT_CHARS;
+    if (options.maxTextChars === Infinity) {
+      maxChars = Infinity;
+    } else if (Number.isFinite(options.maxTextChars) && options.maxTextChars > 0) {
+      maxChars = Math.floor(options.maxTextChars);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch (_) {
+      return null; // Corrupt or partial line.
+    }
+
+    // Bare-JSON detection mirrors the historical inline check EXACTLY: it is
+    // computed pre-wrap, but only surfaced when the envelope wraps (the old
+    // loop `continue`d on a null envelope before warning).
+    const wasBareJson =
+      parsed &&
+      typeof parsed === 'object' &&
+      !(typeof parsed.type === 'string' && parsed.payload && typeof parsed.payload === 'object');
+
+    const envelope = wrapEnvelope(parsed);
+    if (!envelope) return null;
+
+    if (wasBareJson && meta) meta.bareJson = true;
+
+    const ts = typeof envelope.timestamp === 'string' ? envelope.timestamp : null;
+
+    switch (envelope.type) {
+      case 'session_meta':
+      case 'turn_context':
+        // Metadata; not a turn. Skip.
+        return null;
+
+      case 'event_msg':
+        // De-dup: response_item.message lines carry the same content with a
+        // richer shape, so ALL event_msg subtypes are skipped.
+        return null;
+
+      case 'response_item': {
+        const payload = envelope.payload;
+        if (!payload || typeof payload !== 'object') return null;
+        switch (payload.type) {
+          case 'message':
+            return buildMirrorMessage(
+              normalizeRole(payload.role),
+              'text',
+              extractMessageText(payload.content),
+              ts,
+              null,
+              maxChars
+            );
+          case 'function_call': {
+            const name = typeof payload.name === 'string' ? payload.name : '';
+            const args = typeof payload.arguments === 'string' ? payload.arguments : '';
+            return buildMirrorMessage(
+              'tool',
+              'tool_use',
+              (name + ' ' + args).trim(),
+              ts,
+              name.length > 0 ? name : null,
+              maxChars
+            );
+          }
+          case 'function_call_output': {
+            const out = typeof payload.output === 'string' ? payload.output : '';
+            return buildMirrorMessage('tool', 'tool_result', out, ts, null, maxChars);
+          }
+          case 'reasoning':
+            // Encrypted blob; not user-readable. Skip.
+            return null;
+          default:
+            // Unknown response_item subtype; defensive skip.
+            return null;
+        }
+      }
+
+      case 'compacted':
+        return buildMirrorMessage('system', 'system', COMPACTED_PLACEHOLDER, ts, null, maxChars);
+
+      default:
+        // Unknown envelope type; defensive skip (schema drift gate catches
+        // new variants before they land here).
+        return null;
+    }
+  } catch (_) {
+    return null; // Never throws, by contract.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public: parseTranscript
 // ---------------------------------------------------------------------------
 
@@ -322,26 +514,21 @@ async function parseTranscript(providerSessionId) {
     for (const line of lines) {
       if (!line || line.length === 0) continue;
 
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch (_) {
-        // Corrupt or partial line; skip silently.
-        continue;
-      }
+      // Issue #10 Tier 1: the per-line normalization (JSON.parse +
+      // wrapEnvelope + envelope switch) now lives in parseLine so the live
+      // mirror and this whole-file view can never drift. Behavior is
+      // preserved exactly:
+      //   - maxTextChars: Infinity keeps the historical uncapped text.
+      //   - meta.bareJson carries the pre-0.45 detection out of parseLine
+      //     so the once-per-file warning (with filePath, which parseLine
+      //     does not know) still fires on the same lines it always did.
+      //   - The projection below strips the mirror-only fields (kind,
+      //     toolName, truncated) so the returned ProviderMessage shape is
+      //     byte-identical to what this function always returned.
+      const meta = {};
+      const mirrorMsg = parseLine(line, { maxTextChars: Infinity, meta: meta });
 
-      // Detect pre-wrap bare-JSON for the once-per-file warning. We check
-      // BEFORE wrapEnvelope so we know whether the line was natively
-      // enveloped or had to be synthesized.
-      const wasBareJson =
-        parsed &&
-        typeof parsed === 'object' &&
-        !(typeof parsed.type === 'string' && parsed.payload && typeof parsed.payload === 'object');
-
-      const envelope = wrapEnvelope(parsed);
-      if (!envelope) continue;
-
-      if (wasBareJson && !bareJsonWarned) {
+      if (meta.bareJson && !bareJsonWarned) {
         // eslint-disable-next-line no-console
         console.warn(
           '[codex-parse] bare-JSON line detected in ' +
@@ -351,80 +538,14 @@ async function parseTranscript(providerSessionId) {
         bareJsonWarned = true;
       }
 
-      const ts = typeof envelope.timestamp === 'string' ? envelope.timestamp : null;
+      if (!mirrorMsg) continue;
 
-      switch (envelope.type) {
-        case 'session_meta':
-        case 'turn_context':
-          // Metadata; not a turn. Skip.
-          continue;
-
-        case 'event_msg':
-          // De-dup: response_item.message lines carry the same content with
-          // a richer shape, so we always prefer those and skip ALL event_msg
-          // subtypes (user_message, agent_message, task_started, etc.).
-          continue;
-
-        case 'response_item': {
-          const payload = envelope.payload;
-          if (!payload || typeof payload !== 'object') continue;
-          switch (payload.type) {
-            case 'message': {
-              const text = extractMessageText(payload.content);
-              messages.push({
-                role: normalizeRole(payload.role),
-                text: text,
-                timestamp: ts,
-                model: null,
-              });
-              break;
-            }
-            case 'function_call': {
-              const name = typeof payload.name === 'string' ? payload.name : '';
-              const args = typeof payload.arguments === 'string' ? payload.arguments : '';
-              messages.push({
-                role: 'tool',
-                text: (name + ' ' + args).trim(),
-                timestamp: ts,
-                model: null,
-              });
-              break;
-            }
-            case 'function_call_output': {
-              const out = typeof payload.output === 'string' ? payload.output : '';
-              messages.push({
-                role: 'tool',
-                text: out,
-                timestamp: ts,
-                model: null,
-              });
-              break;
-            }
-            case 'reasoning':
-              // Encrypted blob; not user-readable. Skip.
-              continue;
-            default:
-              // Unknown response_item subtype; defensive skip.
-              continue;
-          }
-          break;
-        }
-
-        case 'compacted':
-          messages.push({
-            role: 'system',
-            text: COMPACTED_PLACEHOLDER,
-            timestamp: ts,
-            model: null,
-          });
-          break;
-
-        default:
-          // Unknown envelope type; defensive skip. The schema fixture test
-          // (test/codex-schema.test.js) catches drift between the parser
-          // and the canonical schema before unknown variants land here.
-          continue;
-      }
+      messages.push({
+        role: mirrorMsg.role,
+        text: mirrorMsg.text,
+        timestamp: mirrorMsg.timestamp,
+        model: mirrorMsg.model,
+      });
     }
 
     return messages;
@@ -440,6 +561,13 @@ async function parseTranscript(providerSessionId) {
 
 module.exports = {
   parseTranscript,
+  // Issue #10 Tier 1: per-line mirror parser. Exported both for the provider
+  // mirror capability (src/providers/codex/index.js re-exports it under
+  // provider.mirror.parseLine) and for direct tests. Called with default
+  // options it caps text at MIRROR_MAX_TEXT_CHARS; parseTranscript calls it
+  // with {maxTextChars: Infinity} to preserve its historical output.
+  parseLine,
+  MIRROR_MAX_TEXT_CHARS,
   // Exported for test introspection. test/codex-schema.test.js asserts the
   // KNOWN_ENVELOPE_TYPES list matches the schema fixture's enum (drift gate).
   // discover.js consumes wrapEnvelope to handle bare-JSON first lines when

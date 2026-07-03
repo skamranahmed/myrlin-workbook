@@ -396,6 +396,28 @@ setupCredentialRoutes(app, {
   macBridge: credentialMacBridge,
 });
 
+// ─── Session Mirror service (issue #10 Tier 1, Phase 3) ─────
+// Read-only live mirror of externally-started provider sessions. The
+// service owns the tailers and subscriber refcounts; the /api/mirror/*
+// routes below (search for "MIRROR - read-only") own HTTP validation.
+// broadcastSSE is a hoisted function declaration and sseClients is a
+// module-scope const declared later in this file; both closures only
+// dereference them at call time, so construction order is safe.
+const { MirrorService, MIRROR_KEY_SEPARATOR } = require('./mirror-service');
+const mirrorService = new MirrorService({
+  getProvider: (id) => registry.getProvider(id),
+  broadcast: (type, data) => broadcastSSE(type, data),
+  // Lets the service GC subscribers whose SSE client vanished without a
+  // close call (tab killed, phone lost signal) so a tailer never leaks.
+  isDeviceConnected: (deviceId) => {
+    if (!deviceId) return false;
+    for (const [, client] of sseClients) {
+      if (client.deviceId === deviceId && !client.res.writableEnded) return true;
+    }
+    return false;
+  },
+});
+
 // ─── Public Server Info (no auth required) ─────────────────
 // Public endpoint for mobile connection testing (no auth)
 
@@ -1911,6 +1933,21 @@ const { extractCustomTitle, extractSessionName } = require('../providers/claude/
 const _discoverCache = new Map(); // Map<providerId, {data: Array, time: number}>
 const DISCOVER_CACHE_TTL = 30000; // 30 seconds
 
+// ─── Session liveness (issue #10 Tier 1, Phase 0) ────────────────────────
+/**
+ * How recently a session's transcript artifact must have been written for
+ * the session to be flagged `live` in discovery responses. mtime-based
+ * heuristic: "live" means "the CLI wrote transcript lines within the
+ * window", NOT "a process is currently running" (a hung CLI stops writing
+ * and goes stale; a session waiting on user input also reads as stale).
+ * Env-overridable (CWM_MIRROR shares the same knob via mirror-service.js)
+ * so operators can widen the window for slow-writing providers.
+ */
+const LIVE_THRESHOLD_MS = (() => {
+  const raw = parseInt(process.env.CWM_LIVE_THRESHOLD_MS || '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120000;
+})();
+
 /**
  * Group a provider's ProviderSession[] return into the v1.2 per-project
  * accordion shape the existing frontend renders. Grouping key is
@@ -1970,6 +2007,10 @@ function groupProviderSessionsForUI(sessions, provider) {
     if (_titleStore && s.providerSessionId) {
       try { storeOverride = _titleStore.getProviderSessionTitle(provider.id, s.providerSessionId); } catch (_) { storeOverride = null; }
     }
+    // Issue #10 Phase 0: liveness flags for the mirror affordance. Guarded
+    // through Number.isFinite so a malformed lastActive can never leak NaN
+    // into the JSON payload (JSON.stringify would silently null it).
+    const lastActiveMs = s.lastActive ? new Date(s.lastActive).getTime() : NaN;
     bucket.sessions.push({
       claudeSessionId: s.providerSessionId, // legacy field name; v1.1 frontend uses this key
       provider: provider.id,
@@ -1980,6 +2021,13 @@ function groupProviderSessionsForUI(sessions, provider) {
       // through to the frontend so a discovered archived thread can be shown
       // with a muted affordance. Absent/false for live sessions.
       archived: s.archived === true,
+      // Issue #10 Phase 0: `live` is a pure mtime heuristic (transcript
+      // written within LIVE_THRESHOLD_MS), never process state. Archived
+      // threads are never live regardless of mtime.
+      live: Number.isFinite(lastActiveMs)
+        && (Date.now() - lastActiveMs) < LIVE_THRESHOLD_MS
+        && s.archived !== true,
+      lastActiveMs: Number.isFinite(lastActiveMs) ? lastActiveMs : null,
     });
   }
 
@@ -2082,6 +2130,146 @@ app.get('/api/discover', requireAuth, async (req, res) => {
   const store = getStore();
   const adHocRoot = (store._state && store._state.providerSessionSettings) || {};
   return res.json({ projects, adHocProviderSettings: adHocRoot });
+});
+
+
+// ──────────────────────────────────────────────────────────
+//  MIRROR - read-only live mirror of provider sessions
+//  (issue #10 Tier 1, Phase 3; service in src/web/mirror-service.js)
+// ──────────────────────────────────────────────────────────
+
+// Validation patterns. Provider ids reuse the exact shape enforced by
+// POST /api/sessions (lowercase slug, matches registry id conventions).
+// providerSessionId covers Claude UUIDs and Codex rollout thread ids; the
+// length cap blocks pathological input without loosening the charset.
+const MIRROR_PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{0,32}$/;
+const MIRROR_SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,256}$/;
+// deviceId: web tabs use 'web-<uuid>'; paired mobile devices use their
+// pairing uuid. Colon allowed for forward-compat with prefixed schemes.
+const MIRROR_DEVICE_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
+ * Validate the (provider, providerSessionId) pair shared by every mirror
+ * endpoint. Returns null when valid, otherwise writes a structured 400
+ * response and returns the response (truthy) so callers can early-return.
+ *
+ * @param {import('express').Response} res
+ * @param {*} provider - Candidate provider id.
+ * @param {*} providerSessionId - Candidate upstream session id.
+ * @returns {object|null} The 400 response, or null when valid.
+ */
+function rejectInvalidMirrorTarget(res, provider, providerSessionId) {
+  if (typeof provider !== 'string' || !MIRROR_PROVIDER_ID_RE.test(provider)) {
+    return structuredError(res, 400, 'INVALID_PROVIDER', 'provider must match ' + String(MIRROR_PROVIDER_ID_RE));
+  }
+  if (typeof providerSessionId !== 'string' || !MIRROR_SESSION_ID_RE.test(providerSessionId)) {
+    return structuredError(res, 400, 'INVALID_SESSION_ID', 'providerSessionId must match ' + String(MIRROR_SESSION_ID_RE));
+  }
+  return null;
+}
+
+/**
+ * Map a MirrorService error to its HTTP response. Unknown codes become a
+ * 500 with a generic message (never leak filesystem paths to the client).
+ *
+ * @param {import('express').Response} res
+ * @param {Error} err - Error thrown by MirrorService (carries .code).
+ * @returns {object} The written response.
+ */
+function mirrorErrorResponse(res, err) {
+  const code = err && err.code;
+  if (code === 'MIRROR_UNSUPPORTED') {
+    return structuredError(res, 400, 'MIRROR_UNSUPPORTED', 'This provider does not support mirroring.');
+  }
+  if (code === 'ARTIFACT_NOT_FOUND') {
+    return structuredError(res, 404, 'ARTIFACT_NOT_FOUND', 'No transcript found for that session.');
+  }
+  if (code === 'MIRROR_LIMIT') {
+    return structuredError(res, 409, 'MIRROR_LIMIT', 'Too many mirrors open. Close one and retry.');
+  }
+  console.error('[mirror] request failed: ' + (err && err.message ? err.message : err));
+  return structuredError(res, 500, 'MIRROR_FAILED', 'Mirror operation failed.', true);
+}
+
+/**
+ * POST /api/mirror/open
+ * Body: { provider, providerSessionId, deviceId }
+ * Opens (or attaches to) a read-only mirror. Response is the MirrorService
+ * open() payload: { mirrorKey, live, fileSize, startOffset, endOffset,
+ * truncatedHead, history }. Idempotent per (key, deviceId): reconnecting
+ * clients re-POST after SSE drops and simply get a fresh history snapshot.
+ */
+app.post('/api/mirror/open', requireAuth, async (req, res) => {
+  const { provider, providerSessionId, deviceId } = req.body || {};
+  const invalid = rejectInvalidMirrorTarget(res, provider, providerSessionId);
+  if (invalid) return invalid;
+  if (typeof deviceId !== 'string' || !MIRROR_DEVICE_ID_RE.test(deviceId)) {
+    return structuredError(res, 400, 'INVALID_DEVICE_ID', 'deviceId must match ' + String(MIRROR_DEVICE_ID_RE));
+  }
+  try {
+    const result = await mirrorService.open({ provider, providerSessionId, deviceId });
+    return res.json(result);
+  } catch (err) {
+    return mirrorErrorResponse(res, err);
+  }
+});
+
+/**
+ * POST /api/mirror/close
+ * Body: { mirrorKey, deviceId }
+ * Detaches a device from a mirror. Always returns {ok:true} for unknown
+ * keys (close is a courtesy call; the idle sweep is the safety net).
+ */
+app.post('/api/mirror/close', requireAuth, (req, res) => {
+  const { mirrorKey, deviceId } = req.body || {};
+  if (typeof mirrorKey !== 'string' || mirrorKey.length === 0 || mirrorKey.length > 300) {
+    return structuredError(res, 400, 'INVALID_MIRROR_KEY', 'mirrorKey is required');
+  }
+  // Key shape check: providerId ':' providerSessionId with the same
+  // per-part patterns as open. Rejecting garbage early keeps the service
+  // map free of unparseable keys (they could never match an entry anyway).
+  const sepIdx = mirrorKey.indexOf(MIRROR_KEY_SEPARATOR);
+  const keyProvider = sepIdx > 0 ? mirrorKey.slice(0, sepIdx) : '';
+  const keySession = sepIdx > 0 ? mirrorKey.slice(sepIdx + 1) : '';
+  const invalid = rejectInvalidMirrorTarget(res, keyProvider, keySession);
+  if (invalid) return invalid;
+  if (deviceId !== undefined && (typeof deviceId !== 'string' || !MIRROR_DEVICE_ID_RE.test(deviceId))) {
+    return structuredError(res, 400, 'INVALID_DEVICE_ID', 'deviceId must match ' + String(MIRROR_DEVICE_ID_RE));
+  }
+  try {
+    mirrorService.close({ mirrorKey, deviceId });
+    return res.json({ ok: true });
+  } catch (err) {
+    return mirrorErrorResponse(res, err);
+  }
+});
+
+/**
+ * GET /api/mirror/history?provider&providerSessionId&beforeOffset&maxBytes
+ * Stateless "Load earlier" window: parses the lines that end before
+ * beforeOffset (a line-aligned byte offset from a previous open/history
+ * response). No watcher is created. Response: { messages, startOffset,
+ * truncatedHead }.
+ */
+app.get('/api/mirror/history', requireAuth, async (req, res) => {
+  const provider = req.query.provider;
+  const providerSessionId = req.query.providerSessionId;
+  const invalid = rejectInvalidMirrorTarget(res, provider, providerSessionId);
+  if (invalid) return invalid;
+  const beforeOffset = parseInt(req.query.beforeOffset, 10);
+  if (!Number.isFinite(beforeOffset) || beforeOffset < 0) {
+    return structuredError(res, 400, 'INVALID_OFFSET', 'beforeOffset must be a non-negative integer');
+  }
+  // maxBytes is optional; the service clamps it to the history window cap,
+  // so a hostile query param can never force a giant read.
+  const maxBytesRaw = parseInt(req.query.maxBytes, 10);
+  const maxBytes = Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? maxBytesRaw : undefined;
+  try {
+    const result = await mirrorService.readEarlier({ provider, providerSessionId, beforeOffset, maxBytes });
+    return res.json(result);
+  } catch (err) {
+    return mirrorErrorResponse(res, err);
+  }
 });
 
 
@@ -5861,6 +6049,31 @@ function broadcastSSE(eventType, data) {
   // Send as unnamed event so EventSource.onmessage fires (named events require addEventListener per type)
   const message = `data: ${payload}\n\n`;
 
+  // Issue #10 Phase 3: mirror events are scoped to the devices that opened
+  // the mirror key, NEVER global (a busy session's message bursts must not
+  // hit every connected client), and deliberately absent from
+  // GLOBAL_EVENT_TYPES. Clients that connected without a deviceId can never
+  // subscribe to a mirror, so they are skipped outright.
+  if (eventType.startsWith('mirror:')) {
+    const subs = mirrorService.subscribersOf(data && data.mirrorKey);
+    if (subs.size === 0) return;
+    for (const [clientId, client] of sseClients) {
+      if (client.res.writableEnded) {
+        clearInterval(client.heartbeatInterval);
+        sseClients.delete(clientId);
+        continue;
+      }
+      if (!client.deviceId || !subs.has(client.deviceId)) continue;
+      try {
+        client.res.write(message);
+      } catch (_) {
+        clearInterval(client.heartbeatInterval);
+        sseClients.delete(clientId);
+      }
+    }
+    return;
+  }
+
   // Extract workspaceId from event data (various shapes across event types)
   const workspaceId = data?.workspaceId || data?.workspace?.id || data?.id || null;
   const isGlobal = GLOBAL_EVENT_TYPES.has(eventType);
@@ -8454,6 +8667,8 @@ function startServer(port = 3456, host = '127.0.0.1') {
       try { _ptyManager.destroyAll(); } catch (_) {}
     }
     try { credentialManager.stopCredentialWatcher(); } catch (_) {}
+    // Issue #10 Phase 3: stop every mirror tailer (fs.watch handles + timers).
+    try { mirrorService.disposeAll(); } catch (_) {}
     for (const [, t] of _tunnels) {
       try { if (t.process) t.process.kill(); } catch {}
     }
@@ -8514,4 +8729,9 @@ module.exports = {
   racedSearch,
   SEARCH_TOTAL_BUDGET_MS,
   SEARCH_TIMEOUT_GRACE_MS,
+  // Issue #10 Tier 1: exposed for test/mirror-routes.test.js (SSE scoping
+  // assertions, watcher-limit setup/teardown) and the Phase 0 liveness test.
+  // Production callers go through the /api/mirror/* routes.
+  mirrorService,
+  LIVE_THRESHOLD_MS,
 };

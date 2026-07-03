@@ -31,6 +31,9 @@ const discover = require('./discover');
 const { parseTranscript, extractCustomTitle, extractSessionName } = require('./parse');
 const { search } = require('./search');
 const { findJsonlFile, findJsonlByWorkingDir } = require('./path-decode');
+// Issue #10 Tier 1: per-line mirror parser (separate module; parseTranscript
+// in ./parse is intentionally untouched per code-preservation rules).
+const mirror = require('./mirror');
 
 // COST-04: cost-worker is required (and module-cached) so the strict
 // equality check in test/cost-worker-via-claude.test.js holds. The
@@ -100,6 +103,20 @@ function getKeyBindings() {
  * @returns {boolean}
  */
 function supportsCost() {
+  return true;
+}
+
+/**
+ * supportsForkResume capability flag (issue #10 Tier 1). OPTIONAL Provider
+ * member; NOT in the registry's REQUIRED_METHODS list. Claude Code supports
+ * forking a conversation by resuming a session id into a new session
+ * (claude --resume/--fork-session semantics), so the mirror UI may offer a
+ * "fork from here" affordance for Claude sessions. Codex exports an explicit
+ * false; callers probe uniformly via provider.supportsForkResume?.().
+ *
+ * @returns {boolean} Always true for Claude Code.
+ */
+function supportsForkResume() {
   return true;
 }
 
@@ -174,6 +191,15 @@ module.exports = {
   isIdleSignal: isIdleSignal,
   getKeyBindings: getKeyBindings,
   costAdapter: costAdapter,
+  // Issue #10 Tier 1: OPTIONAL mirror capability. mirror.parseLine maps one
+  // raw transcript JSONL line to a MirrorMessage (or null); the session-
+  // mirror wiring feeds it lines from src/web/jsonl-tailer.js. Optional
+  // member: NOT added to REQUIRED_METHODS, so providers without a mirror
+  // still validate.
+  mirror: { parseLine: mirror.parseLine },
+  // Issue #10 Tier 1: OPTIONAL capability flag; Claude supports forking via
+  // session resume, so the mirror UI may offer "fork from here".
+  supportsForkResume: supportsForkResume,
   // Plan 15-01 (DISC-03): transcript artifact path resolution.
   findArtifactPath: findArtifactPath,
   findArtifactByWorkingDir: findArtifactByWorkingDir,
