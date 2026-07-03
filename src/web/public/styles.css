@@ -11680,3 +11680,301 @@ html {
     animation: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MIRROR PANE (issue #10 Tier 1, Phase 4)
+   Read-only live mirror of an externally-started provider
+   session, mounted inside a .pane-view-container. Catppuccin
+   tokens only; provider accent rides the same
+   --provider-{id}-accent custom properties as the pane pills,
+   so every provider and all 13 themes cascade for free.
+   ═══════════════════════════════════════════════════════════ */
+.mirror-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--base);
+  color: var(--text);
+}
+
+/* Header: provider pill, live dot, title, read-only tag. The 2px accent
+   underline is the provider fingerprint (same tokens as sidebar tabs). */
+.mirror-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+  background: var(--mantle);
+  border-bottom: 2px solid var(--surface-2);
+}
+.mirror-pane-header[data-provider="claude"] {
+  border-bottom-color: var(--provider-claude-accent);
+}
+.mirror-pane-header[data-provider="codex"] {
+  border-bottom-color: var(--provider-codex-accent);
+}
+.mirror-pane-header[data-provider="gemini"] {
+  border-bottom-color: var(--provider-gemini-accent);
+}
+
+/* Provider pill: same recipe as .pane-provider-pill (Plan 22-02) with a
+   generic fallback dot for providers without a dedicated accent token. */
+.mirror-provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+.mirror-provider-pill::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--overlay0);
+}
+.mirror-provider-pill[data-provider="claude"]::before {
+  background: var(--provider-claude-accent);
+}
+.mirror-provider-pill[data-provider="codex"]::before {
+  background: var(--provider-codex-accent);
+}
+.mirror-provider-pill[data-provider="gemini"]::before {
+  background: var(--provider-gemini-accent);
+}
+
+/* Live dot: green pulse while the transcript is being written, muted
+   static dot when stale. Shares the Phase 0 pulse keyframes. */
+.mirror-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--overlay0);
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+.mirror-live-dot[data-live="true"] {
+  background: var(--green);
+  animation: session-live-pulse 2s ease-in-out infinite;
+}
+
+.mirror-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mirror-readonly-tag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--surface-1);
+  border: 1px solid var(--surface-2);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtext0);
+  user-select: none;
+}
+
+/* Load-earlier affordance docked above the scroller. */
+.mirror-load-earlier {
+  flex-shrink: 0;
+  margin: 6px 10px 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--surface-2);
+  background: var(--surface0);
+  color: var(--subtext1);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.mirror-load-earlier:hover {
+  background: var(--surface-1);
+  color: var(--text);
+}
+.mirror-load-earlier:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Scrollable message list. Monospace pre-wrap so transcript text keeps
+   its shape without forcing horizontal scroll. */
+.mirror-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mirror-msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+  animation: mirror-msg-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes mirror-msg-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* User turns: right-shifted bubble, matching chat conventions. */
+.mirror-msg-user {
+  display: flex;
+  justify-content: flex-end;
+}
+.mirror-msg-user .mirror-bubble {
+  max-width: 86%;
+  padding: 6px 10px;
+  border-radius: 10px 10px 3px 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--surface-2);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Assistant turns: plain block, no chrome (the reading surface). */
+.mirror-msg-assistant {
+  color: var(--text);
+  padding: 0 2px;
+}
+.mirror-model-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 9px;
+  color: var(--overlay1);
+  letter-spacing: 0.04em;
+}
+
+/* System notices from the transcript (hooks, API banners). */
+.mirror-msg-system {
+  color: var(--subtext0);
+  font-style: italic;
+  font-size: 11px;
+  padding: 0 2px;
+}
+
+/* Tool calls/results: collapsed details rows. */
+.mirror-msg-tool {
+  border: 1px solid var(--surface-1);
+  border-radius: 6px;
+  background: var(--mantle);
+  overflow: hidden;
+}
+.mirror-msg-tool > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--subtext1);
+  font-size: 11px;
+  transition: background var(--transition-fast);
+}
+.mirror-msg-tool > summary:hover {
+  background: var(--surface0);
+}
+.mirror-msg-tool > summary::before {
+  content: '\25B8';
+  color: var(--overlay0);
+  transition: transform var(--transition-fast);
+}
+.mirror-msg-tool[open] > summary::before {
+  transform: rotate(90deg);
+}
+.mirror-tool-name {
+  font-weight: 600;
+  color: var(--subtext1);
+  flex-shrink: 0;
+}
+.mirror-tool-first-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--overlay1);
+}
+.mirror-tool-body {
+  margin: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--surface-1);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--subtext1);
+  font-size: 11px;
+}
+
+/* Inline lifecycle notices (reset, closed, load failure). */
+.mirror-msg-notice {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface0);
+  border: 1px solid var(--surface-1);
+  color: var(--overlay1);
+  font-size: 10px;
+}
+.mirror-msg-error {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+/* Server-capped message marker. */
+.mirror-truncated-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  color: var(--peach);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Skeleton rows while the initial open() is in flight (never spinners). */
+.mirror-skeleton-row {
+  height: 12px;
+  border-radius: 4px;
+  background: var(--surface-1);
+  animation: mirror-skeleton-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mirror-skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mirror-live-dot[data-live="true"],
+  .mirror-skeleton-row {
+    animation: none;
+  }
+  .mirror-msg {
+    animation: none;
+  }
+}

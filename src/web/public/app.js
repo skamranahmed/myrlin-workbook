@@ -214,6 +214,11 @@ class CWMApp {
     this.terminalPanes = new Array(CWMApp.MAX_PANES).fill(null);
     this._activeTerminalSlot = null;
     this._paneRefreshTimers = {};
+    // Issue #10 Phase 4: MirrorPaneView instances by slot index. Mirror
+    // panes are standalone (no TerminalPane in the slot), so occupancy
+    // checks route through _isSlotOccupied / _findEmptyPaneSlot instead of
+    // reading terminalPanes[] truthiness directly.
+    this._mirrorPanes = {};
     // Cache of TerminalPane instances per group to avoid reconnection on tab switch.
     // Key: groupId, Value: { panes: [TerminalPane|null x MAX_PANES], domFragments: [DocumentFragment|null x MAX_PANES] }
     this._groupPaneCache = {};
@@ -257,6 +262,29 @@ class CWMApp {
     // ─── SSE ───────────────────────────────────────────────────
     this.eventSource = null;
     this.sseRetryTimeout = null;
+    // Issue #10 Phase 4: stable per-tab device id, appended to the SSE URL
+    // and to mirror open/close bodies so the server can scope mirror:*
+    // events to exactly the tabs that subscribed. sessionStorage keeps it
+    // stable across reloads of THIS tab while giving every tab its own id
+    // (two tabs mirroring one session each hold their own subscription).
+    // crypto.randomUUID requires a secure context; plain-HTTP LAN origins
+    // fall back to a time+random slug (uniqueness, not unguessability, is
+    // all this id needs; auth still rides on the bearer token).
+    this.deviceId = (() => {
+      try {
+        const existing = sessionStorage.getItem('cwm_deviceId');
+        if (existing) return existing;
+        const fresh = 'web-' + ((window.crypto && typeof window.crypto.randomUUID === 'function')
+          ? window.crypto.randomUUID()
+          : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+        sessionStorage.setItem('cwm_deviceId', fresh);
+        return fresh;
+      } catch (_) {
+        // sessionStorage can throw in exotic privacy modes; a per-load id
+        // still works (reconnects just re-subscribe under the new id).
+        return 'web-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      }
+    })();
 
     // ─── Modal state ───────────────────────────────────────────
     this.modalResolve = null;
@@ -1629,7 +1657,7 @@ class CWMApp {
         const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
         if (!session) return;
         if (this.state.viewMode === 'terminal') {
-          const emptySlot = this.terminalPanes.findIndex(p => p === null);
+          const emptySlot = this._findEmptyPaneSlot();
           if (emptySlot !== -1) {
             if (!session.resumeSessionId) this.showToast('Starting new Claude session (no previous conversation to resume)', 'info');
             const spawnOpts = {};
@@ -2841,7 +2869,7 @@ class CWMApp {
       this.showToast(`Session created in ${name}`, 'success');
       await this.loadSessions();
       // Auto-open in first empty terminal pane
-      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      const emptySlot = this._findEmptyPaneSlot();
       if (emptySlot !== -1) {
         this.setViewMode('terminal');
         const spawnOpts = { cwd: dir, newSession: true };
@@ -3441,7 +3469,7 @@ class CWMApp {
     // Sidebar-specific: Open in terminal
     items.push({
       label: 'Open in Terminal', icon: '&#9654;', action: () => {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        const emptySlot = this._findEmptyPaneSlot();
         if (emptySlot !== -1) {
           this.setViewMode('terminal');
           const spawnOpts = {};
@@ -3537,7 +3565,7 @@ class CWMApp {
     // Open in terminal - resume the session via the right provider's CLI.
     items.push({
       label: 'Open in Terminal', icon: '&#9654;', action: () => {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        const emptySlot = this._findEmptyPaneSlot();
         if (emptySlot === -1) {
           this.showToast('All terminal panes full. Close one first.', 'warning');
           return;
@@ -3549,6 +3577,28 @@ class CWMApp {
           resumeSessionId: sessionName,
           command: cliBinary,
           provider: resolvedProvider,
+        });
+      },
+    });
+
+    // Issue #10 Phase 4: read-only live mirror of the session's transcript.
+    // Unlike "Open in Terminal" this never resumes/locks the session; it
+    // tails the JSONL artifact, so it is safe on sessions another window
+    // (or machine) is actively driving. provider comes from the element
+    // dataset via the caller, never a literal.
+    items.push({
+      label: 'Mirror Session', icon: '&#128065;', action: () => {
+        const emptySlot = this._findEmptyPaneSlot();
+        if (emptySlot === -1) {
+          this.showToast('All terminal panes full. Close one first.', 'warning');
+          return;
+        }
+        this.setViewMode('terminal');
+        const title = this.getProjectSessionTitle(sessionName) || sessionName;
+        this.openMirrorInSlot(emptySlot, {
+          provider: resolvedProvider,
+          providerSessionId: sessionName,
+          title,
         });
       },
     });
@@ -3707,7 +3757,7 @@ class CWMApp {
 
         items.push({
           label: 'New ' + providerLabel + ' Session Here', icon: '&#9654;', action: () => {
-            const emptySlot = this.terminalPanes.findIndex(p => p === null);
+            const emptySlot = this._findEmptyPaneSlot();
             if (emptySlot === -1) {
               this.showToast('All terminal panes full. Close one first.', 'warning');
               return;
@@ -3724,7 +3774,7 @@ class CWMApp {
 
         items.push({
           label: 'New ' + providerLabel + ' Session (Bypass)', icon: '&#9888;', action: () => {
-            const emptySlot = this.terminalPanes.findIndex(p => p === null);
+            const emptySlot = this._findEmptyPaneSlot();
             if (emptySlot === -1) {
               this.showToast('All terminal panes full. Close one first.', 'warning');
               return;
@@ -6675,7 +6725,7 @@ class CWMApp {
         } else if (action === 'open') {
           const task = (this._worktreeTaskCache || []).find(t => t.id === taskId);
           if (task && task.sessionId) {
-            const emptySlot = this.terminalPanes.findIndex(p => p === null);
+            const emptySlot = this._findEmptyPaneSlot();
             if (emptySlot !== -1) {
               this.setViewMode('terminal');
               this.openTerminalInPane(emptySlot, task.sessionId, task.branch, { cwd: task.worktreePath });
@@ -7390,7 +7440,7 @@ class CWMApp {
 
         // Open session in terminal pane
         if (data.session) {
-          const emptySlot = this.terminalPanes.findIndex(p => p === null);
+          const emptySlot = this._findEmptyPaneSlot();
           if (emptySlot !== -1) {
             this.setViewMode('terminal');
             this.openTerminalInPane(emptySlot, data.session.id, branch, {
@@ -7781,7 +7831,7 @@ class CWMApp {
         if (startImmediately && data.created) {
           for (const item of data.created) {
             if (item.session) {
-              const emptySlot = this.terminalPanes.findIndex(p => p === null);
+              const emptySlot = this._findEmptyPaneSlot();
               if (emptySlot !== -1) {
                 this.openTerminalInPane(emptySlot, item.session.id, item.task.branch || item.session.name, {
                   cwd: item.task.worktreePath,
@@ -8002,7 +8052,7 @@ class CWMApp {
       await this.loadSessions();
 
       // Open in first empty terminal pane
-      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      const emptySlot = this._findEmptyPaneSlot();
       if (emptySlot === -1) {
         this.showToast('All terminal panes full. Session created but not opened.', 'warning');
         return;
@@ -10800,11 +10850,23 @@ class CWMApp {
     this.disconnectSSE();
 
     try {
-      // SSE doesn't support custom headers, pass token as query param
-      this.eventSource = new EventSource(`/api/events?token=${encodeURIComponent(this.state.token)}`);
+      // SSE doesn't support custom headers, pass token as query param.
+      // deviceId (issue #10 Phase 4) lets the server scope mirror:* events
+      // to this tab; servers that ignore the param behave exactly as before.
+      this.eventSource = new EventSource(`/api/events?token=${encodeURIComponent(this.state.token)}&deviceId=${encodeURIComponent(this.deviceId)}`);
 
       this.eventSource.onopen = () => {
         console.log('[SSE] Connected');
+        // Issue #10 Phase 4: after a reconnect, every active mirror pane
+        // re-POSTs open (idempotent server-side). The fresh history snapshot
+        // closes any gap from the disconnect window; skip views that never
+        // finished their first open (their own open() is still in flight).
+        for (const slot of Object.keys(this._mirrorPanes)) {
+          const view = this._mirrorPanes[slot];
+          if (view && view._openedOnce) {
+            view.open().catch(() => { /* the view renders its own failure */ });
+          }
+        }
       };
 
       this.eventSource.onmessage = (e) => {
@@ -11021,9 +11083,40 @@ class CWMApp {
         }
         break;
       }
+      case 'mirror:message':
+      case 'mirror:reset':
+      case 'mirror:status':
+      case 'mirror:closed':
+        // Issue #10 Phase 4: route to the owning MirrorPaneView by
+        // mirrorKey. These cases MUST exist here; the default branch below
+        // would otherwise turn every mirrored transcript line into a full
+        // loadAll() reload storm. Payload rides at data.data (same envelope
+        // convention as docs:updated / credentials:*).
+        this._routeMirrorEvent(data.type, (data && data.data) || {});
+        break;
       default:
         // Refresh all for unknown events
         this.loadAll();
+    }
+  }
+
+  /**
+   * Deliver one mirror:* SSE event to the MirrorPaneView that owns its
+   * mirrorKey. Events for keys with no mounted view are dropped silently
+   * (a pane was just closed; the server-side unsubscribe is in flight).
+   *
+   * @param {string} type - mirror:* event type.
+   * @param {Object} payload - Event payload carrying mirrorKey.
+   */
+  _routeMirrorEvent(type, payload) {
+    if (!payload || !payload.mirrorKey) return;
+    for (const slot of Object.keys(this._mirrorPanes)) {
+      const view = this._mirrorPanes[slot];
+      if (view && view.mirrorKey === payload.mirrorKey) {
+        try { view.handleEvent(type, payload); } catch (err) {
+          console.warn('[mirror] view handler failed:', err && err.message);
+        }
+      }
     }
   }
 
@@ -11347,7 +11440,7 @@ class CWMApp {
     const items = [
       // Quick actions
       { label: 'Open Terminal', icon: '&#9654;', action: () => {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        const emptySlot = this._findEmptyPaneSlot();
         if (emptySlot === -1) { this.showToast('All terminal panes full', 'warning'); return; }
         // Create a new session in this workspace and open terminal
         this.api('POST', '/api/sessions', { name: `${ws.name} terminal`, workspaceId }).then(data => {
@@ -12844,7 +12937,7 @@ class CWMApp {
     // Mark this card as opened
     card.classList.add('ai-find-card-opened');
 
-    const emptySlot = this.terminalPanes.findIndex(p => p === null);
+    const emptySlot = this._findEmptyPaneSlot();
     if (emptySlot === -1) {
       this.showToast('All terminal panes full. Close one first.', 'warning');
       return;
@@ -12894,7 +12987,7 @@ class CWMApp {
    */
   openConversationResult(sessionId, projectPath, provider) {
     if (!sessionId) return;
-    const emptySlot = this.terminalPanes.findIndex(p => p === null);
+    const emptySlot = this._findEmptyPaneSlot();
     if (emptySlot === -1) {
       this.showToast('All terminal panes full. Close one first.', 'warning');
       return;
@@ -13325,13 +13418,32 @@ class CWMApp {
     console.log('[DnD] openTerminalInPane slot:', slotIdx, 'session:', sessionId, 'name:', sessionName);
     // If the target slot already has an active terminal, find the next empty slot
     if (this.terminalPanes[slotIdx]) {
-      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      const emptySlot = this._findEmptyPaneSlot();
       if (emptySlot !== -1) {
         slotIdx = emptySlot;
       } else {
         // All slots full, replace the target slot
         this.terminalPanes[slotIdx].dispose();
         this.terminalPanes[slotIdx] = null;
+      }
+    }
+    // Issue #10 Phase 4: a terminal landing in a mirror slot (drag-drop
+    // onto the pane, full-grid replacement) evicts the mirror. Release the
+    // subscription and clear the view chrome so the terminal is not
+    // rendered underneath a lingering mirror overlay.
+    if (this._mirrorPanes[slotIdx]) {
+      try { this._mirrorPanes[slotIdx].dispose(); } catch (_) { /* already gone */ }
+      delete this._mirrorPanes[slotIdx];
+      const mirrorPaneEl = document.getElementById(`term-pane-${slotIdx}`);
+      const mirrorViewEl = document.getElementById(`pane-view-${slotIdx}`);
+      if (mirrorViewEl) { mirrorViewEl.hidden = true; mirrorViewEl.replaceChildren(); }
+      if (mirrorPaneEl) {
+        const mBadge = mirrorPaneEl.querySelector('.pane-view-badge');
+        const mBack = mirrorPaneEl.querySelector('.pane-view-back');
+        if (mBadge) mBadge.hidden = true;
+        if (mBack) mBack.hidden = true;
+        delete mirrorPaneEl.dataset.viewType;
+        delete mirrorPaneEl.dataset.viewData;
       }
     }
 
@@ -13492,7 +13604,8 @@ class CWMApp {
       'tasks-td': 'Tasks',
       'tasks-worktree': 'Worktree',
       'tasks-files': 'Files',
-      'doc': 'Doc'
+      'doc': 'Doc',
+      'mirror': 'Mirror'
     };
     const badge = paneEl.querySelector('.pane-view-badge');
     const backBtn = paneEl.querySelector('.pane-view-back');
@@ -13517,6 +13630,13 @@ class CWMApp {
     const termContainer = document.getElementById(`term-container-${slotIdx}`);
     const viewContainer = document.getElementById(`pane-view-${slotIdx}`);
 
+    // Issue #10 Phase 4: a mirror view holds a server-side subscription;
+    // release it (POSTs /api/mirror/close) before the container is cleared.
+    if (this._mirrorPanes[slotIdx]) {
+      try { this._mirrorPanes[slotIdx].dispose(); } catch (_) { /* already gone */ }
+      delete this._mirrorPanes[slotIdx];
+    }
+
     if (viewContainer) { viewContainer.hidden = true; viewContainer.replaceChildren(); }
     if (termContainer) termContainer.hidden = false;
 
@@ -13535,6 +13655,15 @@ class CWMApp {
 
     const tp = this.terminalPanes[slotIdx];
     if (tp && tp.safeFit) tp.safeFit();
+    if (!tp) {
+      // Standalone view pane (mirror): with no terminal underneath, "back"
+      // means "close the pane". Return the slot to the empty pool and let
+      // the grid recount, mirroring closeTerminalPane's reset.
+      paneEl.classList.add('terminal-pane-empty');
+      const titleEl = paneEl.querySelector('.terminal-pane-title');
+      if (titleEl) titleEl.textContent = 'Drop a session here';
+      this.updateTerminalGridLayout();
+    }
     this.saveTerminalLayout();
   }
 
@@ -13575,7 +13704,72 @@ class CWMApp {
       case 'doc':
         await this._renderDocInPane(container, viewData);
         break;
+      case 'mirror':
+        // Issue #10 Phase 4: read-only live mirror of an externally-started
+        // provider session. No refresh timer: updates arrive over SSE.
+        await this._renderMirrorInPane(slotIdx, container, viewData);
+        break;
     }
+  }
+
+  /**
+   * Mount a MirrorPaneView into a pane view container (issue #10 Phase 4).
+   * Disposes any previous mirror in the slot first (openViewInPane clears
+   * the container DOM, but the old view still holds a server subscription
+   * that must be released). viewData carries {provider, providerSessionId,
+   * title} and is persisted verbatim by the pane-layout system, so a
+   * restored layout re-opens the same mirror.
+   *
+   * @param {number} slotIdx - The pane slot index.
+   * @param {HTMLElement} container - The pane-view container element.
+   * @param {Object} viewData - {provider, providerSessionId, title}.
+   */
+  async _renderMirrorInPane(slotIdx, container, viewData) {
+    const vd = viewData || {};
+    if (!vd.provider || !vd.providerSessionId) {
+      container.innerHTML = '<div class="mirror-msg mirror-msg-notice">Missing mirror target (provider/session).</div>';
+      return;
+    }
+    if (this._mirrorPanes[slotIdx]) {
+      try { this._mirrorPanes[slotIdx].dispose(); } catch (_) { /* already gone */ }
+      delete this._mirrorPanes[slotIdx];
+    }
+    const view = new MirrorPaneView(container, {
+      provider: vd.provider,
+      providerSessionId: vd.providerSessionId,
+      title: vd.title || vd.providerSessionId,
+      api: (method, path, body) => this.api(method, path, body),
+      escapeHtml: (s) => this.escapeHtml(s),
+      deviceId: this.deviceId,
+    });
+    this._mirrorPanes[slotIdx] = view;
+    try {
+      await view.open();
+    } catch (err) {
+      // The view rendered its own inline failure notice; surface a toast so
+      // the miss is visible even if the pane is small.
+      this.showToast((err && err.message) || 'Failed to open mirror', 'error');
+    }
+  }
+
+  /**
+   * Open a read-only mirror pane for a discovered session (issue #10
+   * Phase 4). Handles the standalone-pane plumbing that openViewInPane
+   * assumes a terminal already did: unhide the slot, clear the empty-pane
+   * affordance, set the title, and recount the grid.
+   *
+   * @param {number} slotIdx - Target pane slot (from _findEmptyPaneSlot).
+   * @param {Object} viewData - {provider, providerSessionId, title}.
+   */
+  async openMirrorInSlot(slotIdx, viewData) {
+    const paneEl = document.getElementById(`term-pane-${slotIdx}`);
+    if (!paneEl) return;
+    paneEl.hidden = false;
+    paneEl.classList.remove('terminal-pane-empty');
+    const titleEl = paneEl.querySelector('.terminal-pane-title');
+    if (titleEl) titleEl.textContent = (viewData && viewData.title) || 'Mirror';
+    await this.openViewInPane(slotIdx, 'mirror', viewData || {});
+    this.updateTerminalGridLayout();
   }
 
   /**
@@ -14249,6 +14443,24 @@ class CWMApp {
       delete this._paneRefreshTimers[slotIdx];
     }
 
+    // Issue #10 Phase 4: release any mirror subscription living in this
+    // slot and clear its view chrome (badge, back button, container).
+    if (this._mirrorPanes[slotIdx]) {
+      try { this._mirrorPanes[slotIdx].dispose(); } catch (_) { /* already gone */ }
+      delete this._mirrorPanes[slotIdx];
+      const paneElMirror = document.getElementById(`term-pane-${slotIdx}`);
+      if (paneElMirror) {
+        const viewContainer = document.getElementById(`pane-view-${slotIdx}`);
+        if (viewContainer) { viewContainer.hidden = true; viewContainer.replaceChildren(); }
+        const mBadge = paneElMirror.querySelector('.pane-view-badge');
+        const mBack = paneElMirror.querySelector('.pane-view-back');
+        if (mBadge) mBadge.hidden = true;
+        if (mBack) mBack.hidden = true;
+        delete paneElMirror.dataset.viewType;
+        delete paneElMirror.dataset.viewData;
+      }
+    }
+
     const tp = this.terminalPanes[slotIdx];
     const sessionName = tp ? tp.sessionName : '';
 
@@ -14654,12 +14866,44 @@ class CWMApp {
     this.saveTerminalLayout();
   }
 
+  /**
+   * True when a pane slot is in use by EITHER a live TerminalPane or a
+   * standalone mirror view (issue #10 Phase 4). Mirror panes have no
+   * TerminalPane, so raw terminalPanes[] truthiness under-counts them and
+   * would hide the pane / hand the slot to the next terminal open.
+   * @param {number} slotIdx - The pane slot index.
+   * @returns {boolean}
+   */
+  _isSlotOccupied(slotIdx) {
+    return !!(this.terminalPanes[slotIdx] || this._mirrorPanes[slotIdx]);
+  }
+
+  /**
+   * First pane slot free of BOTH terminals and mirror views, or -1.
+   * Replaces the raw `terminalPanes.findIndex(p => p === null)` idiom at
+   * every "open in empty pane" call site so a mirror pane's slot can never
+   * be stomped by a new terminal. Behavior is identical when no mirror
+   * panes exist.
+   * @returns {number} Free slot index, or -1 when the grid is full.
+   */
+  _findEmptyPaneSlot() {
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      if (!this._isSlotOccupied(i)) return i;
+    }
+    return -1;
+  }
+
   updateTerminalGridLayout() {
     const grid = this.els.terminalGrid;
     if (!grid) return;
 
-    const filledCount = this.terminalPanes.filter(p => p !== null).length;
-    // Only show empty drop target when no terminals are open
+    // Occupancy counts terminals AND standalone mirror panes (issue #10):
+    // a mirror-only layout must still size the grid and keep its pane shown.
+    let filledCount = 0;
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      if (this._isSlotOccupied(i)) filledCount++;
+    }
+    // Only show empty drop target when no panes are open
     const visibleCount = filledCount > 0 ? filledCount : 1;
 
     grid.setAttribute('data-panes', visibleCount.toString());
@@ -14669,7 +14913,7 @@ class CWMApp {
       const paneEl = document.getElementById(`term-pane-${i}`);
       if (!paneEl) continue;
 
-      if (this.terminalPanes[i]) {
+      if (this._isSlotOccupied(i)) {
         // Filled pane - always show
         paneEl.hidden = false;
       } else if (!emptyShown && filledCount === 0) {
@@ -14693,7 +14937,7 @@ class CWMApp {
     if (filledCount === 3) {
       // 2-col grid, 3 panes: last pane spans 2 columns (fills bottom row)
       for (let i = CWMApp.MAX_PANES - 1; i >= 0; i--) {
-        if (this.terminalPanes[i]) {
+        if (this._isSlotOccupied(i)) {
           const paneEl = document.getElementById(`term-pane-${i}`);
           if (paneEl) paneEl.style.gridColumn = 'span 2';
           break;
@@ -14706,7 +14950,7 @@ class CWMApp {
       let lastFilledIdx = -1;
       let count = 0;
       for (let i = 0; i < CWMApp.MAX_PANES; i++) {
-        if (this.terminalPanes[i]) {
+        if (this._isSlotOccupied(i)) {
           count++;
           if (count > 3) bottomRowPanes++;
           lastFilledIdx = i;
@@ -15615,7 +15859,7 @@ class CWMApp {
             label: s.name,
             icon: '&#9654;',
             action: () => {
-              const emptySlot = this.terminalPanes.findIndex(p => p === null);
+              const emptySlot = this._findEmptyPaneSlot();
               if (emptySlot === -1) {
                 this.showToast('All terminal panes full', 'warning');
                 return;
@@ -16804,6 +17048,12 @@ class CWMApp {
           if (p.viewType) {
             setTimeout(() => this.openViewInPane(p.slot, p.viewType, p.viewData || {}), 100);
           }
+        } else if (p.viewType === 'mirror' && !p.sessionId && !this._isSlotOccupied(p.slot)) {
+          // Issue #10 Phase 4: standalone mirror pane (no PTY session).
+          // Re-open from the persisted descriptor; openMirrorInSlot owns
+          // the unhide + grid recount that openTerminalInPane would have
+          // done for a terminal-backed record.
+          this.openMirrorInSlot(p.slot, p.viewData || {});
         }
       });
     }
@@ -17140,6 +17390,17 @@ class CWMApp {
           }
         }
         this.terminalPanes[i] = null;
+        // Issue #10 Phase 4: standalone mirror panes are not cacheable like
+        // xterm DOM (the subscription is server-side state, not a canvas).
+        // Dispose on switch-away; saveCurrentGroupPanes() above already
+        // persisted the descriptor, and _restoreGroupMirrorPanes re-opens
+        // it (idempotent, fresh history) when this group activates again.
+        if (this._mirrorPanes[i]) {
+          try { this._mirrorPanes[i].dispose(); } catch (_) { /* already gone */ }
+          delete this._mirrorPanes[i];
+          const mirrorViewContainer = document.getElementById(`pane-view-${i}`);
+          if (mirrorViewContainer) { mirrorViewContainer.hidden = true; mirrorViewContainer.replaceChildren(); }
+        }
         // Reset pane DOM to empty visual state
         const paneEl = document.getElementById(`term-pane-${i}`);
         if (paneEl) {
@@ -17150,6 +17411,16 @@ class CWMApp {
           if (closeBtn) closeBtn.hidden = true;
           const uploadBtnG = paneEl.querySelector('.terminal-pane-upload');
           if (uploadBtnG) uploadBtnG.hidden = true;
+          // Clear stale mirror view chrome so the incoming group's slot
+          // starts clean (only when the slot hosted a standalone mirror).
+          if (paneEl.dataset.viewType === 'mirror') {
+            const mBadge = paneEl.querySelector('.pane-view-badge');
+            const mBack = paneEl.querySelector('.pane-view-back');
+            if (mBadge) mBadge.hidden = true;
+            if (mBack) mBack.hidden = true;
+            delete paneEl.dataset.viewType;
+            delete paneEl.dataset.viewData;
+          }
         }
       }
       this._groupPaneCache[prevGroupId] = cached;
@@ -17236,6 +17507,12 @@ class CWMApp {
       }
     }
 
+    // Issue #10 Phase 4: re-open the new group's persisted mirror panes.
+    // Runs after BOTH restore branches: the pane cache only carries
+    // TerminalPane instances (mirror subscriptions were disposed on
+    // switch-away), so mirrors always restore from their descriptors.
+    this._restoreGroupMirrorPanes(this._tabGroups.find(g => g.id === groupId));
+
     // Re-point the active-slot suppression at a pane that actually exists
     // in the NEW group (runs after both the cached and fresh branches).
     // Without this, onTerminalIdle compared incoming idle events against
@@ -17266,6 +17543,25 @@ class CWMApp {
     this.saveTerminalLayout();
   }
 
+  /**
+   * Re-open every standalone mirror pane persisted on a tab group (issue
+   * #10 Phase 4). Mirror records carry sessionId:null + viewType:'mirror'
+   * + a viewData descriptor; slots already occupied (terminal restored
+   * from cache, or another mirror) are skipped defensively. Server-side
+   * open is idempotent, so re-running this after a quick away-and-back
+   * switch is safe.
+   *
+   * @param {Object|null} group - The tab group whose panes to scan.
+   */
+  _restoreGroupMirrorPanes(group) {
+    if (!group || !Array.isArray(group.panes)) return;
+    for (const p of group.panes) {
+      if (p && p.viewType === 'mirror' && !p.sessionId && !this._isSlotOccupied(p.slot)) {
+        this.openMirrorInSlot(p.slot, p.viewData || {});
+      }
+    }
+  }
+
   saveCurrentGroupPanes() {
     const group = this._tabGroups.find(g => g.id === this._activeGroupId);
     if (!group) return;
@@ -17293,6 +17589,23 @@ class CWMApp {
           spawnOpts: tp.spawnOpts || {},
           viewType,
           viewData,
+        });
+      } else if (this._mirrorPanes[i]) {
+        // Issue #10 Phase 4: standalone mirror pane (no TerminalPane in the
+        // slot). Persist a sessionId:null record whose viewData descriptor
+        // is everything openMirrorInSlot needs to re-open the same mirror
+        // on layout restore or tab-group switch-back. provider is stored at
+        // the record level too so future provider-aware layout consumers
+        // treat mirror panes uniformly with terminal panes.
+        const mv = this._mirrorPanes[i];
+        group.panes.push({
+          slot: i,
+          sessionId: null,
+          sessionName: mv.title || mv.providerSessionId,
+          provider: mv.provider,
+          spawnOpts: {},
+          viewType: 'mirror',
+          viewData: mv.descriptor(),
         });
       }
     }
@@ -19142,7 +19455,7 @@ class CWMApp {
       await this.loadSessions();
 
       // Open in terminal
-      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      const emptySlot = this._findEmptyPaneSlot();
       if (emptySlot !== -1) {
         this.setViewMode('terminal');
         this.openTerminalInPane(emptySlot, sessionData.session.id, result.featureName, { cwd: sessionDir });
@@ -19230,7 +19543,7 @@ class CWMApp {
 
       // Open session in terminal pane if available
       if (data.session) {
-        const emptySlot = this.terminalPanes.findIndex(p => p === null);
+        const emptySlot = this._findEmptyPaneSlot();
         if (emptySlot !== -1) {
           this.setViewMode('terminal');
           this.openTerminalInPane(emptySlot, data.session.id, branch, { cwd: data.task.worktreePath });
@@ -20016,7 +20329,7 @@ class CWMApp {
             await this.loadSessions();
 
             // Open in first empty terminal pane and send context as first message
-            const emptySlot = this.terminalPanes.findIndex(p => p === null);
+            const emptySlot = this._findEmptyPaneSlot();
             if (emptySlot !== -1) {
               this.setViewMode('terminal');
               const spawnOpts = { cwd: session.workingDir || '' };
@@ -21215,7 +21528,7 @@ class CWMApp {
     }
 
     // Not open yet - find an empty slot
-    const emptySlot = this.terminalPanes.findIndex(p => p === null);
+    const emptySlot = this._findEmptyPaneSlot();
     if (emptySlot === -1) {
       this.showToast('No empty terminal pane - close one first', 'warning');
       return;
@@ -21596,7 +21909,7 @@ class CWMApp {
       await this.loadStats();
 
       // Open in a terminal pane
-      const emptySlot = this.terminalPanes.findIndex(p => p === null);
+      const emptySlot = this._findEmptyPaneSlot();
       if (emptySlot !== -1) {
         const spawnOpts = { cwd: dir };
         if (model) spawnOpts.model = model;
