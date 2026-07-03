@@ -6230,7 +6230,12 @@ function gitExec(args, cwd) {
   return new Promise((resolve, reject) => {
     const run = () => {
       gitRunning++;
-      execFile('git', args, { cwd, timeout: 5000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      // windowsHide keeps each git spawn from flashing an OpenConsole/conhost
+      // window on Windows (with Windows Terminal as the default console host a
+      // windowless parent otherwise pops a visible terminal per spawn). This is
+      // the source-level guarantee so no git call, on any code path, ever pops
+      // a terminal, independent of how often callers poll.
+      execFile('git', args, { cwd, timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
         gitRunning--;
         // Drain next queued command if any
         const next = gitQueue.shift();
