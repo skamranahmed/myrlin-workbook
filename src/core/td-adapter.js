@@ -29,7 +29,7 @@ const DEFAULT_TD_BINARY = process.env.TD_BINARY || 'td';
  * @returns {Promise<{stdout: string, stderr: string}>}
  */
 async function runTd(binary, args, cwd) {
-  return execFileAsync(binary, args, { cwd, timeout: 15000 });
+  return execFileAsync(binary, args, { cwd, timeout: 15000, windowsHide: true });
 }
 
 /**
@@ -39,7 +39,7 @@ async function runTd(binary, args, cwd) {
  */
 async function isAvailable(binary = DEFAULT_TD_BINARY) {
   try {
-    await execFileAsync(binary, ['--version'], { timeout: 5000 });
+    await execFileAsync(binary, ['--version'], { timeout: 5000, windowsHide: true });
     return true;
   } catch {
     return false;

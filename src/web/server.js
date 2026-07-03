@@ -999,7 +999,7 @@ function resolveTdRepoDir(store, workspaceId) {
     const { execFileSync } = require('child_process');
     const commonGitDir = execFileSync(
       'git', ['-C', inferredDir, 'rev-parse', '--git-common-dir'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }
     ).trim();
     const absCommonGitDir = path.isAbsolute(commonGitDir)
       ? commonGitDir
@@ -2134,7 +2134,7 @@ function probeAvailability(cliBinary, forceRefresh) {
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   let available = false;
   try {
-    execSync(cmd + ' ' + JSON.stringify(cliBinary), { stdio: 'pipe', timeout: 2000 });
+    execSync(cmd + ' ' + JSON.stringify(cliBinary), { stdio: 'pipe', timeout: 2000, windowsHide: true });
     available = true;
   } catch (_) {
     available = false;
@@ -3209,7 +3209,7 @@ function resolveClaudeCli() {
   // Try bare command first (works if claude is on PATH)
   try {
     execSync(process.platform === 'win32' ? 'where claude' : 'which claude', {
-      stdio: 'pipe', timeout: 5000,
+      stdio: 'pipe', timeout: 5000, windowsHide: true,
     });
     // Plan 15-01: PATH-resolved bare-command form. Use the Claude provider's
     // canonical cliBinary so the value is sourced from the provider object
@@ -4551,6 +4551,7 @@ JSON array:`;
         cwd: session ? (session.workingDir || process.cwd()) : process.cwd(),
         timeout: 90000,
         maxBuffer: 1024 * 512,
+        windowsHide: true,
       }, (err, stdout) => {
         if (err) return reject(new Error('Task extraction failed: ' + (err.message || 'unknown error')));
         resolve(stdout.trim());
@@ -4816,7 +4817,7 @@ app.post('/api/sessions/:id/spinoff-batch', requireAuth, async (req, res) => {
           if (initHooks.init_script && typeof initHooks.init_script === 'string') {
             try {
               const { execSync } = require('child_process');
-              execSync(initHooks.init_script, { cwd: worktreePath, timeout: 30000, stdio: 'pipe' });
+              execSync(initHooks.init_script, { cwd: worktreePath, timeout: 30000, stdio: 'pipe', windowsHide: true });
             } catch { /* non-fatal */ }
           }
         }
@@ -5992,7 +5993,7 @@ function getCpuUsagePercent() {
 function getProcessMemory(pid) {
   return new Promise((resolve) => {
     if (process.platform === 'win32') {
-      execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeout: 5000 }, (err, stdout) => {
+      execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (err || !stdout.trim()) return resolve(null);
         // Format: "name","pid","session","session#","mem usage"
         // Mem usage: "123,456 K" or "123 456 K"
@@ -6005,7 +6006,7 @@ function getProcessMemory(pid) {
       });
     } else {
       // Linux/macOS: ps -o rss= -p PID → returns RSS in KB
-      execFile('ps', ['-o', 'rss=', '-p', String(pid)], { timeout: 5000 }, (err, stdout) => {
+      execFile('ps', ['-o', 'rss=', '-p', String(pid)], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (err || !stdout.trim()) return resolve(null);
         const kb = parseInt(stdout.trim(), 10);
         if (!isNaN(kb)) return resolve(kb / 1024);
@@ -6019,7 +6020,7 @@ function getChildPids(pid) {
   return new Promise((resolve) => {
     const allPids = [pid];
     if (process.platform === 'win32') {
-      execFile('wmic', ['process', 'where', `ParentProcessId=${pid}`, 'get', 'ProcessId', '/format:csv'], { timeout: 5000 }, (err, stdout) => {
+      execFile('wmic', ['process', 'where', `ParentProcessId=${pid}`, 'get', 'ProcessId', '/format:csv'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (!err && stdout) {
           stdout.split('\n').forEach(line => {
             const parts = line.trim().split(',');
@@ -6032,7 +6033,7 @@ function getChildPids(pid) {
         resolve(allPids);
       });
     } else {
-      execFile('pgrep', ['-P', String(pid)], { timeout: 5000 }, (err, stdout) => {
+      execFile('pgrep', ['-P', String(pid)], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (!err && stdout) {
           stdout.trim().split('\n').forEach(line => {
             const childPid = parseInt(line.trim(), 10);
@@ -6051,7 +6052,7 @@ function getProcessPorts(pid) {
       getChildPids(pid).then((allPids) => {
         const pidList = allPids.join(',');
         const psScript = `Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { @(${pidList}) -contains $_.OwningProcess } | Select-Object -ExpandProperty LocalPort`;
-        execFile('powershell', ['-NoProfile', '-Command', psScript], { timeout: 5000 }, (err, stdout) => {
+        execFile('powershell', ['-NoProfile', '-Command', psScript], { timeout: 5000, windowsHide: true }, (err, stdout) => {
           if (err || !stdout.trim()) return resolve([]);
           const ports = [...new Set(
             stdout.trim().split('\n')
@@ -6064,7 +6065,7 @@ function getProcessPorts(pid) {
     } else {
       getChildPids(pid).then((allPids) => {
         const pidArg = allPids.join(',');
-        execFile('lsof', ['-i', '-P', '-n', '-a', '-p', pidArg], { timeout: 5000 }, (err, stdout) => {
+        execFile('lsof', ['-i', '-P', '-n', '-a', '-p', pidArg], { timeout: 5000, windowsHide: true }, (err, stdout) => {
           if (err || !stdout.trim()) return resolve([]);
           const ports = [];
           stdout.split('\n').forEach(line => {
@@ -6088,7 +6089,7 @@ function getProcessStats(pid) {
     if (process.platform === 'win32') {
       // Single WMIC call gets memory + CPU times
       execFile('wmic', ['process', 'where', `ProcessId=${pid}`, 'get', 'WorkingSetSize,KernelModeTime,UserModeTime', '/format:csv'],
-        { timeout: 5000 }, (err, stdout) => {
+        { timeout: 5000, windowsHide: true }, (err, stdout) => {
           if (err || !stdout.trim()) return resolve({ memoryMB: null, cpuPercent: null });
           const lines = stdout.trim().split('\n').filter(l => l.trim() && !l.startsWith('Node'));
           if (lines.length === 0) return resolve({ memoryMB: null, cpuPercent: null });
@@ -6120,7 +6121,7 @@ function getProcessStats(pid) {
         });
     } else {
       // Linux/macOS: use ps to get both RSS and %CPU
-      execFile('ps', ['-o', 'rss=,pcpu=', '-p', String(pid)], { timeout: 5000 }, (err, stdout) => {
+      execFile('ps', ['-o', 'rss=,pcpu=', '-p', String(pid)], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (err || !stdout.trim()) return resolve({ memoryMB: null, cpuPercent: null });
         const parts = stdout.trim().split(/\s+/);
         const rss = parseInt(parts[0], 10);
@@ -6227,6 +6228,15 @@ const GIT_MAX_CONCURRENT = 3;
 let gitRunning = 0;
 const gitQueue = [];
 
+// Short-TTL cache for `git status --porcelain`, used by the workspace
+// conflict endpoint below. WHY: the frontend polls conflicts on a timer;
+// without a cache every poll re-spawned one git process per running
+// session. Entries are keyed by resolved repo path, expire after
+// GIT_CONFLICT_CACHE_TTL_MS, and are invalidated eagerly whenever a
+// mutating git command for the same path flows through gitExec.
+const { createGitStatusCache } = require('./git-status-cache');
+const conflictGitStatusCache = createGitStatusCache();
+
 /**
  * Execute a git command with concurrency limiting.
  * At most GIT_MAX_CONCURRENT git processes run simultaneously;
@@ -6239,6 +6249,10 @@ function gitExec(args, cwd) {
   return new Promise((resolve, reject) => {
     const run = () => {
       gitRunning++;
+      // A mutating git command makes any cached `status --porcelain` for
+      // this repo path stale; drop it eagerly so the conflict endpoint
+      // never serves pre-mutation state (TTL alone could lag ~15s).
+      conflictGitStatusCache.invalidateIfMutating(args, cwd);
       // windowsHide keeps each git spawn from flashing an OpenConsole/conhost
       // window on Windows (with Windows Terminal as the default console host a
       // windowless parent otherwise pops a visible terminal per spawn). This is
@@ -6462,14 +6476,14 @@ app.get('/api/worktree-tasks', requireAuth, async (req, res) => {
       const base = task.baseBranch || 'main';
       // Count commits ahead of base branch
       const ahead = await new Promise((resolve) => {
-        const p = require('child_process').execFile('git', ['rev-list', '--count', `${base}..${task.branch}`], { cwd: task.worktreePath, timeout: 5000 }, (err, stdout) => {
+        const p = require('child_process').execFile('git', ['rev-list', '--count', `${base}..${task.branch}`], { cwd: task.worktreePath, timeout: 5000, windowsHide: true }, (err, stdout) => {
           resolve(err ? 0 : parseInt(stdout.trim(), 10) || 0);
         });
       });
       info.branchAhead = ahead;
       // Count changed files (uncommitted + committed vs base)
       const changed = await new Promise((resolve) => {
-        require('child_process').execFile('git', ['diff', '--name-only', base], { cwd: task.worktreePath, timeout: 5000 }, (err, stdout) => {
+        require('child_process').execFile('git', ['diff', '--name-only', base], { cwd: task.worktreePath, timeout: 5000, windowsHide: true }, (err, stdout) => {
           resolve(err ? 0 : stdout.trim().split('\n').filter(Boolean).length);
         });
       });
@@ -6598,6 +6612,7 @@ app.post('/api/worktree-tasks', requireAuth, async (req, res) => {
             cwd: worktreePath,
             timeout: 30000,
             stdio: 'pipe',
+            windowsHide: true,
           });
         } catch (e) {
           console.error(`[init-hook] init_script failed: ${e.message}`);
@@ -6814,7 +6829,7 @@ app.put('/api/worktree-init-hooks', requireAuth, (req, res) => {
  */
 function ghExec(args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile('gh', args, { cwd, timeout: 30000, maxBuffer: 1024 * 512 }, (err, stdout, stderr) => {
+    execFile('gh', args, { cwd, timeout: 30000, maxBuffer: 1024 * 512, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
         const msg = (stderr || err.message || '').trim();
         return reject(new Error(msg || 'gh command failed'));
@@ -6991,6 +7006,7 @@ Format: Start with a ## Summary section with 2-3 bullet points, then a ## Change
         cwd: taskCwd,
         timeout: 60000,
         maxBuffer: 1024 * 256,
+        windowsHide: true,
       }, (err, stdout) => {
         if (err) return reject(new Error('PR description generation failed: ' + (err.message || 'unknown error')));
         resolve(stdout.trim());
@@ -7108,16 +7124,16 @@ app.get('/api/version', requireAuth, async (req, res) => {
 
     try {
       // Fetch latest from remote
-      execSync('git fetch origin main --quiet', { cwd: appDir, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+      execSync('git fetch origin main --quiet', { cwd: appDir, timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
 
       // Check how many commits behind
-      const behindOutput = execSync('git rev-list HEAD..origin/main --count', { cwd: appDir, timeout: 5000, encoding: 'utf-8' }).trim();
+      const behindOutput = execSync('git rev-list HEAD..origin/main --count', { cwd: appDir, timeout: 5000, encoding: 'utf-8', windowsHide: true }).trim();
       commitsBehind = parseInt(behindOutput, 10) || 0;
       updateAvailable = commitsBehind > 0;
 
       // Get the latest commit message from remote
       if (updateAvailable) {
-        const latestMsg = execSync('git log origin/main -1 --format=%s', { cwd: appDir, timeout: 5000, encoding: 'utf-8' }).trim();
+        const latestMsg = execSync('git log origin/main -1 --format=%s', { cwd: appDir, timeout: 5000, encoding: 'utf-8', windowsHide: true }).trim();
         remoteVersion = `${currentVersion}+${commitsBehind}`;
       }
     } catch (_) {
@@ -7162,7 +7178,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
     // Step 2: npm install (in case dependencies changed)
     sendStep('install', 'running', 'Installing dependencies...');
     try {
-      const installOutput = execSync('npm install --production', { cwd: appDir, timeout: 120000, encoding: 'utf-8' });
+      const installOutput = execSync('npm install --production', { cwd: appDir, timeout: 120000, encoding: 'utf-8', windowsHide: true });
       // Count packages
       const match = installOutput.match(/added (\d+)/);
       const detail = match ? `Installed ${match[1]} new packages` : 'Dependencies up to date';
@@ -7215,6 +7231,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
                 stdio: 'ignore',
                 env: Object.assign({}, process.env, { CWM_NO_OPEN: '1' }),
                 cwd: path.join(__dirname, '..'),
+                windowsHide: true,
               });
               child.unref();
               process.exit(0);
@@ -7230,6 +7247,7 @@ app.post('/api/update', requireAuth, async (req, res) => {
         detached: true,
         stdio: 'ignore',
         cwd: projectRoot,
+        windowsHide: true,
       });
       child.unref();
 
@@ -7253,7 +7271,7 @@ let _cloudflaredAvailable = null;
 
 function checkCloudflared() {
   return new Promise((resolve) => {
-    execFile('cloudflared', ['--version'], { timeout: 5000 }, (err, stdout) => {
+    execFile('cloudflared', ['--version'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
       if (err) return resolve({ available: false, version: null });
       const version = stdout.trim().split('\n')[0] || stdout.trim();
       resolve({ available: true, version });
@@ -7293,6 +7311,7 @@ app.post('/api/tunnels', requireAuth, async (req, res) => {
     const proc = spawn('cloudflared', ['tunnel', '--url', `http://localhost:${port}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
+      windowsHide: true,
     });
     const tunnel = { id, port, url: null, pid: proc.pid, process: proc, label: label || `Port ${port}`, createdAt: new Date().toISOString() };
     _tunnels.set(id, tunnel);
@@ -7400,6 +7419,7 @@ function startNamedTunnel(token) {
     proc = spawn('cloudflared', ['tunnel', 'run', '--token', token], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
+      windowsHide: true,
     });
   } catch (err) {
     return { error: 'Failed to spawn cloudflared: ' + err.message };
@@ -8053,7 +8073,9 @@ app.get('/api/conflicts', requireAuth, (req, res) => {
  * GET /api/workspaces/:id/conflicts
  * Checks if multiple running sessions in a workspace are modifying the same files.
  * Runs `git status --porcelain` in each session's workingDir to discover modified files,
- * then cross-references to find overlapping edits.
+ * then cross-references to find overlapping edits. Status output is cached
+ * per repo path for GIT_CONFLICT_CACHE_TTL_MS (see git-status-cache.js) so
+ * rapid repeated polls do not re-spawn git per session.
  * Protected by auth.
  */
 app.get('/api/workspaces/:id/conflicts', requireAuth, async (req, res) => {
@@ -8087,7 +8109,9 @@ app.get('/api/workspaces/:id/conflicts', requireAuth, async (req, res) => {
   // Run git status for all sessions concurrently (pool limits actual spawns)
   await Promise.all(runningSessions.map(async (session) => {
     try {
-      const stdout = await gitExec(['status', '--porcelain'], session.workingDir);
+      // Served through the short-TTL per-repo-path cache: rapid repeated
+      // polls (and sessions sharing one workingDir) reuse one git spawn.
+      const stdout = await conflictGitStatusCache.get(session.workingDir, (dir) => gitExec(['status', '--porcelain'], dir));
 
       checkedSessions++;
 

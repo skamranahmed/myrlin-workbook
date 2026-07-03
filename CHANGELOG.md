@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Complete windowsHide sweep: no server-side child process can flash a console window on Windows.** Every child_process call site in the server-side code now passes `windowsHide: true`. WHY: with a windowless parent (daemonized supervisor, watchdog-spawned workbook) any spawn without the flag pops a visible conhost/OpenConsole window; earlier fixes covered gitExec and the git panel/conflict pollers, this sweep covers everything else. Swept sites: the browser-open helpers (src/gui.js), cloudflared quick/token tunnel spawns, tasklist/wmic/pgrep/lsof/powershell/ps resource probes, the gh CLI runner, claude --print one-shots (task extraction, PR description), where/which availability probes, npm install and git fetch/rev-list/log in the self-update path, worktree/spinoff init_script hooks, the git rev-parse worktree guard, spinoff branch info (rev-list/diff), the generated state/_restart.js script plus the spawn inside it, the td CLI adapter (src/core/td-adapter.js), the supervisor daemon spawn, PID probe, and GUI child (src/supervisor.js), and the legacy session launcher wrapper (src/core/session-manager.js, where the visible session window is created by start in its own console, so only the helper flash is removed). Interactive node-pty sessions (pty.spawn in src/web/pty-manager.js) are deliberately untouched: those ConPTY terminals are the panes the user opens on purpose.
+
+### Added
+
+- **Short-TTL git status cache for the workspace conflict endpoint (src/web/git-status-cache.js).** GET /api/workspaces/:id/conflicts previously spawned one `git status --porcelain` per running session on every poll (60s timer plus manual refreshes). Results are now cached per resolved repo path for GIT_CONFLICT_CACHE_TTL_MS (15s), concurrent callers share the in-flight spawn, and any mutating git command routed through gitExec (commit, checkout, merge, ...) eagerly invalidates its path so post-mutation polls are never stale. Git run outside gitExec (e.g. typed in a terminal pane) is covered by the TTL alone; that tradeoff is documented in the module. Failures are cached for the TTL on purpose so non-repo workingDirs do not re-spawn git every poll.
+
+### Testing
+
+- New `test/windows-hide-sweep.test.js`: source-scan gate asserting every child_process call site in the swept server-side files (all of src/ except the browser bundle src/web/public, plus runtime scripts watchdog.js, restart-workbook.js, recover-orphan-panes.js) carries windowsHide in its options, with a pattern-rot floor; method-style pty.spawn stays out of scope by design.
+- New `test/git-conflict-cache.test.js`: hermetic TTL/hit/expiry/eager-invalidation coverage for the conflict status cache (injected clock, counting stub, zero real git spawns).
+
 ## [1.2.0-alpha.15] - 2026-07-03
 
 ### Added

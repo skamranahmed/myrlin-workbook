@@ -921,6 +921,8 @@ const standaloneTests = [
   'credential-routes.test.js',       // credential switcher T1: /api/credentials routes, SSE broadcasts, token-material leak gate
   'mac-bridge.test.js',              // feat/mac-credential-sync: hermetic ssh/scp argv gate (accept-new, no token in argv), inventory parser, install/apply split
   'usage-meter.test.js',             // feat/usage-meter: per-model bars (Session/Opus/Fable), model-scope mapper wiring, absolute local resets
+  'windows-hide-sweep.test.js',  // chore/windowshide-sweep: every server-side child_process call site passes windowsHide (source gate)
+  'git-conflict-cache.test.js',  // chore/windowshide-sweep: short-TTL git status cache hit/expiry/eager invalidation
 ];
 
 let standaloneFailed = 0;
