@@ -1075,3 +1075,182 @@
     inset: -12px;
   }
 }
+
+
+/* ─── Credential Switcher: mobile bottom sheet ─────────────────
+   The desktop dropdown (.account-panel, anchored under the header chip)
+   becomes a fixed bottom sheet on phones, following the action-sheet
+   recipe above. A JS-created backdrop (.account-panel-backdrop) dims the
+   app and closes on tap. CRITICAL stacking note: on mobile .app is
+   position:fixed, which ALWAYS forms a stacking context, so the panel is
+   trapped inside .app and a body-level backdrop would paint over it. The
+   backdrop is therefore mounted INSIDE .account-switcher (see
+   _ensureAccountBackdrop), so the backdrop and panel share the header's
+   stacking context; body.account-sheet-open then lifts that whole header
+   context above the tab bar so the header unit (backdrop z 10000 + panel
+   z 10001) paints over the dimmed app, and the panel paints over the
+   backdrop by their in-context z-index. */
+
+@media (max-width: 768px) {
+  /* Backdrop: full-viewport dim (fixed inset:0 escapes the header's
+     overflow:hidden because its containing block is the viewport); tap to
+     close (bound in JS). z 10000 sits just below the panel's 10001 within
+     the shared header stacking context. */
+  .account-panel-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: color-mix(in srgb, var(--crust) 60%, transparent);
+    animation: overlay-in 0.15s ease;
+  }
+
+  /* Lift the header stacking context above the tab bar (z 50) while the
+     account sheet is open, so the header unit (which now contains BOTH the
+     backdrop at z 10000 and the panel at z 10001) paints over the rest of
+     .app. Modals (z 10002, at body level above .app) still stack above.
+     Scoped to a dedicated class so the shared sheet-open scroll lock never
+     changes header stacking for other sheets. */
+  body.account-sheet-open .app-header {
+    z-index: 10001;
+  }
+
+  .account-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    margin-top: 0;
+    max-height: 75vh;
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    z-index: 10001;
+    animation: sheet-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Drag-handle bar, mirroring .action-sheet-handle. Rendered as a
+     pseudo-element so the section 6.1 markup stays untouched. */
+  .account-panel::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    margin: 8px auto 4px;
+  }
+
+  /* Comfortable touch rows; hover-reveal becomes always-visible. */
+  .account-row {
+    min-height: 56px;
+  }
+
+  .account-row-edit {
+    opacity: 1;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Machine segments (PC/MAC) get comfier touch targets in the sheet;
+     same states and tokens as desktop (mobile parity for the per-machine
+     staging flow). */
+  .account-seg {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+
+  /* Machines strip: a touch more breathing room inside the sheet. */
+  .account-machines {
+    padding: 10px 16px;
+  }
+
+  .account-pending-line {
+    font-size: 12px;
+  }
+
+  /* Footer buttons: full-width, stacked, Save on top (column-reverse
+     mirrors the .modal-footer treatment near the top of this file). */
+  .account-panel-actions {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .account-panel-actions .btn {
+    width: 100%;
+    padding: 14px;
+    justify-content: center;
+  }
+
+  /* Compact chip: drop the countdown so the 50px header never wraps. */
+  .account-chip-meta {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Smallest phones: avatar + chevron only. */
+  .account-chip-label {
+    display: none;
+  }
+
+  .account-chip {
+    padding: 4px 8px;
+  }
+}
+
+
+/* ─── Usage meter: bottom-sheet mirror ─────────────────────────
+   The header-right rail (which hosts #usage-meter) is display:none on
+   phones, so the ACTIVE account's Session/Opus/Fable bars surface inside
+   the account bottom sheet instead. #account-panel-meter is populated by
+   the same renderUsageMeter() call that paints the header widget; desktop
+   keeps it display:none (base rule in styles.css). :not([hidden]) keeps
+   the JS hidden attribute authoritative when there is no usage data. */
+
+@media (max-width: 768px) {
+  .account-panel-meter:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--surface0);
+  }
+
+  /* Roomier grid than the header widget: the track flexes to the sheet
+     width and the reset time stays fully visible (no hover tooltips on
+     touch, so the inline text must carry the exact local reset). */
+  .account-panel-meter .usage-meter-row {
+    grid-template-columns: 38px minmax(48px, 1fr) 34px auto;
+    font-size: 11px;
+  }
+
+  .account-panel-meter .usage-meter-key,
+  .account-panel-meter .usage-meter-reset {
+    font-size: 10px;
+  }
+
+  /* One-line scope note: touch has no tooltips, so the weekly-vs-session
+     distinction is spelled out inline. */
+  .account-panel-meter-note {
+    font-size: 10px;
+    color: var(--overlay0);
+    margin-top: 2px;
+  }
+
+  .account-panel-meter.is-stale .usage-meter-reset {
+    opacity: 0.55;
+  }
+}
+
+/* Reduced motion: the sheet snaps into place instead of sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .account-panel,
+  .account-panel-backdrop {
+    animation: none;
+  }
+}

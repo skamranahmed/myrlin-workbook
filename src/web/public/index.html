@@ -106,6 +106,54 @@
           <img src="logo.png" alt="Myrlin" class="header-logo-img">
           <span class="header-title">Myrlin's Workbook</span>
         </div>
+        <!-- Claude account switcher (credential switcher design doc, section 6.1).
+             Starts hidden; unhidden by app.js only after GET /api/credentials
+             succeeds, so old servers without the routes degrade gracefully.
+             Rows are rendered by app.js; this shell is static. -->
+        <div class="account-switcher" id="account-switcher" hidden>
+          <button class="account-chip" id="account-chip" aria-haspopup="listbox" aria-expanded="false" title="Claude account">
+            <span class="account-chip-avatar" id="account-chip-avatar">G</span>
+            <span class="account-chip-label" id="account-chip-label">Gayane</span>
+            <span class="account-chip-meta" id="account-chip-meta">resets 2h 14m</span>
+            <svg class="account-chip-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M2 4l3 3 3-3" stroke="currentColor" fill="none" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
+          <div class="account-panel" id="account-panel" role="listbox" hidden>
+            <div class="account-panel-header">
+              <span>Claude account</span>
+              <span class="account-panel-header-actions">
+                <button class="btn btn-ghost btn-icon btn-sm" id="account-refresh-btn" title="Refresh usage and Mac state">&#8635;</button>
+                <!-- Gear opens the Mac sync config modal (enable/host/user/tool);
+                     this is how the Mac target is set without code edits. -->
+                <button class="btn btn-ghost btn-icon btn-sm" id="account-mac-config-btn" title="Mac sync settings" aria-label="Mac sync settings">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </span>
+            </div>
+            <!-- Mobile mirror of the header usage meter (active account's
+                 Session/Opus/Fable bars). Populated by renderUsageMeter();
+                 desktop hides it via CSS because the header widget and the
+                 per-row usage lines already cover desktop. -->
+            <div class="account-panel-meter" id="account-panel-meter" hidden></div>
+            <!-- Machines strip: which account lives on which machine
+                 (PC and Mac). Rendered by renderMachinesStrip(); stays
+                 hidden while the Mac bridge is disabled so the default
+                 panel keeps today's zero-clutter layout. -->
+            <div class="account-machines" id="account-machines" hidden></div>
+            <div class="account-panel-list" id="account-panel-list"></div>
+            <div class="account-panel-footer">
+              <!-- Pending per-machine selections (PC: / Mac: lines), filled
+                   by renderAccountSwitcher and hidden when nothing is
+                   staged. Replaces the retired "Also apply on Mac Mini"
+                   checkbox: the per-row MAC segments stage the Mac
+                   independently now. -->
+              <div class="account-pending" id="account-pending" hidden></div>
+              <div class="account-panel-actions">
+                <button class="btn btn-ghost btn-sm" id="account-cancel-btn">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="account-save-btn" disabled>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="header-center">
@@ -161,6 +209,14 @@
       </div>
 
       <div class="header-right">
+        <!-- Per-model usage meter for the ACTIVE account: Session (5h) bar
+             (the true cooldown) plus Opus and Fable bars from their
+             WEEKLY-scoped limits, each with its exact local reset time.
+             Starts hidden; renderUsageMeter() unhides it once usage data
+             exists (rides the same render path as the account chip). -->
+        <div class="usage-meter" id="usage-meter" hidden>
+          <div class="usage-meter-bars" id="usage-meter-bars" role="group" aria-label="Account usage"></div>
+        </div>
         <button class="btn btn-ghost btn-icon update-btn" id="update-btn" title="Check for updates" hidden>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M8 1v6m0 0l2.5-2.5M8 7L5.5 4.5M2 10l.8 2.4c.2.6.8 1.1 1.5 1.1h7.4c.7 0 1.3-.4 1.5-1.1L14 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>

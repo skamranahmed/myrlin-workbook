@@ -109,6 +109,36 @@ class CWMApp {
    *  so several sessions finishing together produce one ding, not a burst. */
   static CHIME_COOLDOWN_MS = 5000;
 
+  /** Git panel/pane auto-refresh cadence. Raised from 10s because every poll
+   *  runs `git status`, which on Windows spawns a git.exe plus a conhost; a 10s
+   *  loop that also ran in background tabs produced a constant terminal-flash
+   *  and steady process churn. Paired with a document.hidden guard at each
+   *  timer site so a hidden tab polls not at all. */
+  static GIT_PANEL_POLL_MS = 30000;
+
+  // ── Credential switcher constants (design doc sections 6.2 and 6.4) ──
+  /** Usage cache staleness threshold; mirrors the server's usageCacheMinutes
+   *  default (10 min). Stale rows dim their countdown and trigger one
+   *  auto-refresh per panel open. */
+  static CRED_USAGE_STALE_MS = 10 * 60 * 1000;
+  /** Cadence of the reset-countdown re-render tick while the chip/panel is
+   *  visible. Countdowns have minute granularity, so 60s is exact. */
+  static CRED_TICK_MS = 60000;
+  /** Window during which credentials:changed SSE broadcasts are treated as
+   *  echoes of this client's own mutation (apply/rename/capture) and are
+   *  not toasted as remote changes. */
+  static CRED_SELF_ACTION_MS = 8000;
+  /** Usage bar fill thresholds (design 6.3, shared by the account panel
+   *  mini-bars and the header usage meter): below MID renders the green
+   *  fill, MID up to and including HIGH the amber fill, above HIGH red. */
+  static USAGE_PCT_MID = 60;
+  static USAGE_PCT_HIGH = 85;
+  /** Mac inventory cache staleness threshold; mirrors the server's
+   *  MAC_STATE_TTL_MS. When the cached sweep is older than this, opening
+   *  the account panel fires one live probe (a single SSH round trip
+   *  server-side); anything fresher is served from the cache with no SSH. */
+  static MAC_STATE_STALE_MS = 5 * 60 * 1000;
+
   constructor() {
     // ─── State ─────────────────────────────────────────────────
     this.state = {
@@ -149,6 +179,16 @@ class CWMApp {
       showHidden: false,
       resourceData: null,
       gitStatusCache: {},
+      // Credential switcher (Claude account roster; design doc section 6.2).
+      // list: safe projection rows from GET /api/credentials (never tokens).
+      // activeId: profileId of the machine-wide active login. stagedId: the
+      // row selected for the PC but not saved yet; stagedMacId: the row
+      // selected for the MAC (independent per machine). mac: { configured,
+      // enabled, host, user } summary gating every Mac surface.
+      // macState: sanitized Mac inventory cache from /api/credentials/
+      // mac-state ({checkedAt, reachable, activeName, activeProfileId,
+      // profiles}); macStale mirrors the server's TTL verdict.
+      credentials: { list: [], activeId: null, stagedId: null, stagedMacId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false },
       settings: Object.assign({
         paneColorHighlights: true,
         activityIndicators: true,
@@ -291,6 +331,28 @@ class CWMApp {
       vkbToggleBtn: document.getElementById('vkb-toggle-btn'),
       scaleDownBtn: document.getElementById('scale-down-btn'),
       scaleUpBtn: document.getElementById('scale-up-btn'),
+
+      // Credential switcher (Claude account chip + panel, design doc 6.1 ids)
+      accountSwitcher: document.getElementById('account-switcher'),
+      accountChip: document.getElementById('account-chip'),
+      accountChipAvatar: document.getElementById('account-chip-avatar'),
+      accountChipLabel: document.getElementById('account-chip-label'),
+      accountChipMeta: document.getElementById('account-chip-meta'),
+      accountPanel: document.getElementById('account-panel'),
+      accountPanelList: document.getElementById('account-panel-list'),
+      accountRefreshBtn: document.getElementById('account-refresh-btn'),
+      accountMacConfigBtn: document.getElementById('account-mac-config-btn'),
+      accountMachines: document.getElementById('account-machines'),
+      accountSaveBtn: document.getElementById('account-save-btn'),
+      accountCancelBtn: document.getElementById('account-cancel-btn'),
+      // Footer pending per-machine lines (PC: / Mac:); replaces the retired
+      // "Also apply on Mac Mini" checkbox from the mirror-checkbox era.
+      accountPending: document.getElementById('account-pending'),
+      // Per-model usage meter (header top-right widget + the mobile mirror
+      // rendered inside the account bottom sheet). See renderUsageMeter().
+      usageMeter: document.getElementById('usage-meter'),
+      usageMeterBars: document.getElementById('usage-meter-bars'),
+      accountPanelMeter: document.getElementById('account-panel-meter'),
 
       // Sessions
       sessionPanelTitle: document.getElementById('session-panel-title'),
@@ -2112,6 +2174,9 @@ class CWMApp {
     this.initNotesEditor();
     this.initAIInsights();
     this.initPairMobile();
+    // Credential switcher: binds once, then kicks a non-blocking roster load.
+    // If the server lacks the routes (404), the switcher simply stays hidden.
+    this.initAccountSwitcher();
     await this.loadAll();
     this.connectSSE();
     this.startConflictChecks();
@@ -2258,6 +2323,15 @@ class CWMApp {
       clearTimeout(this.sseRetryTimeout);
       this.sseRetryTimeout = null;
     }
+    // Credential switcher teardown: stop the countdown tick, close the panel,
+    // and re-hide the chip so the login screen never shows account state.
+    this._stopAccountTick();
+    this._closeAccountPanel();
+    if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = true;
+    this.state.credentials = { list: [], activeId: null, stagedId: null, stagedMacId: null, loading: false, applying: false, lastListAt: 0, mac: null, macState: null, macStale: true, macStateLoading: false };
+    // The usage meter lives outside the switcher subtree, so re-render it
+    // against the now-empty roster to hide and clear its bars too.
+    this.renderUsageMeter();
     this.disconnectSSE();
     this.showLogin();
   }
@@ -5537,11 +5611,15 @@ class CWMApp {
     if (name === 'td') this.renderTasksTdPanel();
     if (name === 'git') {
       this.renderTasksGitPanel();
-      // Start auto-refresh every 10 seconds while git tab is active
+      // Auto-refresh while the git tab is active, but skip entirely when the
+      // browser tab is hidden. Each refresh runs `git status` (a git.exe +
+      // conhost spawn on Windows); polling a background tab every 10s flashed
+      // terminals and churned processes for no visible benefit.
       if (this._gitRefreshTimer) clearInterval(this._gitRefreshTimer);
       this._gitRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
         if (this._activeTasksTab === 'git') this.renderTasksGitPanel();
-      }, 10000);
+      }, CWMApp.GIT_PANEL_POLL_MS);
     } else {
       // Clear git refresh timer when switching away from git tab
       if (this._gitRefreshTimer) {
@@ -7975,21 +8053,33 @@ class CWMApp {
     return null;
   }
 
-  async restartAllSessions() {
+  /**
+   * Restart every running/idle session so they pick up fresh state (for
+   * example a new machine-wide login after a credential switch).
+   * @param {object} [opts] - Options bag (additive; callers passing nothing keep the old behavior).
+   * @param {boolean} [opts.skipConfirm=false] - When true, skip the built-in
+   *   confirm modal. Used by the credential switcher's post-apply restart
+   *   offer, which has ALREADY confirmed with its own modal; without this
+   *   flag the user would be double-prompted.
+   * @returns {Promise<void>}
+   */
+  async restartAllSessions({ skipConfirm = false } = {}) {
     const runningSessions = this.state.sessions.filter(s => s.status === 'running' || s.status === 'idle');
     if (runningSessions.length === 0) {
       this.showToast('No running sessions to restart', 'info');
       return;
     }
 
-    const confirmed = await this.showConfirmModal({
-      title: 'Restart All Sessions',
-      message: `Restart <strong>${runningSessions.length}</strong> running session(s)? This will stop and relaunch each one, picking up any new login credentials.`,
-      confirmText: 'Restart All',
-      confirmClass: 'btn-primary',
-    });
+    if (!skipConfirm) {
+      const confirmed = await this.showConfirmModal({
+        title: 'Restart All Sessions',
+        message: `Restart <strong>${runningSessions.length}</strong> running session(s)? This will stop and relaunch each one, picking up any new login credentials.`,
+        confirmText: 'Restart All',
+        confirmClass: 'btn-primary',
+      });
 
-    if (!confirmed) return;
+      if (!confirmed) return;
+    }
 
     for (const s of runningSessions) {
       try {
@@ -8001,6 +8091,1381 @@ class CWMApp {
     this.showToast(`Restarted ${runningSessions.length} session(s)`, 'success');
     await this.loadSessions();
     await this.loadStats();
+  }
+
+
+  /* ═══════════════════════════════════════════════════════════
+     CREDENTIAL SWITCHER (Claude account chip + panel)
+     Design contract: docs/plans/2026-07-02-credential-switcher-design.md
+     sections 4 (API), 5 (SSE), 6 (frontend). Tokens NEVER reach this
+     code; only the safe projection rows from GET /api/credentials.
+     ═══════════════════════════════════════════════════════════ */
+
+  /**
+   * Wire up the credential switcher (chip, panel, footer, keyboard nav,
+   * outside-click close) and kick off the first roster load. Bindings
+   * attach once even if _initializeApp runs again after a re-login; the
+   * roster load runs on every call so a fresh login always refreshes it.
+   * @returns {void}
+   */
+  initAccountSwitcher() {
+    const els = this.els;
+    if (!els.accountSwitcher || !els.accountChip || !els.accountPanel) return;
+
+    if (!this._accountSwitcherBound) {
+      this._accountSwitcherBound = true;
+
+      // Chip toggles the panel (mirrors the theme-dropdown toggle pattern).
+      els.accountChip.addEventListener('click', () => {
+        if (els.accountPanel.hidden) this._openAccountPanel();
+        else this._closeAccountPanel();
+      });
+
+      // ArrowDown on the chip opens the panel and moves focus into the list.
+      els.accountChip.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this._openAccountPanel();
+          this._moveAccountFocus(1);
+        }
+      });
+
+      // Row interactions are delegated on the stable list container so the
+      // per-render innerHTML swaps never need re-binding.
+      els.accountPanelList.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('.account-row-edit');
+        if (editBtn) {
+          // The pencil must never stage the row it sits on.
+          e.stopPropagation();
+          const row = editBtn.closest('.account-row');
+          const p = row && this.state.credentials.list.find(x => x.profileId === row.dataset.profileId);
+          if (p) this.renameAccount(p);
+          return;
+        }
+        if (e.target.closest('#account-capture-btn')) {
+          this.captureCurrentAccount();
+          return;
+        }
+        const seg = e.target.closest('.account-seg');
+        if (seg) {
+          // Machine segments stage per machine and must never trigger the
+          // whole-row PC staging underneath them.
+          e.stopPropagation();
+          const segRow = seg.closest('.account-row');
+          if (!segRow || !segRow.dataset.profileId || segRow.getAttribute('aria-disabled') === 'true') return;
+          if (seg.dataset.machine === 'mac') this.stageMacAccount(segRow.dataset.profileId);
+          else this.stageAccount(segRow.dataset.profileId);
+          return;
+        }
+        const row = e.target.closest('.account-row');
+        if (row && row.dataset.profileId && row.getAttribute('aria-disabled') !== 'true') {
+          this.stageAccount(row.dataset.profileId);
+        }
+      });
+
+      // Keyboard: ArrowUp/ArrowDown roving focus between selectable rows,
+      // Enter/Space stages the focused row (needs-re-login rows excluded).
+      els.accountPanel.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          this._moveAccountFocus(e.key === 'ArrowDown' ? 1 : -1);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === ' ') {
+          const row = e.target.closest && e.target.closest('.account-row');
+          if (row && row.dataset.profileId && row.getAttribute('aria-disabled') !== 'true') {
+            e.preventDefault();
+            this.stageAccount(row.dataset.profileId);
+          }
+        }
+      });
+
+      // Header + footer controls. Refresh covers BOTH machines: usage on
+      // the PC roster plus (when the bridge is enabled) one live Mac
+      // inventory probe, fired in parallel so neither waits on the other.
+      els.accountRefreshBtn.addEventListener('click', () => {
+        this.loadCredentials({ refresh: true });
+        if (this._macEnabled()) this.loadMacState({ probe: true });
+      });
+      // Gear: Mac sync settings (enable/host/user/tool). This modal is the
+      // no-code-edit path for pointing the bridge at a renamed Mac host.
+      if (els.accountMacConfigBtn) {
+        els.accountMacConfigBtn.addEventListener('click', () => this.openMacConfigModal());
+      }
+      els.accountCancelBtn.addEventListener('click', () => {
+        this.state.credentials.stagedId = null;
+        this.state.credentials.stagedMacId = null;
+        this._closeAccountPanel();
+        this.renderAccountSwitcher();
+      });
+      els.accountSaveBtn.addEventListener('click', () => this.applyStagedAccount());
+      // The old "Also apply on Mac Mini" checkbox is retired: per-row MAC
+      // segments stage the Mac independently now. Clear its stale
+      // localStorage key so no future code can ever misread it.
+      try { localStorage.removeItem('cwm_credMirrorMac'); } catch (_) { /* storage may be unavailable */ }
+
+      // Outside click closes. composedPath() is checked instead of a plain
+      // contains() because staging re-renders the list synchronously,
+      // detaching the clicked row before the event reaches the document;
+      // contains() on a detached node would close the panel on every stage.
+      document.addEventListener('click', (e) => {
+        if (!els.accountPanel || els.accountPanel.hidden) return;
+        const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        if (path.includes(els.accountSwitcher) || els.accountSwitcher.contains(e.target)) return;
+        this._closeAccountPanel();
+      });
+
+      // Escape closes the panel (unless a modal owns the key) and returns
+      // focus to the chip for keyboard users.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (this._modalOpen) return;
+        if (els.accountPanel && !els.accountPanel.hidden) {
+          this._closeAccountPanel();
+          els.accountChip.focus();
+        }
+      });
+    }
+
+    // Non-blocking first load: a 404 (old server without the credential
+    // routes) simply keeps the switcher hidden. Never blocks app init.
+    this.loadCredentials();
+  }
+
+  /**
+   * Fetch helper dedicated to the credential routes. The generic api()
+   * helper discards the HTTP status and the structuredError message field,
+   * both of which this feature needs: 404 detection drives the graceful
+   * degradation on servers without the routes, and error toasts must show
+   * the server's human-readable message. 401 handling mirrors api().
+   * @param {string} method - HTTP verb.
+   * @param {string} path - Route path.
+   * @param {object} [body] - JSON body for non-GET requests.
+   * @returns {Promise<{ok: boolean, status: number, data: object|null}>} Response envelope.
+   * @throws {Error} 'Unauthorized' on 401 (after local logout), or the network-level fetch error.
+   */
+  async _credApi(method, path, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.state.token) headers['Authorization'] = `Bearer ${this.state.token}`;
+    const opts = { method, headers };
+    if (body && method !== 'GET') opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      this.state.token = null;
+      localStorage.removeItem('cwm_token');
+      this.showLogin();
+      this.disconnectSSE();
+      throw new Error('Unauthorized');
+    }
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = null; }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  /**
+   * Load the credential roster: GET /api/credentials, or POST
+   * /api/credentials/refresh-usage when opts.refresh is true (empty body,
+   * so the server-side cache TTL is honored). On 404 or network failure
+   * the switcher stays hidden and nothing else breaks (old-server /
+   * new-frontend mixes degrade gracefully, per design 6.1).
+   * @param {object} [opts] - Options bag.
+   * @param {boolean} [opts.refresh=false] - Refresh usage instead of a plain list read.
+   * @returns {Promise<void>} Never rejects; failures degrade silently or toast.
+   */
+  async loadCredentials({ refresh = false } = {}) {
+    const cred = this.state.credentials;
+    if (!this.els.accountSwitcher) return;
+    if (cred.loading) return;
+    cred.loading = true;
+    const firstLoad = cred.lastListAt === 0;
+    // Render immediately so an open panel shows the 3 skeleton rows.
+    this.renderAccountSwitcher();
+    try {
+      const resp = refresh
+        ? await this._credApi('POST', '/api/credentials/refresh-usage', {})
+        : await this._credApi('GET', '/api/credentials');
+      if (!resp.ok) {
+        if (resp.status === 404) return; // routes absent: feature self-hides
+        if (!firstLoad) {
+          const msg = (resp.data && (resp.data.message || resp.data.error)) || `Failed to load accounts (${resp.status})`;
+          this.showToast(msg, 'error');
+        }
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+    } catch (_) {
+      // Network failure or auth logout: degrade silently. If the roster was
+      // never loaded the switcher stays hidden; otherwise the previous data
+      // remains on screen until the next successful load.
+    } finally {
+      cred.loading = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Apply a 4.1-shape list response ({ activeProfileId, profiles, mac }) to
+   * local state, unhide the switcher, start the countdown tick, and render.
+   * Shared by loadCredentials, rename, and capture (their routes all return
+   * the same list shape).
+   * @param {object} data - Response body in the GET /api/credentials shape.
+   * @returns {boolean} True when the payload carried a usable profiles array.
+   */
+  _applyCredListResponse(data) {
+    if (!data || !Array.isArray(data.profiles)) return false;
+    const cred = this.state.credentials;
+    cred.list = data.profiles;
+    cred.activeId = data.activeProfileId || null;
+    if (data.mac !== undefined) cred.mac = data.mac || null;
+    cred.lastListAt = Date.now();
+    // Staging hygiene: a staged row that vanished or became active is stale.
+    if (cred.stagedId && (cred.stagedId === cred.activeId || !cred.list.some(p => p.profileId === cred.stagedId))) {
+      cred.stagedId = null;
+    }
+    // Mac staging hygiene: only the vanished-row case here; the staged-row-
+    // became-Mac-active case is handled by the credentials:mac SSE (the
+    // roster response carries no Mac state).
+    if (cred.stagedMacId && !cred.list.some(p => p.profileId === cred.stagedMacId)) {
+      cred.stagedMacId = null;
+    }
+    if (this.els.accountSwitcher) this.els.accountSwitcher.hidden = false;
+    this._startAccountTick();
+    this.renderAccountSwitcher();
+    return true;
+  }
+
+  /**
+   * Render the chip (avatar initial, display name, next 5-hour reset
+   * countdown) and, when the panel is open, the row list and footer.
+   * Save enables only when a staged selection differs from the active
+   * account. Loading with an empty roster renders 3 skeleton rows; an
+   * empty roster renders the capture-current empty state.
+   * @returns {void}
+   */
+  renderAccountSwitcher() {
+    const els = this.els;
+    const cred = this.state.credentials;
+    if (!els.accountSwitcher) return;
+
+    // ── Chip ──
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const chipName = active ? this._accountDisplayName(active) : 'Unknown account';
+    if (els.accountChipAvatar) els.accountChipAvatar.textContent = active ? (chipName.charAt(0).toUpperCase() || '?') : '?';
+    if (els.accountChipLabel) els.accountChipLabel.textContent = chipName;
+    if (els.accountChipMeta) {
+      const fiveHour = active && active.usage && active.usage.five_hour;
+      if (fiveHour && fiveHour.resets_at) {
+        els.accountChipMeta.textContent = this._formatResetText(fiveHour.resets_at);
+        els.accountChipMeta.dataset.resetAt = fiveHour.resets_at;
+        els.accountChipMeta.hidden = false;
+        els.accountChipMeta.classList.toggle('is-stale', this._isUsageStale(active));
+      } else {
+        els.accountChipMeta.textContent = '';
+        delete els.accountChipMeta.dataset.resetAt;
+        els.accountChipMeta.hidden = true;
+      }
+    }
+    if (els.accountChip) els.accountChip.classList.toggle('is-applying', cred.applying);
+
+    // Header usage meter rides the exact same render path as the chip so it
+    // updates on initial load, refresh-usage, account switches, and both
+    // credentials:* SSE broadcasts without any extra wiring.
+    this.renderUsageMeter();
+
+    // Panel applying state is synced even while hidden so a panel closed
+    // mid-apply can never get stuck inert.
+    if (els.accountPanel) {
+      els.accountPanel.classList.toggle('is-applying', cred.applying);
+      try {
+        els.accountPanel.inert = cred.applying;
+      } catch (_) {
+        // inert unsupported: the is-applying class disables pointer events.
+      }
+    }
+
+    if (!els.accountPanel || els.accountPanel.hidden) return;
+
+    // ── Machines strip (PC / Mac locations) ──
+    // Rendered on every open-panel repaint so roster loads, mac-state
+    // fetches, and credentials:mac SSE all refresh it from one path.
+    this.renderMachinesStrip();
+
+    // ── Row list ──
+    if (cred.loading && cred.list.length === 0) {
+      // First load: skeleton rows, never spinners (design system rule).
+      els.accountPanelList.innerHTML = Array.from({ length: 3 }, () => `
+        <div class="account-row account-row-skeleton" aria-hidden="true">
+          <span class="skeleton-line account-skeleton-avatar"></span>
+          <span class="account-row-body">
+            <span class="skeleton-line" style="width: 55%"></span>
+            <span class="skeleton-line" style="width: 75%"></span>
+            <span class="skeleton-line" style="width: 40%"></span>
+          </span>
+        </div>
+      `).join('');
+    } else if (cred.list.length === 0) {
+      els.accountPanelList.innerHTML = `
+        <div class="account-empty">
+          <p>No saved credentials yet</p>
+          <button type="button" class="btn btn-primary btn-sm" id="account-capture-btn">Capture current account</button>
+        </div>`;
+    } else {
+      els.accountPanelList.innerHTML = cred.list.map(p => this.renderAccountRow(p)).join('');
+    }
+
+    // ── Footer ──
+    // Pending per-machine lines: exactly what Save will do, one line per
+    // machine. A staged row equal to that machine's current active account
+    // is a no-op and renders nothing.
+    const pcPendingRow = (cred.stagedId && cred.stagedId !== cred.activeId)
+      ? cred.list.find(p => p.profileId === cred.stagedId) : null;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    const macPendingRow = (cred.stagedMacId && cred.stagedMacId !== macActiveId)
+      ? cred.list.find(p => p.profileId === cred.stagedMacId) : null;
+    if (els.accountPending) {
+      const lines = [];
+      if (pcPendingRow) {
+        lines.push('<span class="account-pending-line"><span class="account-pending-key">PC:</span>'
+          + this.escapeHtml(this._accountDisplayName(pcPendingRow)) + '</span>');
+      }
+      if (macPendingRow) {
+        lines.push('<span class="account-pending-line"><span class="account-pending-key">Mac:</span>'
+          + this.escapeHtml(this._accountDisplayName(macPendingRow)) + '</span>');
+      }
+      els.accountPending.innerHTML = lines.join('');
+      els.accountPending.hidden = lines.length === 0;
+    }
+    if (els.accountSaveBtn) {
+      els.accountSaveBtn.disabled = !(pcPendingRow || macPendingRow) || cred.applying;
+      els.accountSaveBtn.textContent = cred.applying ? 'Applying' : 'Save';
+    }
+    // Footer fully disabled during the first-load skeleton state (6.4) and
+    // while a switch is applying.
+    const skeletonState = cred.loading && cred.list.length === 0;
+    if (els.accountCancelBtn) els.accountCancelBtn.disabled = cred.applying || skeletonState;
+    if (els.accountRefreshBtn) els.accountRefreshBtn.disabled = cred.loading || cred.applying;
+  }
+
+  /**
+   * Build the HTML for one account row: avatar, primary line (display name
+   * plus plan badge), secondary identity line (email is ALWAYS visible),
+   * usage mini-bars with reset texts, active pill / staged radio, and the
+   * rename pencil. Rows are div[role=option] rather than <button> because
+   * each row CONTAINS the pencil button and nested interactive elements
+   * are invalid HTML (browsers split them unpredictably).
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @returns {string} Row HTML string.
+   */
+  renderAccountRow(p) {
+    const cred = this.state.credentials;
+    const health = this.accountHealth(p);
+    const isDead = health === 'needs-re-login';
+    const isWarn = health === 'needs-attention';
+    const isActive = p.profileId === cred.activeId;
+    const isStaged = p.profileId === cred.stagedId;
+    const name = this._accountDisplayName(p);
+    const badge = this._accountPlanBadge(p);
+
+    // Identity always visible (design 2.2): named rows show the email as
+    // the secondary line; unnamed rows already show the email as primary,
+    // so their secondary is the uuid8 marker.
+    const email = p.email || '';
+    let secondary = '';
+    if (email && name !== email) secondary = email;
+    else if (email) secondary = (p.profileId || '').slice(0, 8) + ' unnamed';
+
+    let usageHtml = '';
+    // Per-model weekly windows (Opus / Fable) come from the weekly_scoped
+    // limits (see _accountModelWindow). Computed before the branch so an
+    // account with ONLY model-scoped data still renders usage rows.
+    const opusWin = this._accountModelWindow(p, 'Opus');
+    const fableWin = this._accountModelWindow(p, 'Fable');
+    if (isDead) {
+      usageHtml = '<span class="account-row-dead-note">needs re-login (stored token is dead)</span>';
+    } else if (p.usage && (p.usage.five_hour || p.usage.seven_day || opusWin || fableWin)) {
+      const stale = this._isUsageStale(p) ? ' is-stale' : '';
+      // Model rows render with absolute=true: Arthur wants the exact local
+      // reset time for per-model cooldowns, and these windows are WEEKLY
+      // scoped (a countdown in minutes would read as an hourly window).
+      usageHtml = `<span class="account-usage${stale}">`
+        + this._accountUsageRowHtml('5h', p.usage.five_hour, false)
+        + this._accountUsageRowHtml('week', p.usage.seven_day, true)
+        + (opusWin ? this._accountUsageRowHtml('Opus', opusWin, true, 'Opus weekly usage') : '')
+        + (fableWin ? this._accountUsageRowHtml('Fable', fableWin, true, 'Fable weekly usage') : '')
+        + '</span>';
+    } else {
+      usageHtml = '<span class="account-usage-unavailable">usage unavailable</span>';
+    }
+
+    const classes = ['account-row'];
+    if (isActive) classes.push('is-active');
+    if (isStaged && !isActive) classes.push('is-staged');
+    if (isDead) classes.push('is-dead');
+    if (isWarn) classes.push('is-warn');
+
+    const avatarChar = isDead ? '!' : (name.charAt(0).toUpperCase() || '?');
+    const deadTitle = isDead
+      ? ' title="Run /login as this account in a terminal; it is recaptured automatically"'
+      : '';
+
+    const sideBits = [];
+    // Per-machine location segments (PC / MAC) render before the pill and
+    // pencil; empty string while the Mac bridge is disabled, keeping the
+    // classic single-machine layout byte for byte.
+    const segments = this._machineSegmentsHtml(p);
+    if (segments) sideBits.push(segments);
+    if (isActive) sideBits.push('<span class="account-active-pill">ACTIVE</span>');
+    else if (!isDead) sideBits.push('<span class="account-row-radio" aria-hidden="true"></span>');
+    sideBits.push(`<button type="button" class="account-row-edit" title="Rename" aria-label="Rename ${this.escapeHtml(name)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg></button>`);
+
+    return `<div class="${classes.join(' ')}" role="option" data-profile-id="${this.escapeHtml(p.profileId)}" data-health="${health}" tabindex="${isDead ? '-1' : '0'}" aria-selected="${isStaged ? 'true' : 'false'}"${isDead ? ' aria-disabled="true"' : ''}${deadTitle}>
+      <span class="account-row-avatar" aria-hidden="true">${this.escapeHtml(avatarChar)}</span>
+      <span class="account-row-body">
+        <span class="account-row-primary">
+          <span class="account-row-name">${this.escapeHtml(name)}</span>
+          ${badge ? `<span class="account-plan-badge">${this.escapeHtml(badge)}</span>` : ''}
+        </span>
+        ${secondary ? `<span class="account-row-secondary">${this.escapeHtml(secondary)}</span>` : ''}
+        ${usageHtml}
+      </span>
+      <span class="account-row-side">${sideBits.join('')}</span>
+    </div>`;
+  }
+
+  /**
+   * Build the PC / MAC location segments for one account row. PC: filled
+   * when active on this machine, staged ring when selected for the PC.
+   * MAC states from the last inventory sweep: filled (is-on) = active on
+   * the Mac, outline (is-installed) = profile present but not active,
+   * dimmed (is-absent) = not on the Mac, dotted (is-unknown) = no sweep
+   * yet or Mac unreachable; staged ring when selected for the Mac. Each
+   * segment is a button because the two machines stage INDEPENDENTLY.
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @returns {string} Segments HTML, or '' while the Mac bridge is disabled.
+   */
+  _machineSegmentsHtml(p) {
+    if (!this._macEnabled()) return '';
+    const cred = this.state.credentials;
+    const ms = cred.macState;
+    const pcActive = p.profileId === cred.activeId;
+    const pcStaged = p.profileId === cred.stagedId;
+    let macClass = 'is-unknown';
+    let macTitle = 'Mac state unknown. Refresh to probe.';
+    if (ms && ms.reachable) {
+      if (ms.activeProfileId === p.profileId) {
+        macClass = 'is-on';
+        macTitle = 'Active on the Mac';
+      } else if ((ms.profiles || []).some(x => x && x.profileId === p.profileId)) {
+        macClass = 'is-installed';
+        macTitle = 'Installed on the Mac (not active). Click to activate it there on Save.';
+      } else {
+        macClass = 'is-absent';
+        macTitle = 'Not on the Mac. Click to send and activate it there on Save.';
+      }
+    } else if (ms && !ms.reachable) {
+      macTitle = 'Mac offline; state unknown. Staging still works and applies when it answers.';
+    }
+    const macStaged = p.profileId === cred.stagedMacId;
+    const pcTitle = pcActive ? 'Active on this PC' : 'Click to make it active on this PC on Save.';
+    return '<span class="account-row-machines">'
+      + '<button type="button" class="account-seg account-seg-pc '
+        + (pcActive ? 'is-on' : 'is-installed') + (pcStaged && !pcActive ? ' is-staged' : '')
+        + '" data-machine="pc" title="' + this.escapeHtml(pcTitle)
+        + '" aria-pressed="' + (pcActive || pcStaged ? 'true' : 'false') + '">PC</button>'
+      + '<button type="button" class="account-seg account-seg-mac '
+        + macClass + (macStaged ? ' is-staged' : '')
+        + '" data-machine="mac" title="' + this.escapeHtml(macTitle + (macStaged ? ' Staged: applied on Save.' : ''))
+        + '" aria-pressed="' + (macClass === 'is-on' || macStaged ? 'true' : 'false') + '">MAC</button>'
+      + '</span>';
+  }
+
+  /**
+   * Build one usage mini-bar row (5h, week, or a per-model weekly window):
+   * 4px track, colored fill, percent, and the reset text. Reset spans carry
+   * data-reset-at (and data-absolute for absolute lines) so the 60s tick
+   * can update the countdown text in place without a focus-stealing
+   * re-render.
+   * @param {string} keyLabel - Short window label shown left ('5h', 'week', 'Opus', 'Fable').
+   * @param {object|null} u - { utilization, resets_at } window object, or null.
+   * @param {boolean} absolute - Render the reset as an absolute day/time.
+   * @param {string} [titleText] - Optional hover tooltip prefix; the exact local
+   *   reset time is appended so hover always carries the full story.
+   * @returns {string} Row HTML, or '' when the window object is missing.
+   */
+  _accountUsageRowHtml(keyLabel, u, absolute, titleText) {
+    if (!u) return '';
+    const pct = Math.max(0, Math.min(100, Math.round(Number(u.utilization) || 0)));
+    const fillClass = this._usageFillClass(pct);
+    const resetText = u.resets_at ? this._formatResetText(u.resets_at, absolute) : '';
+    const resetAttrs = u.resets_at
+      ? ` data-reset-at="${this.escapeHtml(u.resets_at)}"${absolute ? ' data-absolute="1"' : ''}`
+      : '';
+    // Tooltips always spell out the EXACT local reset so a truncated inline
+    // reset text never hides the answer.
+    const titleAttr = titleText
+      ? ` title="${this.escapeHtml(titleText + (resetText ? '. ' + resetText : ''))}"`
+      : '';
+    return `<span class="account-usage-row"${titleAttr}>
+      <span class="account-usage-key">${this.escapeHtml(keyLabel)}</span>
+      <span class="account-usage-bar"><span class="account-usage-fill ${fillClass}" style="width:${pct}%"></span></span>
+      <span class="account-usage-pct">${pct}%</span>
+      <span class="account-usage-reset"${resetAttrs}>${this.escapeHtml(resetText)}</span>
+    </span>`;
+  }
+
+  /**
+   * Map a clamped utilization percent to its fill-color class. Thresholds
+   * live in the USAGE_PCT_MID / USAGE_PCT_HIGH class constants (design 6.3:
+   * green below 60, amber 60 to 85, red above 85) and are shared by the
+   * account panel mini-bars and the header usage meter so the two surfaces
+   * can never drift apart.
+   * @param {number} pct - Utilization percent, already clamped to 0..100.
+   * @returns {'u-low'|'u-mid'|'u-high'} CSS fill class.
+   */
+  _usageFillClass(pct) {
+    if (pct > CWMApp.USAGE_PCT_HIGH) return 'u-high';
+    if (pct >= CWMApp.USAGE_PCT_MID) return 'u-mid';
+    return 'u-low';
+  }
+
+  /**
+   * Extract one per-model usage window from a profile row. Primary source:
+   * the sanitized usage.limits[] rows where kind === 'weekly_scoped' and
+   * row.model matches the requested model name case-insensitively (the
+   * server maps scope.model.display_name onto row.model). Fallback: the
+   * top-level usage.seven_day_<model> window (e.g. seven_day_opus), which
+   * the endpoint sometimes populates instead. Both sources are WEEKLY
+   * windows; there is no per-model hourly data upstream, which is why every
+   * caller renders these with absolute reset times and weekly-labelled
+   * tooltips. Null-tolerant: malformed rows or missing usage return null.
+   * @param {object} p - Safe profile row from GET /api/credentials.
+   * @param {string} modelName - Model display name to look up (e.g. 'Opus', 'Fable').
+   * @returns {{utilization: number|null, resets_at: string|null}|null} Normalized window, or null.
+   */
+  _accountModelWindow(p, modelName) {
+    const usage = p && p.usage;
+    if (!usage || !modelName) return null;
+    const want = String(modelName).toLowerCase();
+    if (Array.isArray(usage.limits)) {
+      const row = usage.limits.find((l) => l && typeof l === 'object'
+        && l.kind === 'weekly_scoped'
+        && typeof l.model === 'string'
+        && l.model.toLowerCase() === want);
+      if (row && (typeof row.percent === 'number' || typeof row.resets_at === 'string')) {
+        return {
+          utilization: typeof row.percent === 'number' ? row.percent : null,
+          resets_at: typeof row.resets_at === 'string' ? row.resets_at : null,
+        };
+      }
+    }
+    // Top-level fallback (seven_day_opus / seven_day_sonnet today; the
+    // generic key means a future seven_day_<model> works without edits).
+    const fb = usage['seven_day_' + want];
+    if (fb && typeof fb === 'object'
+      && (typeof fb.utilization === 'number' || typeof fb.resets_at === 'string')) {
+      return {
+        utilization: typeof fb.utilization === 'number' ? fb.utilization : null,
+        resets_at: typeof fb.resets_at === 'string' ? fb.resets_at : null,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Build one compact meter bar row for the header usage meter (and its
+   * mobile mirror in the account sheet): short key, thin filled track,
+   * percent, and the EXACT local reset time (absolute, never a countdown,
+   * per Arthur's "exactly what time locally it will reset"). The reset span
+   * carries data-reset-at + data-absolute so the shared 60s tick refreshes
+   * it in place (matters at the moment a window rolls over to 'Resetting...').
+   * @param {string} keyLabel - Bar label ('5h', 'Opus', 'Fable').
+   * @param {object|null} u - { utilization, resets_at } window, or null.
+   * @param {string} titleText - Tooltip prefix stating the window scope
+   *   (session vs weekly); the local reset time is appended.
+   * @returns {string} Row HTML, or '' when the window object is missing.
+   */
+  _usageMeterRowHtml(keyLabel, u, titleText) {
+    if (!u) return '';
+    const pct = Math.max(0, Math.min(100, Math.round(Number(u.utilization) || 0)));
+    const fillClass = this._usageFillClass(pct);
+    const resetText = u.resets_at ? this._formatResetText(u.resets_at, true) : '';
+    const resetAttrs = u.resets_at
+      ? ` data-reset-at="${this.escapeHtml(u.resets_at)}" data-absolute="1"`
+      : '';
+    const titleAttr = titleText
+      ? ` title="${this.escapeHtml(titleText + (resetText ? '. ' + resetText : ''))}"`
+      : '';
+    return `<span class="usage-meter-row"${titleAttr}>
+      <span class="usage-meter-key">${this.escapeHtml(keyLabel)}</span>
+      <span class="usage-meter-bar"><span class="usage-meter-fill ${fillClass}" style="width:${pct}%"></span></span>
+      <span class="usage-meter-pct">${pct}%</span>
+      <span class="usage-meter-reset"${resetAttrs}>${this.escapeHtml(resetText)}</span>
+    </span>`;
+  }
+
+  /**
+   * Build the full bar stack for one profile's usage meter: the Session
+   * (5h) bar, which is the true account-wide cooldown, plus Opus and Fable
+   * bars sourced from their WEEKLY-scoped limits. Each bar carries its own
+   * exact local reset time; the tooltips name the window scope explicitly
+   * so weekly per-model data is never mislabelled as hourly. Bars with no
+   * data are simply omitted (no placeholders, no spinners).
+   * @param {object} p - Safe profile row (normally the ACTIVE account).
+   * @returns {string} Concatenated bar rows, or '' when no window has data.
+   */
+  _usageMeterBarsHtml(p) {
+    if (!p || !p.usage) return '';
+    const session = p.usage.five_hour || null;
+    const opusWin = this._accountModelWindow(p, 'Opus');
+    const fableWin = this._accountModelWindow(p, 'Fable');
+    return (session ? this._usageMeterRowHtml('5h', session, 'Session (5h) usage') : '')
+      + (opusWin ? this._usageMeterRowHtml('Opus', opusWin, 'Opus weekly usage') : '')
+      + (fableWin ? this._usageMeterRowHtml('Fable', fableWin, 'Fable weekly usage') : '');
+  }
+
+  /**
+   * Render the per-model usage meter for the ACTIVE account into both
+   * mounts: the header top-right widget (#usage-meter, desktop) and the
+   * account bottom-sheet mirror (#account-panel-meter, phone widths; CSS
+   * decides which mount is visible so both stay populated from one render).
+   * Hidden entirely when there is no active account, the active account is
+   * dead, or no usage window has data yet (never a spinner; the roster
+   * skeleton already covers first load). Called from renderAccountSwitcher
+   * so every chip update path (load, refresh, switch, SSE) repaints it.
+   * @returns {void}
+   */
+  renderUsageMeter() {
+    const els = this.els;
+    if (!els.usageMeter && !els.accountPanelMeter) return;
+    const cred = this.state.credentials;
+    const active = cred.list.find(x => x.profileId === cred.activeId) || null;
+    // A dead active account has no meaningful usage; hide rather than show
+    // stale bars that cannot refresh.
+    const usable = active && this.accountHealth(active) !== 'needs-re-login';
+    const barsHtml = usable ? this._usageMeterBarsHtml(active) : '';
+    const stale = usable ? this._isUsageStale(active) : false;
+    if (els.usageMeter) {
+      if (barsHtml) {
+        if (els.usageMeterBars) els.usageMeterBars.innerHTML = barsHtml;
+        els.usageMeter.hidden = false;
+        els.usageMeter.classList.toggle('is-stale', stale);
+      } else {
+        if (els.usageMeterBars) els.usageMeterBars.innerHTML = '';
+        els.usageMeter.hidden = true;
+      }
+    }
+    if (els.accountPanelMeter) {
+      if (barsHtml) {
+        // The sheet mirror adds a one-line scope note because touch devices
+        // have no hover tooltips to carry the weekly-vs-session nuance.
+        els.accountPanelMeter.innerHTML = barsHtml
+          + '<span class="account-panel-meter-note">5h is the session window. Opus and Fable are weekly limits.</span>';
+        els.accountPanelMeter.hidden = false;
+        els.accountPanelMeter.classList.toggle('is-stale', stale);
+      } else {
+        els.accountPanelMeter.innerHTML = '';
+        els.accountPanelMeter.hidden = true;
+      }
+    }
+  }
+
+  /**
+   * Map a profile row to a health enum: 'healthy', 'needs-attention', or
+   * 'needs-re-login'. ALL rendering keys off this single helper so a richer
+   * server-side field later is a one-line change here: a recognized string
+   * p.health is preferred when present; otherwise tokenDead:true maps to
+   * 'needs-re-login' and everything else to 'healthy'.
+   * @param {object} p - Safe profile row.
+   * @returns {'healthy'|'needs-attention'|'needs-re-login'} Health enum value.
+   */
+  accountHealth(p) {
+    if (p && typeof p.health === 'string') {
+      if (p.health === 'needs-re-login' || p.health === 'needs-attention' || p.health === 'healthy') {
+        return p.health;
+      }
+    }
+    return (p && p.tokenDead) ? 'needs-re-login' : 'healthy';
+  }
+
+  /**
+   * Client-side mirror of the server's displayNameFor fallback chain
+   * (design 2.2): displayName (already server-computed), else label, else
+   * email, else uuid8 + ' unnamed'. Guards missing fields so a row is
+   * never blank.
+   * @param {object} p - Safe profile row.
+   * @returns {string} Non-empty display name.
+   */
+  _accountDisplayName(p) {
+    if (!p) return 'Unknown';
+    if (p.displayName && String(p.displayName).trim()) return String(p.displayName).trim();
+    if (p.label && String(p.label).trim()) return String(p.label).trim();
+    if (p.email) return p.email;
+    return (p.profileId || '').slice(0, 8) + ' unnamed';
+  }
+
+  /**
+   * Plan badge text per design 6.2: subscriptionType 'max' with a rate
+   * limit tier containing '20x' renders 'max 20x'; team organizations
+   * render 'team'; otherwise the raw subscriptionType (may be '').
+   * @param {object} p - Safe profile row.
+   * @returns {string} Badge text, '' when nothing applies.
+   */
+  _accountPlanBadge(p) {
+    const sub = String(p.subscriptionType || '').toLowerCase();
+    const tier = String(p.rateLimitTier || '').toLowerCase();
+    const org = String(p.organizationType || '').toLowerCase();
+    if (sub === 'max' && tier.includes('20x')) return 'max 20x';
+    if (org.includes('team')) return 'team';
+    return sub;
+  }
+
+  /**
+   * Whether a profile's cached usage is stale (older than the server's
+   * 10-minute usage cache TTL) or missing entirely. Dead rows are never
+   * "stale" because they cannot be refreshed without a re-login.
+   * @param {object} p - Safe profile row.
+   * @returns {boolean} True when the panel-open auto-refresh should include this row.
+   */
+  _isUsageStale(p) {
+    if (!p || this.accountHealth(p) === 'needs-re-login') return false;
+    const fetchedAt = p.usage && p.usage.fetchedAt;
+    if (!fetchedAt) return true;
+    const age = Date.now() - new Date(fetchedAt).getTime();
+    return !(age < CWMApp.CRED_USAGE_STALE_MS);
+  }
+
+  /**
+   * Stage an account row for the Save button. Staging the active row
+   * clears the selection (it means "keep current"); needs-re-login rows
+   * are not selectable at all.
+   * @param {string} profileId - accountUuid of the clicked row.
+   * @returns {void}
+   */
+  stageAccount(profileId) {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const p = cred.list.find(x => x.profileId === profileId);
+    if (!p) return;
+    if (this.accountHealth(p) === 'needs-re-login') return;
+    cred.stagedId = (profileId === cred.activeId) ? null : profileId;
+    this.renderAccountSwitcher();
+    // The re-render rebuilt the rows; put keyboard focus back on the row
+    // the user acted on so arrow-key navigation continues where it was.
+    try {
+      const escaped = (window.CSS && CSS.escape) ? CSS.escape(profileId) : profileId;
+      const rowEl = this.els.accountPanelList.querySelector(`.account-row[data-profile-id="${escaped}"]`);
+      if (rowEl) rowEl.focus({ preventScroll: true });
+    } catch (_) {
+      // Focus restoration is cosmetic; never fatal.
+    }
+  }
+
+  /**
+   * Stage an account for the MAC on the next Save, independently of the PC
+   * staging. Staging the Mac-active row, or re-clicking the row already
+   * staged, clears the Mac selection (toggle = "keep current"). Dead rows
+   * are never stageable: the bridge refuses to ship a dead token anyway.
+   * @param {string} profileId - accountUuid of the clicked row's account.
+   * @returns {void}
+   */
+  stageMacAccount(profileId) {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const p = cred.list.find(x => x.profileId === profileId);
+    if (!p) return;
+    if (this.accountHealth(p) === 'needs-re-login') return;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    cred.stagedMacId = (cred.stagedMacId === profileId || profileId === macActiveId) ? null : profileId;
+    this.renderAccountSwitcher();
+    // The re-render rebuilt the rows; put keyboard focus back on the MAC
+    // segment the user acted on so tab order continues where it was.
+    try {
+      const escaped = (window.CSS && CSS.escape) ? CSS.escape(profileId) : profileId;
+      const segEl = this.els.accountPanelList.querySelector(`.account-row[data-profile-id="${escaped}"] .account-seg-mac`);
+      if (segEl) segEl.focus({ preventScroll: true });
+    } catch (_) {
+      // Focus restoration is cosmetic; never fatal.
+    }
+  }
+
+  /**
+   * Rename a saved credential via the existing prompt modal. Empty submit
+   * clears the label (display falls back to email / uuid8 per design 2.2).
+   * The SSE credentials:changed broadcast is the primary re-render path;
+   * the route's list response is applied too so a dropped SSE connection
+   * cannot leave a stale label on screen.
+   * @param {object} p - Safe profile row being renamed.
+   * @returns {Promise<void>}
+   */
+  async renameAccount(p) {
+    if (!p || !p.profileId) return;
+    const result = await this.showPromptModal({
+      title: 'Rename account',
+      fields: [{
+        key: 'label',
+        label: 'Label',
+        value: p.label || '',
+        placeholder: p.email || 'Label',
+        maxlength: 60,
+      }],
+      confirmText: 'Save',
+    });
+    if (!result) return; // cancelled
+    const label = (result.label || '').trim().slice(0, 60);
+    if (label === (p.label || '')) return; // unchanged: skip the round-trip
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    try {
+      const resp = await this._credApi('PUT', `/api/credentials/${encodeURIComponent(p.profileId)}/label`, { label });
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Rename failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+      this.showToast(label ? `Renamed to ${label}` : 'Label cleared', 'success');
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Rename failed: could not reach the server', 'error');
+    }
+  }
+
+  /**
+   * Empty-state CTA: snapshot the machine's currently active Claude login
+   * via POST /api/credentials/capture, with an optional label prompt
+   * (defaults to the active account's email when known).
+   * @returns {Promise<void>}
+   */
+  async captureCurrentAccount() {
+    const cred = this.state.credentials;
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const result = await this.showPromptModal({
+      title: 'Capture current account',
+      fields: [{
+        key: 'label',
+        label: 'Label (optional)',
+        value: (active && active.email) || '',
+        placeholder: 'e.g. Personal',
+        maxlength: 60,
+      }],
+      confirmText: 'Capture',
+    });
+    if (!result) return; // cancelled
+    const label = (result.label || '').trim().slice(0, 60);
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    try {
+      const resp = await this._credApi('POST', '/api/credentials/capture', label ? { label } : {});
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Capture failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this._applyCredListResponse(resp.data || {});
+      this.showToast('Current account captured', 'success');
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Capture failed: could not reach the server', 'error');
+    }
+  }
+
+  /**
+   * Open the Mac sync settings modal (gear in the account panel header):
+   * GET /api/credentials/mac-config, edit enable/host/user/profileTool/
+   * postSwapCommand in the shared prompt modal, PUT the result back, then
+   * refresh the roster so cred.mac (and the strip/segments) update. This is
+   * the no-code-edit affordance for retargeting the bridge (e.g. the Mac
+   * renamed from arthurs-mac-mini to alloy). Host and user are validated
+   * server-side against the ssh option-injection charset; the server's
+   * VALIDATION message is surfaced as the error toast.
+   * @returns {Promise<void>} Never rejects; failures toast.
+   */
+  async openMacConfigModal() {
+    let cfg = { enabled: false, host: '', user: '', profileTool: '', postSwapCommand: '' };
+    try {
+      const resp = await this._credApi('GET', '/api/credentials/mac-config');
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Could not load Mac config (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      cfg = { ...cfg, ...(resp.data || {}) };
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Could not load Mac config: server unreachable', 'error');
+      return;
+    }
+    const result = await this.showPromptModal({
+      title: 'Mac sync settings',
+      headerHtml: '<p class="account-modal-hint">Pushes the selected account to the Mac over SSH (key auth, Tailscale). '
+        + 'Nothing moves until this is enabled and Save is pressed in the account panel.</p>',
+      fields: [
+        { key: 'enabled', type: 'checkbox', label: 'Enable Mac credential sync', value: !!cfg.enabled },
+        { key: 'host', label: 'Mac host (Tailscale name or IP)', value: cfg.host || '', placeholder: 'alloy', required: true },
+        { key: 'user', label: 'SSH user', value: cfg.user || '', placeholder: 'arthur', required: true },
+        { key: 'profileTool', label: 'Profile tool path (optional)', value: cfg.profileTool || '', placeholder: '$HOME/.local/bin/claude-profile' },
+        { key: 'postSwapCommand', label: 'Post-swap command (optional)', value: cfg.postSwapCommand || '', placeholder: 'runs on the Mac after each swap' },
+      ],
+      confirmText: 'Save',
+    });
+    if (!result) return; // cancelled
+    const body = {
+      enabled: !!result.enabled,
+      host: String(result.host || '').trim(),
+      user: String(result.user || '').trim(),
+      profileTool: String(result.profileTool || '').trim(),
+      postSwapCommand: String(result.postSwapCommand || '').trim(),
+    };
+    try {
+      const resp = await this._credApi('PUT', '/api/credentials/mac-config', body);
+      if (!resp.ok) {
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Saving Mac config failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      this.showToast(body.enabled ? `Mac sync enabled (${body.user}@${body.host})` : 'Mac sync saved (disabled)', 'success');
+      // Roster reload refreshes cred.mac so the machines strip and MAC
+      // segments appear/disappear without a page reload.
+      await this.loadCredentials();
+      // Kick a live Mac probe when enabling (guarded: the probe method ships
+      // with the mac-state phase and this modal must never hard-depend on it).
+      if (body.enabled && typeof this.loadMacState === 'function') this.loadMacState({ probe: true });
+    } catch (err) {
+      if (err && err.message === 'Unauthorized') return;
+      this.showToast('Saving Mac config failed: server unreachable', 'error');
+    }
+  }
+
+  /**
+   * Whether the Mac credential bridge is configured AND enabled, from the
+   * roster response's mac summary. Gates the machines strip, the mac-state
+   * fetches, and (once shipped) the per-row MAC segments; while false the
+   * panel keeps today's zero-clutter single-machine layout.
+   * @returns {boolean} True when Mac state should be shown and probed.
+   */
+  _macEnabled() {
+    const mac = this.state.credentials.mac;
+    return !!(mac && mac.configured && mac.enabled);
+  }
+
+  /**
+   * Load the Mac inventory state for the machines strip. probe:false serves
+   * the server's cached sweep (GET, instant, zero SSH by construction);
+   * probe:true asks the server for ONE live inventory sweep (POST, a single
+   * SSH round trip on the server side). Never rejects; failures keep the
+   * previous state on screen because an offline or unreachable Mac is a
+   * STATE the strip renders, not an error to toast about.
+   * @param {object} [opts] - Options bag.
+   * @param {boolean} [opts.probe=false] - Force a live sweep instead of the cache.
+   * @returns {Promise<void>} Never rejects.
+   */
+  async loadMacState({ probe = false } = {}) {
+    const cred = this.state.credentials;
+    if (!this.els.accountSwitcher) return;
+    if (cred.macStateLoading) return;
+    cred.macStateLoading = true;
+    this.renderMachinesStrip();
+    try {
+      const resp = probe
+        ? await this._credApi('POST', '/api/credentials/mac-state/refresh', {})
+        : await this._credApi('GET', '/api/credentials/mac-state');
+      if (resp.ok && resp.data) {
+        if (resp.data.state !== undefined) cred.macState = resp.data.state || null;
+        cred.macStale = !!resp.data.stale;
+        if (resp.data.mac) cred.mac = resp.data.mac;
+      }
+    } catch (_) {
+      // Network failure or auth logout: keep whatever state was on screen.
+    } finally {
+      cred.macStateLoading = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Panel-open Mac freshness policy: hydrate from the server's cached sweep
+   * first (instant), then fire ONE live probe only when that cache is
+   * absent or older than MAC_STATE_STALE_MS. Mirrors the stale-usage
+   * auto-refresh so opening the panel never triggers SSH when the cache is
+   * fresh. Fire and forget; never blocks the panel.
+   * @returns {Promise<void>} Never rejects.
+   */
+  async _autoRefreshMacState() {
+    const cred = this.state.credentials;
+    if (!this._macEnabled()) return;
+    if (!cred.macState) {
+      await this.loadMacState(); // server cache first: instant, no SSH
+    }
+    const checkedAtMs = cred.macState && cred.macState.checkedAt
+      ? Date.parse(cred.macState.checkedAt) : NaN;
+    const fresh = Number.isFinite(checkedAtMs)
+      && (Date.now() - checkedAtMs) < CWMApp.MAC_STATE_STALE_MS;
+    if (!fresh || cred.macStale) this.loadMacState({ probe: true });
+  }
+
+  /**
+   * Render the machines strip (#account-machines): which account is live on
+   * which machine. Left pill is this PC with its active account's display
+   * name; right pill is the Mac with the matched profile's display name, or
+   * its offline / checking / unknown / not-configured state. Hidden
+   * entirely while the Mac bridge is disabled. Pure render from state
+   * (roster + macState); safe to call on every panel repaint.
+   * @returns {void}
+   */
+  renderMachinesStrip() {
+    const el = this.els.accountMachines;
+    if (!el) return;
+    const cred = this.state.credentials;
+    if (!this._macEnabled()) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    const active = cred.list.find(p => p.profileId === cred.activeId) || null;
+    const pcName = active ? this._accountDisplayName(active) : 'unknown';
+    const ms = cred.macState;
+    let macText = '';
+    let macClass = '';
+    let macTitle = '';
+    if (cred.macStateLoading && !ms) {
+      // First probe in flight: quiet pulse, never a spinner.
+      macText = 'checking';
+      macClass = 'is-checking';
+      macTitle = 'Probing the Mac over SSH.';
+    } else if (!ms) {
+      macText = 'unknown';
+      macClass = 'is-unknown';
+      macTitle = 'No Mac probe yet. Refresh to check.';
+    } else if (!ms.reachable) {
+      macText = 'offline';
+      macClass = 'is-offline';
+      macTitle = 'The Mac did not answer over SSH'
+        + (ms.checkedAt ? ' (checked ' + new Date(ms.checkedAt).toLocaleTimeString() + ')' : '') + '.';
+    } else {
+      const matched = ms.activeProfileId
+        ? cred.list.find(p => p.profileId === ms.activeProfileId) : null;
+      if (matched) {
+        macText = this._accountDisplayName(matched);
+        macClass = 'is-matched';
+      } else if (ms.activeName) {
+        // A profile is active on the Mac but no local snapshot matches its
+        // name; show the raw remote name so nothing is silently hidden.
+        macText = ms.activeName;
+        macClass = 'is-unmatched';
+        macTitle = 'The Mac runs a profile with no matching saved account here.';
+      } else {
+        macText = 'no profile';
+        macClass = 'is-none';
+        macTitle = 'The Mac is reachable but no claude-profile is active.';
+      }
+      if (!macTitle && ms.checkedAt) {
+        macTitle = 'Checked ' + new Date(ms.checkedAt).toLocaleTimeString() + '.';
+      }
+    }
+    el.innerHTML =
+      '<span class="machine-pill machine-pill-pc" title="Active on this PC">'
+        + '<span class="machine-pill-key">PC</span>'
+        + '<span class="machine-pill-val">' + this.escapeHtml(pcName) + '</span>'
+      + '</span>'
+      + '<span class="machine-pill machine-pill-mac ' + macClass + '"'
+        + (macTitle ? ' title="' + this.escapeHtml(macTitle) + '"' : '') + '>'
+        + '<span class="machine-pill-key">Mac</span>'
+        + '<span class="machine-pill-val">' + this.escapeHtml(macText) + '</span>'
+      + '</span>';
+    el.hidden = false;
+  }
+
+  /**
+   * Commit the staged selections, machine by machine: confirm once with a
+   * PC:/Mac: summary, POST /api/credentials/apply (legacy {profileId} body
+   * when only the PC is staged so old servers keep working; the {pc, mac}
+   * shape otherwise), then toast each machine's outcome from the response's
+   * `machines` object and offer a session restart only when the PC login
+   * actually changed. While the request is in flight the panel is inert
+   * and Save reads "Applying" (no spinner, per design system rules). A
+   * failed machine keeps its staged selection so Save can retry it; a
+   * succeeded machine clears its own.
+   * @returns {Promise<void>}
+   */
+  async applyStagedAccount() {
+    const cred = this.state.credentials;
+    if (cred.applying) return;
+    const pcTargetRow = (cred.stagedId && cred.stagedId !== cred.activeId)
+      ? cred.list.find(p => p.profileId === cred.stagedId) : null;
+    const macActiveId = (cred.macState && cred.macState.activeProfileId) || null;
+    const macTargetRow = (cred.stagedMacId && cred.stagedMacId !== macActiveId)
+      ? cred.list.find(p => p.profileId === cred.stagedMacId) : null;
+    if (!pcTargetRow && !macTargetRow) return;
+
+    // Restart semantics note from the design doc (section 4.3), surfaced in
+    // the confirm so the user knows running sessions keep the old login.
+    // Only relevant when the PC login itself changes.
+    const restartNote = 'New sessions use this account immediately. Running Claude sessions keep the previous account until restarted.';
+    const parts = [];
+    if (pcTargetRow) {
+      parts.push(`PC: <strong>${this.escapeHtml(this._accountDisplayName(pcTargetRow))}</strong> (${this.escapeHtml(pcTargetRow.email || 'no email on record')})`);
+    }
+    if (macTargetRow) {
+      parts.push(`Mac: <strong>${this.escapeHtml(this._accountDisplayName(macTargetRow))}</strong> (${this.escapeHtml(macTargetRow.email || 'no email on record')})`);
+    }
+    const confirmed = await this.showConfirmModal({
+      title: 'Switch Claude account?',
+      message: parts.join('<br>') + (pcTargetRow ? `<br><br>${restartNote}` : ''),
+      confirmText: 'Switch',
+    });
+    if (!confirmed) return;
+
+    // Body shape: legacy {profileId} when only the PC is staged (old
+    // servers understand it; new servers treat it identically), the
+    // {pc, mac} per-machine shape whenever the Mac is involved.
+    const body = macTargetRow
+      ? { ...(pcTargetRow ? { pc: pcTargetRow.profileId } : {}), mac: macTargetRow.profileId }
+      : { profileId: pcTargetRow.profileId, mirrorToMac: false };
+
+    cred.applying = true;
+    this._credSelfActionUntil = Date.now() + CWMApp.CRED_SELF_ACTION_MS;
+    this.renderAccountSwitcher();
+    try {
+      const resp = await this._credApi('POST', '/api/credentials/apply', body);
+      if (!resp.ok) {
+        // structuredError shape { error, code, message, retryable }: the
+        // human message is the toast. Panel stays open, staging preserved.
+        const msg = (resp.data && (resp.data.message || resp.data.error)) || `Switch failed (${resp.status})`;
+        this.showToast(msg, 'error');
+        return;
+      }
+      const result = resp.data || {};
+      const machines = result.machines || {};
+      // Per-machine outcomes, with a fallback for old servers that predate
+      // `machines`: synthesize the PC outcome from the legacy fields.
+      const pcOut = machines.pc
+        || (pcTargetRow ? { requested: true, applied: !!result.applied, alreadyActive: !!result.alreadyActive } : null);
+      const macOut = machines.mac || null;
+      let pcApplied = false;
+      if (pcTargetRow && pcOut) {
+        const name = this._accountDisplayName(pcTargetRow);
+        if (pcOut.applied || pcOut.alreadyActive) {
+          cred.activeId = pcTargetRow.profileId;
+          cred.stagedId = null;
+          pcApplied = pcOut.applied === true;
+          this.showToast(
+            pcOut.alreadyActive ? `${name} was already active on the PC` : `PC switched to ${name}`,
+            'success'
+          );
+        } else {
+          // Failed PC apply keeps its staged selection for a retry.
+          this.showToast(`PC switch failed: ${pcOut.message || pcOut.error || 'unknown error'}`, 'error');
+        }
+      }
+      if (macTargetRow && macOut) {
+        const name = this._accountDisplayName(macTargetRow);
+        if (macOut.applied) {
+          cred.stagedMacId = null;
+          this.showToast(`Mac switched to ${name}`, 'success');
+          if (macOut.warning) this.showToast(`Mac note: ${macOut.warning}`, 'warning');
+        } else {
+          this.showToast(`Mac switch failed: ${macOut.message || macOut.error || 'unknown error'}`, 'error');
+        }
+      } else if (macTargetRow && !macOut) {
+        // Old server without per-machine apply support.
+        this.showToast('This server does not support Mac apply yet; update the workbook server and retry.', 'warning');
+      }
+      // Legacy mirror warning path (old servers, mirror-checkbox era).
+      if (!macOut && result.mac && result.mac.attempted && !result.mac.mirrored) {
+        this.showToast(`Mac mirror failed: ${result.mac.message || result.mac.error || 'unknown error'}`, 'warning');
+      }
+      cred.applying = false;
+      // Close only when nothing is left staged; otherwise stay open so the
+      // failed machine can be retried or restaged.
+      const allDone = (!pcTargetRow || cred.stagedId === null) && (!macTargetRow || cred.stagedMacId === null);
+      if (allDone) this._closeAccountPanel();
+      this.renderAccountSwitcher();
+      // Background roster refresh (isActive flags, usage, mac summary).
+      this.loadCredentials();
+      // Offer the restart; never auto-restart (design decision 10.9). The
+      // skipConfirm flag avoids a double prompt: this modal IS the confirm.
+      if (pcApplied) {
+        const restart = await this.showConfirmModal({
+          title: 'Restart sessions?',
+          message: 'Restart running sessions now so they pick up the new login?',
+          confirmText: 'Restart sessions',
+        });
+        if (restart) await this.restartAllSessions({ skipConfirm: true });
+      }
+    } catch (err) {
+      if (!(err && err.message === 'Unauthorized')) {
+        this.showToast('Switch failed: could not reach the server', 'error');
+      }
+    } finally {
+      cred.applying = false;
+      this.renderAccountSwitcher();
+    }
+  }
+
+  /**
+   * Open the account panel: render, arm the mobile bottom-sheet chrome
+   * (backdrop, scroll lock, header stacking lift), and auto-refresh stale
+   * usage once per open. No-op when already open.
+   * @returns {void}
+   */
+  _openAccountPanel() {
+    const els = this.els;
+    if (!els.accountPanel || !els.accountPanel.hidden) return;
+    els.accountPanel.hidden = false;
+    els.accountChip.setAttribute('aria-expanded', 'true');
+    // sheet-open reuses the existing mobile scroll lock; account-sheet-open
+    // lifts the header's stacking context above the mobile tab bar and the
+    // backdrop (see styles-mobile.css). Both classes are inert on desktop.
+    document.body.classList.add('sheet-open', 'account-sheet-open');
+    this._ensureAccountBackdrop();
+    this.renderAccountSwitcher();
+    // Stale-usage auto refresh, once per open (design 6.4). The empty-body
+    // refresh honors the server-side cache TTL, so only genuinely stale
+    // snapshots actually hit the network.
+    const cred = this.state.credentials;
+    if (!cred.loading && cred.list.some(p => this._isUsageStale(p))) {
+      this.loadCredentials({ refresh: true });
+    }
+    // Mac freshness: hydrate from the server cache, then live-probe only
+    // when the last sweep is older than MAC_STATE_STALE_MS. No-op while
+    // the bridge is disabled.
+    this._autoRefreshMacState();
+  }
+
+  /**
+   * Close the account panel and tear down the mobile sheet chrome. Safe to
+   * call when already closed (also used from logout()).
+   * @returns {void}
+   */
+  _closeAccountPanel() {
+    const els = this.els;
+    if (els.accountPanel) els.accountPanel.hidden = true;
+    if (els.accountChip) els.accountChip.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('sheet-open', 'account-sheet-open');
+    this._removeAccountBackdrop();
+  }
+
+  /**
+   * Create the mobile backdrop behind the bottom sheet (dim, tap to close).
+   * Created lazily on open and removed on close; styles-mobile.css shows it
+   * only at phone widths, so on desktop it exists but renders nothing (a
+   * desktop base rule also forces display:none so it takes zero layout space).
+   * @returns {void}
+   */
+  _ensureAccountBackdrop() {
+    if (this._accountBackdrop) return;
+    const bd = document.createElement('div');
+    bd.className = 'account-panel-backdrop';
+    bd.addEventListener('click', () => this._closeAccountPanel());
+    // Mount the backdrop inside the account switcher (the panel's own parent),
+    // NOT document.body. WHY: on mobile, .app is position:fixed (styles.css
+    // "app never exceeds viewport" rule), and a fixed element ALWAYS forms a
+    // stacking context. The panel lives inside .app, so a body-level backdrop
+    // is a sibling of .app and paints over the entire .app subtree (backdrop
+    // z-index 10000 beats .app's effective z-index auto), dimming the sheet and
+    // stealing every tap even though the header is lifted to z-index 10001,
+    // because that lift only reorders inside .app and cannot escape it. Placing
+    // the backdrop beside the panel puts both in the SAME (header) stacking
+    // context, where panel z-index 10001 > backdrop z-index 10000 is a direct,
+    // robust comparison that no longer depends on .app's stacking context. Falls
+    // back to <body> if the switcher element is somehow missing.
+    const mount = (this.els && this.els.accountSwitcher) || document.body;
+    mount.appendChild(bd);
+    this._accountBackdrop = bd;
+  }
+
+  /**
+   * Remove the mobile backdrop if present.
+   * @returns {void}
+   */
+  _removeAccountBackdrop() {
+    if (this._accountBackdrop) {
+      this._accountBackdrop.remove();
+      this._accountBackdrop = null;
+    }
+  }
+
+  /**
+   * Move keyboard focus between selectable account rows (roving focus).
+   * Wraps at both ends; enters from the chip land on the first/last row.
+   * @param {number} dir - +1 for ArrowDown, -1 for ArrowUp.
+   * @returns {void}
+   */
+  _moveAccountFocus(dir) {
+    if (!this.els.accountPanelList) return;
+    const rows = Array.from(this.els.accountPanelList.querySelectorAll('.account-row[tabindex="0"]'));
+    if (rows.length === 0) return;
+    const idx = rows.indexOf(document.activeElement);
+    let next;
+    if (idx === -1) next = dir > 0 ? rows[0] : rows[rows.length - 1];
+    else next = rows[(idx + dir + rows.length) % rows.length];
+    if (next) next.focus();
+  }
+
+  /**
+   * Start the single 60-second countdown tick. Idempotent; started when the
+   * switcher first becomes visible and cleared on logout (design 6.2).
+   * @returns {void}
+   */
+  _startAccountTick() {
+    if (this._accountTickTimer) return;
+    this._accountTickTimer = setInterval(() => this._tickAccountCountdowns(), CWMApp.CRED_TICK_MS);
+  }
+
+  /**
+   * Stop the countdown tick (logout / teardown).
+   * @returns {void}
+   */
+  _stopAccountTick() {
+    if (this._accountTickTimer) {
+      clearInterval(this._accountTickTimer);
+      this._accountTickTimer = null;
+    }
+  }
+
+  /**
+   * Re-render every visible reset countdown in place. Updates textContent
+   * on the data-reset-at spans (chip meta + open panel rows + the header
+   * usage meter) instead of a full re-render, so keyboard focus and scroll
+   * position are preserved. The meter mounts live outside the switcher
+   * subtree, so they are ticked as their own scopes with the same guard
+   * (skip while hidden; absolute texts only change at the reset moment).
+   * @returns {void}
+   */
+  _tickAccountCountdowns() {
+    const scopes = [this.els.accountSwitcher, this.els.usageMeter, this.els.accountPanelMeter];
+    scopes.forEach(scope => {
+      if (!scope || scope.hidden) return;
+      scope.querySelectorAll('[data-reset-at]').forEach(el => {
+        el.textContent = this._formatResetText(el.dataset.resetAt, el.dataset.absolute === '1');
+      });
+    });
+  }
+
+  /**
+   * Format a millisecond duration into a human-readable reset countdown.
+   * Matches Anthropic dashboard format: "Resets in 2 hr 32 min", "Resets Thu 5:00 PM"
+   * @param {string} resetAt - ISO timestamp of reset
+   * @param {boolean} [absolute] - Show absolute day/time instead of countdown
+   * @returns {string} Formatted reset text
+   */
+  _formatResetText(resetAt, absolute) {
+    if (!resetAt) return '';
+    const diffMs = new Date(resetAt).getTime() - Date.now();
+    if (diffMs <= 0) return 'Resetting...';
+
+    if (absolute) {
+      const d = new Date(resetAt);
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const hr = d.getHours();
+      const ampm = hr >= 12 ? 'PM' : 'AM';
+      const h12 = hr % 12 || 12;
+      const min = d.getMinutes().toString().padStart(2, '0');
+      return `Resets ${days[d.getDay()]} ${h12}:${min} ${ampm}`;
+    }
+
+    const hrs = Math.floor(diffMs / 3600000);
+    const mins = Math.floor((diffMs % 3600000) / 60000);
+    if (hrs > 0) return `Resets in ${hrs} hr ${mins} min`;
+    return `Resets in ${mins} min`;
   }
 
 
@@ -8867,10 +10332,13 @@ class CWMApp {
         }
         const tag = f.type === 'textarea' ? 'textarea' : 'input';
         const typeAttr = f.type === 'textarea' ? '' : `type="${f.type || 'text'}"`;
+        // Additive: fields may declare a numeric maxlength (e.g. the credential
+        // label rename caps at 60 chars to match the server-side VALIDATION).
+        const maxlenAttr = f.maxlength ? `maxlength="${parseInt(f.maxlength, 10)}"` : '';
         bodyHtml += `
           <div class="input-group">
             <label class="input-label" for="modal-field-${f.key}">${f.label}</label>
-            <${tag} id="modal-field-${f.key}" class="input" ${typeAttr}
+            <${tag} id="modal-field-${f.key}" class="input" ${typeAttr} ${maxlenAttr}
               placeholder="${this.escapeHtml(f.placeholder || '')}"
               value="${tag === 'input' ? this.escapeHtml(f.value || '') : ''}"
               ${f.required ? 'required' : ''}
@@ -9478,6 +10946,78 @@ class CWMApp {
           const stopBtn = document.getElementById('named-tunnel-stop-btn');
           if (startBtn) startBtn.disabled = data.running;
           if (stopBtn) stopBtn.disabled = !data.running;
+        }
+        break;
+      }
+      case 'credentials:changed': {
+        // Credential switcher (design doc section 5): the machine-wide Claude
+        // login changed, or a snapshot was captured/renamed/deleted. These
+        // cases MUST exist here; without them the default branch below would
+        // turn every credentials broadcast into a full loadAll() reload storm.
+        // Payload rides at data.data, same convention as docs:updated.
+        const payload = (data && data.data) || {};
+        const cred = this.state.credentials;
+        const activeChanged = payload.activeProfileId !== undefined &&
+          payload.activeProfileId !== cred.activeId;
+        // A different account went live: any pending selection is stale.
+        if (activeChanged) cred.stagedId = null;
+        // Toast only when the change came from ANOTHER client. Our own
+        // mutations arm _credSelfActionUntil right before the request, so
+        // broadcasts landing inside that window are self-echoes.
+        const fromSelf = this._credSelfActionUntil && Date.now() < this._credSelfActionUntil;
+        if (!fromSelf) {
+          if (payload.renamed) {
+            this.showToast('A saved Claude account was renamed', 'info');
+          } else if (payload.captured) {
+            this.showToast('Current Claude account was captured', 'info');
+          } else if (payload.deleted) {
+            this.showToast('A saved Claude account was removed', 'info');
+          } else if (activeChanged) {
+            const who = payload.email ? ` to ${payload.email}` : '';
+            this.showToast(`Claude account switched${who} from another client`, 'info');
+          }
+        }
+        // Re-fetch the safe roster so chip, rows and mac config all refresh.
+        // loadCredentials() re-renders and never throws (graceful degrade).
+        this.loadCredentials();
+        break;
+      }
+      case 'credentials:usage': {
+        // Usage refresh completed (always client-triggered on the server
+        // side). Merge the returned safe rows into local state by profileId
+        // and re-render so mini-bars and reset countdowns update in place.
+        const payload = (data && data.data) || {};
+        const cred = this.state.credentials;
+        if (Array.isArray(payload.profiles) && payload.profiles.length > 0) {
+          const byId = new Map(payload.profiles.map(p => [p.profileId, p]));
+          cred.list = cred.list.map(p => byId.get(p.profileId) || p);
+          // Any brand-new profiles (captured elsewhere) get appended.
+          payload.profiles.forEach(p => {
+            if (!cred.list.some(x => x.profileId === p.profileId)) cred.list.push(p);
+          });
+          this.renderAccountSwitcher();
+        }
+        break;
+      }
+      case 'credentials:mac': {
+        // A Mac inventory sweep completed (this client's refresh or another
+        // client's). Payload is the sanitized cache: names and uuids ONLY,
+        // never token material (setMacState whitelists server-side). Adopt
+        // it and repaint the strip; the case MUST exist here or the default
+        // branch would turn every sweep into a full loadAll() reload.
+        const payload = (data && data.data) || {};
+        if (payload.state !== undefined) {
+          const cred = this.state.credentials;
+          cred.macState = payload.state || null;
+          cred.macStale = false;
+          // Staging hygiene: the staged Mac row just became Mac-active
+          // (this client's Save or another client's), so the selection is
+          // now a no-op and clears.
+          if (cred.macState && cred.macState.activeProfileId
+            && cred.stagedMacId === cred.macState.activeProfileId) {
+            cred.stagedMacId = null;
+          }
+          this.renderAccountSwitcher();
         }
         break;
       }
@@ -12007,7 +13547,13 @@ class CWMApp {
     switch (viewType) {
       case 'tasks-git':
         await this.renderTasksGitPanel(container);
-        this._paneRefreshTimers[slotIdx] = setInterval(() => this.renderTasksGitPanel(container), 10000);
+        // Same guard as the git tasks tab: never poll while the browser tab is
+        // hidden, and use the shared, less-aggressive cadence, so a parked
+        // git pane stops spawning git.exe + conhost every 10s on Windows.
+        this._paneRefreshTimers[slotIdx] = setInterval(() => {
+          if (document.hidden) return;
+          this.renderTasksGitPanel(container);
+        }, CWMApp.GIT_PANEL_POLL_MS);
         break;
       case 'tasks-td':
         await this.renderTasksTdPanel(container);
@@ -18797,6 +20343,20 @@ class CWMApp {
       if (runningSessions.length < 2) {
         this._currentConflicts = [];
         this._updateConflictBadge(0);
+        return;
+      }
+
+      // Only run the git-based per-workspace scan when the conflict center is
+      // actually open. That endpoint runs `git status` for EVERY running
+      // session at once, and on Windows each spawn flashes a console window
+      // (OpenConsole / conhost). Firing it on the 60s background poll produced
+      // the burst of "popping up terminals" (8+ git.exe + terminal windows
+      // every minute) and a steady lag. The background poll now relies on the
+      // JSONL-based check below, which spawns nothing; the git scan runs only
+      // on demand, when the user opens the conflict center (which sets the
+      // flag before calling this) or clicks refresh while it is open.
+      if (!this._conflictCenterOpen) {
+        this._checkJsonlConflicts();
         return;
       }
 

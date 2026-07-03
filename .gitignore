@@ -4,6 +4,10 @@ node_modules/
 # Runtime state & credentials (contains passwords, session data, PIDs)
 /state/
 
+# Claude account snapshots (plaintext OAuth tokens; never commit)
+state/claude-accounts/
+**/claude-accounts/
+
 # Uploaded images (per-session image attachments)
 /uploads/
 

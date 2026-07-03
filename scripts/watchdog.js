@@ -35,6 +35,7 @@
 'use strict';
 
 const http = require('http');
+const net = require('net');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -43,6 +44,19 @@ const os = require('os');
 const PORT = parseInt(process.env.WORKBOOK_PORT, 10) || 3457;
 const POLL_MS = 10_000;
 const SPAWN_TIMEOUT_MS = 4_000;
+// Consecutive missed HTTP probes required before we treat the workbook as
+// truly down. A single miss is almost always a briefly-blocked event loop
+// (heavy search, git status/fetch sweep across many workspaces, transient
+// machine load), NOT a dead process. Requiring several consecutive misses,
+// combined with the TCP port-bound gate below, stops the watchdog from
+// spawning duplicate workbooks that then cannot bind PORT and linger as
+// inert zombies (the multiple-gui.js incident on 2026-07-02).
+const FAILS_BEFORE_SPAWN = 3;
+// Timeout for the raw TCP liveness gate. A completed TCP handshake proves a
+// listening socket exists (the OS kernel accepts the connection even when the
+// Node event loop is blocked), which distinguishes "alive but busy" from
+// "process actually gone / port free".
+const PORT_CHECK_TIMEOUT_MS = 2_000;
 const RESTART_HISTORY = []; // timestamps of recent respawns
 const RESTART_WINDOW_MS = 5 * 60_000;
 const RESTART_BURST_LIMIT = 6;
@@ -81,6 +95,34 @@ function probe() {
 }
 
 /**
+ * Resolve true if something is bound and listening on PORT, false otherwise.
+ *
+ * Why a raw TCP connect and not the HTTP probe: the OS kernel completes the
+ * TCP handshake for a listening socket even when the owning Node process has
+ * a blocked event loop and never calls accept(). So a successful connect is a
+ * reliable "the workbook process is alive and holding the port" signal, while
+ * ECONNREFUSED means nothing is listening (the port is genuinely free). This
+ * is the final gate that prevents spawning a duplicate against a workbook that
+ * is merely busy rather than dead.
+ */
+function isPortBound() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (bound) => {
+      if (settled) return;
+      settled = true;
+      try { sock.destroy(); } catch (_) { /* already closed */ }
+      resolve(bound);
+    };
+    const sock = net.connect({ host: '127.0.0.1', port: PORT });
+    sock.setTimeout(PORT_CHECK_TIMEOUT_MS);
+    sock.on('connect', () => finish(true));   // a listener accepted us
+    sock.on('timeout', () => finish(false));
+    sock.on('error', () => finish(false));     // ECONNREFUSED => port is free
+  });
+}
+
+/**
  * Spawn a replacement workbook detached + unref'd so the watchdog
  * doesn't accumulate child references. The replacement inherits
  * PORT=<PORT> so it binds to the same port the tunnel routes to.
@@ -110,16 +152,40 @@ function spawnWorkbook() {
 }
 
 let nextDelay = POLL_MS;
+// Count of consecutive failed HTTP probes. Reset to 0 on any success or when
+// the TCP gate proves the workbook is alive-but-busy. Only when this reaches
+// FAILS_BEFORE_SPAWN AND the port is confirmed free do we spawn a replacement.
+let consecutiveFails = 0;
 
 async function tick() {
   const alive = await probe();
   if (alive) {
-    // Healthy. Reset back-off counter implicitly via the cleanup
-    // pass at the top of spawnWorkbook (no respawn = no entry).
+    // Healthy. Reset the miss counter and the back-off counter (the latter
+    // implicitly, via the cleanup pass at the top of spawnWorkbook).
+    consecutiveFails = 0;
     nextDelay = POLL_MS;
   } else {
-    log(`workbook not responding on ${PORT}; spawning replacement`);
-    nextDelay = spawnWorkbook();
+    consecutiveFails += 1;
+    log(`workbook not responding on ${PORT} (miss ${consecutiveFails}/${FAILS_BEFORE_SPAWN})`);
+    if (consecutiveFails < FAILS_BEFORE_SPAWN) {
+      // Not enough consecutive misses yet; a briefly-blocked event loop
+      // recovers on its own. Keep polling, do not spawn.
+      nextDelay = POLL_MS;
+    } else {
+      // Enough misses to suspect death. Final gate: if the port is still
+      // bound, the workbook is alive but busy (event loop blocked), so we
+      // must NOT spawn a duplicate that would only fail to bind and linger.
+      const bound = await isPortBound();
+      if (bound) {
+        log(`port ${PORT} still bound; workbook is alive but busy, not spawning`);
+        consecutiveFails = 0;
+        nextDelay = POLL_MS;
+      } else {
+        log(`workbook confirmed down (${consecutiveFails} misses, port free); spawning replacement`);
+        consecutiveFails = 0;
+        nextDelay = spawnWorkbook();
+      }
+    }
   }
   setTimeout(tick, nextDelay);
 }
