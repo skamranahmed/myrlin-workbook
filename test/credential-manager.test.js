@@ -254,7 +254,24 @@ const stubServer = http.createServer((req, res) => {
       res.end(JSON.stringify({
         five_hour: { utilization: 34, resets_at: '2026-07-02T21:00:00+00:00', limit_dollars: 50, used_dollars: 17, remaining_dollars: 33 },
         seven_day: { utilization: 61, resets_at: '2026-07-08T07:00:00+00:00' },
-        limits: [{ kind: 'five_hour', percent: 34, severity: 'ok', resets_at: '2026-07-02T21:00:00+00:00', is_active: true, internal_secret: 'DO-NOT-SHIP' }],
+        // Per-model weekly windows: opus present, sonnet null (the usual
+        // live shape). The mapper must capture the present one and omit the
+        // null one rather than storing a null key.
+        seven_day_opus: { utilization: 12, resets_at: '2026-07-08T07:00:00+00:00' },
+        seven_day_sonnet: null,
+        limits: [
+          // Index 0 stays the legacy five_hour row: older assertions index it.
+          { kind: 'five_hour', percent: 34, severity: 'ok', resets_at: '2026-07-02T21:00:00+00:00', is_active: true, internal_secret: 'DO-NOT-SHIP' },
+          // Object scope rows: the live per-model breakdown. The nested
+          // internal marker must never survive the mapper (whitelist gate).
+          { kind: 'weekly_scoped', group: 'weekly', percent: 38, severity: 'ok', resets_at: '2026-07-08T07:00:00+00:00', is_active: true, scope: { model: { display_name: 'Fable', internal_model_id: 'DO-NOT-SHIP-SCOPE' } } },
+          { kind: 'weekly_scoped', group: 'weekly', percent: 12, severity: 'ok', resets_at: '2026-07-08T07:00:00+00:00', is_active: true, scope: { model: { display_name: 'Opus' } } },
+          // Legacy string scope: must still pass through as row.scope.
+          { kind: 'weekly_all', group: 'weekly', percent: 61, severity: 'ok', resets_at: '2026-07-08T07:00:00+00:00', is_active: true, scope: 'account_wide' },
+          // Malformed object scopes: must degrade to no model, never throw.
+          { kind: 'weekly_scoped', group: 'weekly', percent: 5, scope: { model: {} } },
+          { kind: 'weekly_scoped', group: 'weekly', percent: 6, scope: { model: { display_name: 42 } } },
+        ],
         extra_usage: {},
         spend: {},
       }));
@@ -546,6 +563,46 @@ let stubBase = '';
     assertEqual(stub.lastUsageAuth, 'Bearer at-FIXTURE-LIVE-A', 'live token used, not the stored one');
     assertEqual(snap.usage.five_hour.utilization, 34);
     assertEqual(snap.tokenState, TOKEN_STATE_OK, 'usage success is positive evidence');
+  });
+
+  await test('usage mapper: model scope objects, string scope, seven_day_opus, malformed scope', async () => {
+    resetStub();
+    const fx = makeFixture();
+    await fx.manager.captureCurrent({});
+    const snap = await fx.manager.updateSnapshotUsage(UUID_A, { force: true });
+    const limits = snap.usage.limits;
+    assert(Array.isArray(limits) && limits.length === 6, 'all stub limit rows mapped');
+
+    // Object scope with model.display_name lands as row.model.
+    const fable = limits.find((l) => l.model === 'Fable');
+    assert(fable, 'weekly_scoped object scope yields row.model = display_name');
+    assertEqual(fable.kind, 'weekly_scoped');
+    assertEqual(fable.percent, 38);
+    assertEqual(fable.resets_at, '2026-07-08T07:00:00+00:00');
+    assert(fable.scope === undefined, 'raw scope object is never stored');
+    assert(JSON.stringify(limits).indexOf('DO-NOT-SHIP-SCOPE') === -1,
+      'nested scope internals never survive the mapper');
+    const opus = limits.find((l) => l.model === 'Opus');
+    assert(opus && opus.percent === 12, 'second model row mapped independently');
+
+    // String scope still passes through untouched (legacy shape).
+    const stringScoped = limits.find((l) => l.scope === 'account_wide');
+    assert(stringScoped, 'string scope still stored as row.scope');
+    assert(stringScoped.model === undefined, 'string scope never fabricates a model');
+
+    // Malformed object scopes degrade to no model field, without throwing.
+    const malformed = limits.filter((l) => l.kind === 'weekly_scoped' && l.model === undefined);
+    assertEqual(malformed.length, 2, 'both malformed scopes mapped without a model');
+
+    // Top-level per-model weekly windows: present opus captured, null sonnet omitted.
+    assert(snap.usage.seven_day_opus, 'seven_day_opus captured when present');
+    assertEqual(snap.usage.seven_day_opus.utilization, 12);
+    assertEqual(snap.usage.seven_day_opus.resets_at, '2026-07-08T07:00:00+00:00');
+    assert(!('seven_day_sonnet' in snap.usage), 'null seven_day_sonnet is omitted, not stored as null');
+
+    // Pre-existing windows unchanged by the additive mapper work.
+    assertEqual(snap.usage.five_hour.utilization, 34);
+    assertEqual(snap.usage.seven_day.utilization, 61);
   });
 
   await test('inactive expired: refresh, rotated pair persisted BEFORE the usage call', async () => {

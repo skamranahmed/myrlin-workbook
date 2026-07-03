@@ -1186,6 +1186,50 @@
   }
 }
 
+
+/* ─── Usage meter: bottom-sheet mirror ─────────────────────────
+   The header-right rail (which hosts #usage-meter) is display:none on
+   phones, so the ACTIVE account's Session/Opus/Fable bars surface inside
+   the account bottom sheet instead. #account-panel-meter is populated by
+   the same renderUsageMeter() call that paints the header widget; desktop
+   keeps it display:none (base rule in styles.css). :not([hidden]) keeps
+   the JS hidden attribute authoritative when there is no usage data. */
+
+@media (max-width: 768px) {
+  .account-panel-meter:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--surface0);
+  }
+
+  /* Roomier grid than the header widget: the track flexes to the sheet
+     width and the reset time stays fully visible (no hover tooltips on
+     touch, so the inline text must carry the exact local reset). */
+  .account-panel-meter .usage-meter-row {
+    grid-template-columns: 38px minmax(48px, 1fr) 34px auto;
+    font-size: 11px;
+  }
+
+  .account-panel-meter .usage-meter-key,
+  .account-panel-meter .usage-meter-reset {
+    font-size: 10px;
+  }
+
+  /* One-line scope note: touch has no tooltips, so the weekly-vs-session
+     distinction is spelled out inline. */
+  .account-panel-meter-note {
+    font-size: 10px;
+    color: var(--overlay0);
+    margin-top: 2px;
+  }
+
+  .account-panel-meter.is-stale .usage-meter-reset {
+    opacity: 0.55;
+  }
+}
+
 /* Reduced motion: the sheet snaps into place instead of sliding. */
 @media (prefers-reduced-motion: reduce) {
   .account-panel,

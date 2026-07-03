@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Per-model usage meter in the header top-right.** A compact stack of thin bars for the ACTIVE account: a Session (5h) bar showing the true account-wide cooldown, plus Opus and Fable bars sourced from their per-model limits, each with utilization percent and the EXACT local reset time (e.g. "Resets Tue 7:00 AM"). Why: the account chip only surfaced the 5-hour countdown; per-model headroom (especially Fable) was invisible, so the only way to know whether a model was about to rate-limit was to hit the wall. Honesty note baked into the UI copy: the Anthropic usage endpoint exposes per-model data only as WEEKLY-scoped limits (there is no per-model hourly window), so the Opus/Fable bars are labelled as weekly in their tooltips and are never presented as hourly; the 5h Session bar is the real short-window cooldown. Fill colors follow the existing design 6.3 thresholds (green below 60, amber 60 to 85, red above 85) via semantic Catppuccin tokens so all 13 themes render correctly; bars animate width over 200ms and honor `prefers-reduced-motion`. The meter renders on the same path as the account chip (initial load, refresh-usage, account switch, both credentials SSE broadcasts) and hides entirely when there is no active account or no usage data (no spinners). A width ladder sheds the inline reset text below 1600px (tooltips and the panel keep it) and the whole widget below 1280px to protect the tab row.
+- **Opus and Fable rows in the account switcher panel.** Each account row now lists per-model weekly usage under the existing 5h and week mini-bars, with the exact local reset time (absolute, not a countdown, because the window is weekly). Sourced from the same model-scoped limits with a fallback to the endpoint's top-level `seven_day_opus`/`seven_day_sonnet` windows when present.
+- **Mobile parity via the account bottom sheet.** The header-right rail is hidden on phones, so the same Session/Opus/Fable bars render at the top of the account bottom sheet (`#account-panel-meter`), with a one-line scope note ("5h is the session window. Opus and Fable are weekly limits.") because touch has no hover tooltips to carry that nuance. Desktop hides the sheet mirror (the header widget plus per-row usage lines already cover it).
+
+### Fixed
+
+- **Per-model usage data no longer dropped by the usage mapper.** `_mapUsageResponse` in `credential-manager.js` only kept `limits[].scope` when it was a string, but the live endpoint sends the per-model breakdown as `weekly_scoped` limit rows whose scope is an OBJECT (`scope.model.display_name` = "Opus" / "Fable" / "Sonnet"), so the model dimension never reached the stored snapshot or the UI. The mapper now extracts `scope.model.display_name` onto a whitelisted `row.model` field (the raw scope object is never stored), keeps string scopes as before, and additionally captures the top-level `seven_day_opus`/`seven_day_sonnet` windows when the endpoint populates them. Malformed scopes degrade to no model field, never a crash. This mapper fix is what unblocks every meter surface above.
+
 ## [1.2.0-alpha.13] - 2026-07-02
 
 ### Fixed
