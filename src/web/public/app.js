@@ -13416,6 +13416,12 @@ class CWMApp {
       sessionName = savedTitle;
     }
     console.log('[DnD] openTerminalInPane slot:', slotIdx, 'session:', sessionId, 'name:', sessionName);
+    // Auto-create a default group if none exists so sessions have somewhere to land
+    if (!this._activeGroupId || !this._tabGroups.find(g => g.id === this._activeGroupId)) {
+      const id = 'tg_' + Date.now().toString(36);
+      this._tabGroups.push({ id, name: 'Main', panes: [] });
+      this._activeGroupId = id;
+    }
     // If the target slot already has an active terminal, find the next empty slot
     if (this.terminalPanes[slotIdx]) {
       const emptySlot = this._findEmptyPaneSlot();
@@ -17014,10 +17020,10 @@ class CWMApp {
   async loadTerminalLayout() {
     try {
       const layout = await this.api('GET', '/api/layout');
-      if (layout && layout.tabGroups && layout.tabGroups.length > 0) {
+      if (layout && layout.tabGroups !== undefined) {
         this._tabGroups = layout.tabGroups;
         this._tabFolders = layout.tabFolders || [];
-        this._activeGroupId = layout.activeGroupId || this._tabGroups[0].id;
+        this._activeGroupId = layout.activeGroupId || (this._tabGroups[0]?.id ?? null);
       } else {
         // Create default group
         this._tabGroups = [{ id: 'tg_default', name: 'Main', panes: [] }];
@@ -17093,6 +17099,23 @@ class CWMApp {
 
   renderTerminalGroupTabs() {
     if (!this.els.terminalGroupsTabs) return;
+
+    // Remove any stale empty state before rendering tabs
+    document.getElementById('empty-tab-state')?.remove();
+
+    // If no groups exist, render empty state and stop
+    if (this._tabGroups.length === 0) {
+      this.els.terminalGroupsTabs.innerHTML = `
+        <button class="terminal-groups-add" id="terminal-groups-add" title="New tab group">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </button>`;
+      const addBtn = this.els.terminalGroupsTabs.querySelector('.terminal-groups-add');
+      if (addBtn) addBtn.addEventListener('click', () => this.createTerminalGroup());
+      this.renderEmptyState();
+      return;
+    }
 
     // Available folder colors - maps to Catppuccin CSS vars
     const FOLDER_COLORS = ['mauve', 'blue', 'green', 'peach', 'red', 'pink', 'teal', 'yellow'];
@@ -17363,6 +17386,10 @@ class CWMApp {
   }
 
   switchTerminalGroup(groupId) {
+    if (!groupId) {
+      this.renderEmptyState();
+      return;
+    }
     if (groupId === this._activeGroupId) return;
 
     // Clear any notification badge on the target tab
@@ -17670,6 +17697,9 @@ class CWMApp {
   }
 
   createTerminalGroup() {
+    // Remove empty state when creating a new group
+    document.getElementById('empty-tab-state')?.remove();
+
     const id = 'tg_' + Date.now().toString(36);
     const name = 'Tab ' + (this._tabGroups.length + 1);
     this._tabGroups.push({ id, name, panes: [] });
@@ -17833,12 +17863,81 @@ class CWMApp {
     });
   }
 
-  deleteTerminalGroup(groupId) {
-    if (this._tabGroups.length <= 1) {
-      this.showToast('Cannot delete the last tab group', 'warning');
-      return;
-    }
+  /**
+   * Render an empty-state overlay when no tab groups exist.
+   * Shows a drop target for sessions and a "New Tab" button.
+   */
+  renderEmptyState() {
+    // Remove any stale overlay
+    const existing = document.getElementById('empty-tab-state');
+    if (existing) existing.remove();
 
+    const overlay = document.createElement('div');
+    overlay.id = 'empty-tab-state';
+    overlay.innerHTML = `
+      <div class="empty-tab-state-drop" data-event-category="Tab Group" data-event-action="Drop Session">
+        <div class="empty-tab-state-icon">+</div>
+      </div>
+    `;
+
+    // Insert after the tab strip
+    const tabStrip = this.els.terminalGroupsTabs;
+    if (tabStrip) tabStrip.insertAdjacentElement('afterend', overlay);
+
+    // Drag-and-drop onto the empty state — creates a group and opens the session
+    const dropZone = overlay.querySelector('.empty-tab-state-drop');
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (e) => {
+        const types = e.dataTransfer?.types ?? [];
+        if (types.includes('cwm/session') || types.includes('cwm/project-session') || types.includes('cwm/workspace')) {
+          e.preventDefault();
+          dropZone.classList.add('drag-over');
+        }
+      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const types = e.dataTransfer?.types ?? [];
+        if (types.includes('cwm/session') || types.includes('cwm/project-session') || types.includes('cwm/workspace')) {
+          let sessionId, sessionName, spawnOpts = {};
+          if (types.includes('cwm/session')) {
+            try {
+              const d = JSON.parse(e.dataTransfer.getData('cwm/session'));
+              sessionId = d.sessionId;
+              sessionName = d.sessionName;
+              spawnOpts = d.spawnOpts || {};
+            } catch (_) {}
+          } else if (types.includes('cwm/project-session')) {
+            try {
+              const d = JSON.parse(e.dataTransfer.getData('cwm/project-session'));
+              sessionId = d.providerSessionId;
+              sessionName = d.title;
+              spawnOpts = { provider: d.provider };
+            } catch (_) {}
+          } else if (types.includes('cwm/workspace')) {
+            try {
+              const d = JSON.parse(e.dataTransfer.getData('cwm/workspace'));
+              sessionId = d.sessionId;
+              sessionName = d.sessionName;
+            } catch (_) {}
+          }
+          if (sessionId) {
+            // Auto-create a group if none exists
+            if (this._tabGroups.length === 0) {
+              const id = 'tg_' + Date.now().toString(36);
+              this._tabGroups.push({ id, name: 'Main', panes: [] });
+              this._activeGroupId = id;
+              this.renderTerminalGroupTabs();
+            }
+            this.openTerminalInPane(0, sessionId, sessionName, spawnOpts);
+          }
+        }
+      });
+    }
+  }
+
+  deleteTerminalGroup(groupId) {
     const wasDeletingActive = (this._activeGroupId === groupId);
 
     // If deleting the active group, save current pane state first so we
@@ -17854,7 +17953,17 @@ class CWMApp {
 
     if (wasDeletingActive) {
       // Must switch to another group - this will dispose current panes and restore the new group's
-      this._activeGroupId = this._tabGroups[0].id;
+      if (this._tabGroups.length === 0) {
+        this._activeGroupId = null;
+        // No groups left - dispose the deleted group's cache, clear panes, show empty state
+        this._disposeGroupCache(groupId);
+        this.saveTerminalLayout();
+        this.renderTerminalGroupTabs();
+        this.renderEmptyState();
+        return;
+      } else {
+        this._activeGroupId = this._tabGroups[0].id;
+      }
       // Bypass the early-return guard in switchTerminalGroup by setting a temp value
       const targetId = this._activeGroupId;
       this._activeGroupId = '__switching__';
@@ -17889,12 +17998,6 @@ class CWMApp {
    * @param {string} groupId - Tab group to close
    */
   async closeTabGroupWithConfirmation(groupId) {
-    // Guard: can't delete last tab
-    if (this._tabGroups.length <= 1) {
-      this.showToast('Cannot delete the last tab group', 'warning');
-      return;
-    }
-
     const group = this._tabGroups.find(g => g.id === groupId);
     if (!group) return;
 

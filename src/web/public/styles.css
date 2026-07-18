@@ -11977,4 +11977,34 @@ html {
   .mirror-msg {
     animation: none;
   }
+
+/* ── Empty tab-state overlay ─────────────────────────────────── */
+#empty-tab-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.empty-tab-state-drop {
+  border: 2px dashed var(--surface-1);
+  border-radius: 10px;
+  padding: 40px 56px;
+  text-align: center;
+  cursor: default;
+  transition: border-color 150ms ease, background 150ms ease;
+  user-select: none;
+}
+
+.empty-tab-state-drop.drag-over,
+.empty-tab-state-drop:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.empty-tab-state-icon {
+  font-size: 28px;
+  color: var(--overlay0);
+  font-weight: 600;
+  line-height: 1;
 }
