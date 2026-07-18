@@ -202,6 +202,7 @@ class CWMApp {
         headerHeight: 80,
         defaultModelPlanning: '',
         defaultModelRunning: '',
+        toastVariants: { success: true, error: true, info: true, warning: true },
       }, JSON.parse(localStorage.getItem('cwm_settings') || '{}')),
     };
 
@@ -4226,6 +4227,10 @@ class CWMApp {
       { key: 'autoOpenTerminal', label: 'Auto-open Terminal on Start', description: 'Automatically open a terminal when starting a session', category: 'Terminal' },
       { key: 'smoothScrolling', label: 'Smooth Scrolling', description: 'Animate terminal scrolling (mouse wheel, Shift+PageUp/Down) instead of jumping in blocks. Automatically disabled when your system requests reduced motion.', category: 'Terminal' },
       { key: 'completionNotifications', label: 'Completion Notifications', description: 'Sound and toast when a background terminal finishes', category: 'Notifications' },
+      { key: 'toastVariants', label: 'Success Toasts', description: 'Show toasts for successful operations (session started, copied, created, etc.)', category: 'Notifications', type: 'toast-variant', variantKey: 'success' },
+      { key: 'toastVariants', label: 'Error Toasts', description: 'Show toasts for failed operations', category: 'Notifications', type: 'toast-variant', variantKey: 'error' },
+      { key: 'toastVariants', label: 'Info Toasts', description: 'Show informational toasts (refreshing, loading, mode switches)', category: 'Notifications', type: 'toast-variant', variantKey: 'info' },
+      { key: 'toastVariants', label: 'Warning Toasts', description: 'Show warning toasts (full panes, concurrent limits, conflicts)', category: 'Notifications', type: 'toast-variant', variantKey: 'warning' },
       { key: 'sessionCountInHeader', label: 'Session Count in Header', description: 'Show running/total session stats in the header bar', category: 'Interface' },
       { key: 'confirmBeforeClose', label: 'Confirm Before Close', description: 'Ask for confirmation before closing terminal panes', category: 'Interface' },
       { key: 'uiScale', label: 'UI Scale', description: 'Adjust the overall interface size', category: 'Interface', type: 'scale' },
@@ -4927,6 +4932,22 @@ class CWMApp {
                 </label>
               </div>
             </div>`;
+        } else if (item.type === 'toast-variant') {
+          // A toggle for one key inside the toastVariants map (success/error/info/warning)
+          const variants = this.state.settings.toastVariants || {};
+          const checked = variants[item.variantKey] ? 'checked' : '';
+          html += `
+            <div class="settings-row" data-setting-key="${item.key}">
+              <div class="settings-row-info">
+                <div class="settings-row-label">${this.escapeHtml(item.label)}</div>
+                <div class="settings-row-desc">${this.escapeHtml(item.description)}</div>
+              </div>
+              <label class="settings-toggle">
+                <input type="checkbox" data-setting="${item.key}" data-variant-key="${item.variantKey}" ${checked} />
+                <span class="settings-toggle-track"></span>
+                <span class="settings-toggle-thumb"></span>
+              </label>
+            </div>`;
         } else {
           const checked = this.state.settings[item.key] ? 'checked' : '';
           html += `
@@ -5148,7 +5169,14 @@ class CWMApp {
     this.els.settingsBody.querySelectorAll('input[data-setting]').forEach(input => {
       input.addEventListener('change', (e) => {
         const key = e.target.dataset.setting;
-        this.state.settings[key] = e.target.checked;
+        const variantKey = e.target.dataset.variantKey;
+        if (variantKey !== undefined) {
+          // toast-variant: update the nested key inside toastVariants
+          if (!this.state.settings.toastVariants) this.state.settings.toastVariants = {};
+          this.state.settings.toastVariants[variantKey] = e.target.checked;
+        } else {
+          this.state.settings[key] = e.target.checked;
+        }
         this.saveSettings();
         this.applySettings();
       });
@@ -10766,6 +10794,8 @@ class CWMApp {
      ═══════════════════════════════════════════════════════════ */
 
   showToast(message, level = 'info') {
+    const variants = this.getSetting('toastVariants');
+    if (variants && !variants[level]) return;
     const icons = {
       info: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M9 8v4M9 6v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
       success: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 9.5l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',

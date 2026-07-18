@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 import type { ToastVariant } from '@/components/ui/Toast';
+import { useSettingsStore } from '@/stores/settings-store';
 
 /** Toast state shape */
 interface ToastState {
@@ -53,10 +54,13 @@ export const useToastStore = create<ToastState & ToastActions>()((set) => ({
 
   /**
    * Display a toast notification at the root level.
+   * Respects the toastVariants setting — silently drops toasts for disabled variants.
    * @param message - Text to show
    * @param variant - Color variant, defaults to 'info'
    */
   showToast: (message: string, variant: ToastVariant = 'info') => {
+    const variants = useSettingsStore.getState().toastVariants;
+    if (!variants[variant]) return;
     set({ visible: true, message, variant });
   },
 
@@ -72,10 +76,13 @@ export const useToastStore = create<ToastState & ToastActions>()((set) => ({
 /**
  * Standalone function to show a toast from anywhere (including non-React code).
  * Reads the store state directly without needing a hook.
+ * Respects toastVariants setting — silently drops toasts for disabled variants.
  *
  * @param message - Text to display
  * @param variant - Color variant, defaults to 'info'
  */
 export function showToast(message: string, variant: ToastVariant = 'info'): void {
+  const variants = useSettingsStore.getState().toastVariants;
+  if (!variants[variant]) return;
   useToastStore.getState().showToast(message, variant);
 }

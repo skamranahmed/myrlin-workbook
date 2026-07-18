@@ -16,6 +16,14 @@ import type { MMKV } from 'react-native-mmkv';
 /** Notification level options */
 export type NotificationLevel = 'all' | 'errors' | 'none';
 
+/** Toast variant visibility map — each key controls whether that variant type is shown */
+export type ToastVariantMap = {
+  success: boolean;
+  error: boolean;
+  info: boolean;
+  warning: boolean;
+};
+
 /**
  * MMKV storage instance for settings persistence.
  * Dedicated instance keeps settings data isolated from theme storage.
@@ -46,6 +54,8 @@ interface SettingsStoreState {
   hapticFeedback: boolean;
   /** Whether to show confirmation before closing sessions */
   confirmBeforeClose: boolean;
+  /** Which toast variants to show */
+  toastVariants: ToastVariantMap;
 }
 
 /** Store actions */
@@ -56,6 +66,8 @@ interface SettingsStoreActions {
   setHapticFeedback: (enabled: boolean) => void;
   /** Toggle confirm-before-close on or off */
   setConfirmBeforeClose: (enabled: boolean) => void;
+  /** Update a single toast variant visibility */
+  setToastVariant: (variant: keyof ToastVariantMap, enabled: boolean) => void;
 }
 
 /**
@@ -76,6 +88,7 @@ export const useSettingsStore = create<SettingsStoreState & SettingsStoreActions
       notificationLevel: 'all' as NotificationLevel,
       hapticFeedback: true,
       confirmBeforeClose: true,
+      toastVariants: { success: true, error: true, info: true, warning: true } as ToastVariantMap,
 
       /**
        * Set the notification level preference.
@@ -99,6 +112,17 @@ export const useSettingsStore = create<SettingsStoreState & SettingsStoreActions
        */
       setConfirmBeforeClose: (enabled: boolean) => {
         set({ confirmBeforeClose: enabled });
+      },
+
+      /**
+       * Toggle a toast variant on or off.
+       * @param variant - Which variant to toggle (success, error, info, warning)
+       * @param enabled - Whether to show this variant type
+       */
+      setToastVariant: (variant: keyof ToastVariantMap, enabled: boolean) => {
+        set((state) => ({
+          toastVariants: { ...state.toastVariants, [variant]: enabled },
+        }));
       },
     }),
     {

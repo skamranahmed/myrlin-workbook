@@ -27,7 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Application from 'expo-application';
 
 import { useTheme } from '@/hooks/useTheme';
-import { useSettingsStore, type NotificationLevel } from '@/stores/settings-store';
+import { useSettingsStore, type NotificationLevel, type ToastVariantMap } from '@/stores/settings-store';
 import { useServerStore } from '@/stores/server-store';
 import { themes, themeIds } from '@/theme/tokens';
 import type { ThemeId } from '@/theme/types';
@@ -180,6 +180,8 @@ export default function SettingsScreen() {
   const setHapticFeedback = useSettingsStore((s) => s.setHapticFeedback);
   const confirmBeforeClose = useSettingsStore((s) => s.confirmBeforeClose);
   const setConfirmBeforeClose = useSettingsStore((s) => s.setConfirmBeforeClose);
+  const toastVariants = useSettingsStore((s) => s.toastVariants);
+  const setToastVariant = useSettingsStore((s) => s.setToastVariant);
 
   // Server count for badge
   const serverCount = useServerStore((s) => s.servers.length);
@@ -310,7 +312,35 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
-        {/* 3. General */}
+        {/* 3. Toast Notifications */}
+        <View style={styles.section}>
+          <SectionHeader title="Toast Notifications" />
+          <Text
+            style={[
+              styles.description,
+              { color: theme.colors.textMuted, fontFamily: fonts.sans.regular },
+            ]}
+          >
+            Choose which toast types to show
+          </Text>
+          {(['success', 'error', 'info', 'warning'] as (keyof ToastVariantMap)[]).map((variant) => (
+            <View key={variant} style={styles.toggleRow}>
+              <Toggle
+                label={variant.charAt(0).toUpperCase() + variant.slice(1)}
+                description={
+                  variant === 'success' ? 'Session started, copied, created' :
+                  variant === 'error' ? 'Failed operations' :
+                  variant === 'info' ? 'Refreshing, loading, mode switches' :
+                  'Full panes, limits, conflicts'
+                }
+                value={toastVariants[variant]}
+                onValueChange={(val) => setToastVariant(variant, val)}
+              />
+            </View>
+          ))}
+        </View>
+
+        {/* 4. General */}
         <View style={styles.section}>
           <SectionHeader title="General" />
           <View style={styles.toggleRow}>
@@ -331,7 +361,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* 4. Servers */}
+        {/* 5. Servers */}
         <View style={styles.section}>
           <SectionHeader title="Servers" />
           <SettingsRow
@@ -347,7 +377,7 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* 5. About */}
+        {/* 6. About */}
         <View style={styles.section}>
           <SectionHeader title="About" />
           <SettingsRow
