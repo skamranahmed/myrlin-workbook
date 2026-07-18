@@ -17705,6 +17705,8 @@ class CWMApp {
     this._tabGroups.push({ id, name, panes: [] });
     this.saveTerminalLayout();
     this.renderTerminalGroupTabs();
+    // Switch focus to the newly created tab
+    this.switchTerminalGroup(id);
     this.showToast(`Created tab group "${name}"`, 'success');
   }
 
