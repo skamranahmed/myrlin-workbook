@@ -1024,6 +1024,58 @@ textarea.input {
   transform: rotate(180deg);
 }
 
+/* Fully hidden sidebar (dragged to 0) */
+.sidebar.hidden {
+  width: 0 !important;
+  border-right-color: transparent;
+}
+
+.sidebar.hidden .sidebar-header,
+.sidebar.hidden .sidebar-list,
+.sidebar.hidden .sidebar-footer,
+.sidebar.hidden .sidebar-divider,
+.sidebar.hidden #projects-header,
+.sidebar.hidden #projects-list,
+.sidebar.hidden .sidebar-collapse-bar {
+  display: none !important;
+}
+
+/* Floating toggle button when sidebar is fully hidden */
+.sidebar-toggle-hidden {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 48px;
+  background: var(--surface0);
+  border: 1px solid var(--border-subtle);
+  border-left: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sidebar-toggle-hidden:hover {
+  background: var(--surface1);
+  color: var(--text-primary);
+  width: 28px;
+}
+
+.sidebar-toggle-hidden svg {
+  transition: transform var(--transition-fast);
+}
+
+/* Always show the floating toggle */
+.sidebar-toggle-hidden {
+  display: flex;
+}
+
 /* Sidebar Resize Handle */
 .sidebar-resize-handle {
   width: 4px;

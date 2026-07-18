@@ -464,6 +464,7 @@ class CWMApp {
       // Sidebar resize & collapse
       sidebarResizeHandle: document.getElementById('sidebar-resize-handle'),
       sidebarCollapseBtn: document.getElementById('sidebar-collapse-btn'),
+      sidebarToggleHidden: document.getElementById('sidebar-toggle-hidden'),
 
       // Docs panel
       docsPanel: document.getElementById('docs-panel'),
@@ -822,6 +823,11 @@ class CWMApp {
     // Sidebar collapse (desktop)
     if (this.els.sidebarCollapseBtn) {
       this.els.sidebarCollapseBtn.addEventListener('click', () => this.toggleSidebarCollapse());
+    }
+
+    // Floating sidebar toggle (when hidden at 0px)
+    if (this.els.sidebarToggleHidden) {
+      this.els.sidebarToggleHidden.addEventListener('click', () => this.toggleSidebarCollapse());
     }
 
     // Sidebar resize handle (desktop drag-to-resize)
@@ -9821,15 +9827,37 @@ class CWMApp {
 
   toggleSidebarCollapse() {
     const sidebar = this.els.sidebar;
-    const isCollapsed = sidebar.classList.toggle('collapsed');
-    localStorage.setItem('cwm_sidebarCollapsed', isCollapsed ? '1' : '0');
+    const isHidden = sidebar.classList.contains('hidden');
 
-    // Trigger resize on terminal panes after animation
-    setTimeout(() => {
-      this.terminalPanes.forEach(tp => {
-        if (tp) tp.safeFit();
-      });
-    }, 250);
+    if (isHidden) {
+      // Hidden (0px) → 280px default
+      sidebar.classList.remove('hidden');
+      sidebar.style.width = '';
+      localStorage.removeItem('cwm_sidebarWidth');
+    } else {
+      // Any visible state → hide (0px)
+      sidebar.classList.add('hidden');
+      sidebar.style.width = '0';
+      localStorage.setItem('cwm_sidebarWidth', '0');
+    }
+
+    this._updateSidebarToggleIcon();
+    this.terminalPanes.forEach(tp => { if (tp) tp.safeFit(); });
+  }
+
+  /**
+   * Updates the floating toggle icon to reflect current sidebar visibility.
+   * Hidden (0px) → chevron pointing right (show sidebar)
+   * Visible (any width) → chevron pointing left (hide sidebar)
+   */
+  _updateSidebarToggleIcon() {
+    const btn = this.els.sidebarToggleHidden;
+    if (!btn) return;
+    const isHidden = this.els.sidebar.classList.contains('hidden');
+    btn.innerHTML = isHidden
+      ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`
+      : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>`;
+    btn.title = isHidden ? 'Show sidebar' : 'Hide sidebar';
   }
 
   restoreSidebarState() {
@@ -9837,16 +9865,14 @@ class CWMApp {
     const savedWidth = localStorage.getItem('cwm_sidebarWidth');
     if (savedWidth) {
       const width = parseInt(savedWidth, 10);
-      if (width >= 180 && width <= 600) {
+      if (width >= 0 && width <= 600) {
         this.els.sidebar.style.width = width + 'px';
+        if (width === 0) {
+          this.els.sidebar.classList.add('hidden');
+        }
       }
     }
-
-    // Restore sidebar collapse
-    const collapsed = localStorage.getItem('cwm_sidebarCollapsed');
-    if (collapsed === '1') {
-      this.els.sidebar.classList.add('collapsed');
-    }
+    this._updateSidebarToggleIcon();
   }
 
   initSidebarResize() {
@@ -9859,7 +9885,7 @@ class CWMApp {
     const onMove = (clientX) => {
       if (!isResizing) return;
       const dx = clientX - startX;
-      const newWidth = Math.max(180, Math.min(600, startWidth + dx));
+      const newWidth = Math.max(0, Math.min(600, startWidth + dx));
       sidebar.style.width = newWidth + 'px';
       sidebar.style.transition = 'none'; // disable transition during drag
     };
@@ -9872,9 +9898,9 @@ class CWMApp {
       document.body.style.userSelect = '';
       sidebar.style.transition = ''; // re-enable transition
 
-      // Save width
+      // Save width (allow 0 to be saved)
       const finalWidth = parseInt(sidebar.style.width, 10);
-      if (finalWidth) {
+      if (finalWidth >= 0) {
         localStorage.setItem('cwm_sidebarWidth', finalWidth.toString());
       }
 
@@ -9882,6 +9908,9 @@ class CWMApp {
       this.terminalPanes.forEach(tp => {
         if (tp) tp.safeFit();
       });
+
+      // Update toggle icon to reflect final state
+      this._updateSidebarToggleIcon();
 
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onEnd);
@@ -9894,7 +9923,12 @@ class CWMApp {
     const onTouchMove = (e) => { e.preventDefault(); onMove(e.touches[0].clientX); };
 
     const startResize = (clientX) => {
-      if (sidebar.classList.contains('collapsed')) return;
+      // Allow resizing from collapsed (48px) and hidden (0px) states
+      if (sidebar.classList.contains('collapsed') || sidebar.classList.contains('hidden')) {
+        // Clear collapsed/hidden so resize can expand freely
+        sidebar.classList.remove('collapsed', 'hidden');
+        sidebar.style.width = '';
+      }
       isResizing = true;
       startX = clientX;
       startWidth = sidebar.getBoundingClientRect().width;
