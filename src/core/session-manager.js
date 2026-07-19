@@ -7,6 +7,7 @@
 const { spawn } = require('child_process');
 const { getStore } = require('../state/store');
 const { expandHome } = require('../utils/path-utils');
+const { DEFAULT_COMMAND, CLAUDE_BYPASS_FLAG, CODEX_BYPASS_FLAG } = require('./constants');
 
 /**
  * Allowlist of known-safe login shells.
@@ -57,7 +58,7 @@ function launchSession(sessionId) {
   }
 
   try {
-    const baseCommand = session.command || 'claude'; // gsd:provider-literal-allowed (v1.1 back-compat default)
+    const baseCommand = session.command || DEFAULT_COMMAND;
     // alpha.7: provider-aware bypass flag. Claude uses
     //   --dangerously-skip-permissions; Codex uses
     //   --dangerously-bypass-approvals-and-sandbox. Passing the Claude
@@ -67,10 +68,10 @@ function launchSession(sessionId) {
     let bypassFlag = '';
     if (session.bypassPermissions) {
       const providerId = session.provider || 'claude'; // gsd:provider-literal-allowed (back-compat default for un-tagged legacy sessions)
-      if (providerId === 'codex') { // gsd:provider-literal-allowed
-        bypassFlag = ' --dangerously-bypass-approvals-and-sandbox';
+      if (providerId === 'codex') {
+        bypassFlag = ' ' + CODEX_BYPASS_FLAG;
       } else {
-        bypassFlag = ' --dangerously-skip-permissions';
+        bypassFlag = ' ' + CLAUDE_BYPASS_FLAG;
       }
     }
     const command = baseCommand + bypassFlag;
@@ -190,7 +191,7 @@ function getSessionProcess(sessionId) {
   return {
     pid: session.pid,
     status: session.status,
-    command: session.command || 'claude', // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
+    command: session.command || DEFAULT_COMMAND,
     workingDir: session.workingDir || '',
   };
 }

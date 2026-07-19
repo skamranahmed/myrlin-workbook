@@ -1657,6 +1657,16 @@ class CWMApp {
         return;
       }
 
+      // Delete button on session item — handled BEFORE session-item click
+      const wsSessionDelete = e.target.closest('.ws-session-delete');
+      if (wsSessionDelete) {
+        e.stopPropagation();
+        e.preventDefault();
+        const sessionId = wsSessionDelete.dataset.deleteSession;
+        if (sessionId) this.removeSessionFromWorkspace(sessionId);
+        return;
+      }
+
       const wsSessionItem = e.target.closest('.ws-session-item');
       if (wsSessionItem) {
         e.stopPropagation();
@@ -1664,20 +1674,37 @@ class CWMApp {
         const session = (this.state.allSessions || this.state.sessions).find(s => s.id === sessionId);
         if (!session) return;
         if (this.state.viewMode === 'terminal') {
-          const emptySlot = this._findEmptyPaneSlot();
-          if (emptySlot !== -1) {
-            if (!session.resumeSessionId) this.showToast('Starting new Claude session (no previous conversation to resume)', 'info');
-            const spawnOpts = {};
-            if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
-            if (session.workingDir) spawnOpts.cwd = session.workingDir;
-            if (session.command) spawnOpts.command = session.command;
-            if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
-            if (session.verbose) spawnOpts.verbose = true;
-            if (session.model) spawnOpts.model = session.model;
-            if (session.agentTeams) spawnOpts.agentTeams = true;
-            this.openTerminalInPane(emptySlot, sessionId, session.name, spawnOpts);
+          // Build spawn options once
+          const spawnOpts = {};
+          if (session.resumeSessionId) spawnOpts.resumeSessionId = session.resumeSessionId;
+          if (session.workingDir) spawnOpts.cwd = session.workingDir;
+          if (session.command) spawnOpts.command = session.command;
+          if (session.bypassPermissions) spawnOpts.bypassPermissions = true;
+          if (session.verbose) spawnOpts.verbose = true;
+          if (session.model) spawnOpts.model = session.model;
+          if (session.agentTeams) spawnOpts.agentTeams = true;
+
+          // Check if this session is already open in any tab (active or cached)
+          const existingTab = this._findSessionInAnyTab(sessionId);
+          if (existingTab) {
+            // Session already open in another tab - switch to that tab
+            this.switchTerminalGroup(existingTab.groupId);
+            this.showToast(`Switched to tab with "${session.name}"`, 'info');
+            return;
+          }
+
+          // Target slot is always 0 (first pane) for sidebar clicks
+          const targetSlot = 0;
+
+          if (this._isSlotOccupied(targetSlot)) {
+            // Slot occupied - create a new tab and open there
+            if (!session.resumeSessionId) this.showToast('Starting new Claude session in new tab', 'info');
+            this.createTerminalGroup(session.name);
+            this.openTerminalInPane(0, sessionId, session.name, spawnOpts);
           } else {
-            this.showToast('All terminal panes are full. Close one first.', 'warning');
+            // Slot is empty - open normally
+            if (!session.resumeSessionId) this.showToast('Starting new Claude session (no previous conversation to resume)', 'info');
+            this.openTerminalInPane(targetSlot, sessionId, session.name, spawnOpts);
           }
         } else {
           this.selectSession(sessionId);
@@ -2991,13 +3018,21 @@ class CWMApp {
 
     const confirmed = await this.showConfirmModal({
       title: 'Remove Session',
-      message: `Remove "${session.name}" from this project? This deletes the session record (your Claude conversation files are not affected).`,
+      message: `Remove "${session.name}" from this project? This deletes the session record and closes any open tab.`,
       confirmText: 'Remove',
       confirmClass: 'btn-danger',
     });
     if (!confirmed) return;
 
     try {
+      // Close all terminal panes that have this session open
+      await this._closeSessionPanes(sessionId);
+
+      // Kill the PTY process if running
+      try {
+        await this.api('POST', `/api/pty/${sessionId}/kill`);
+      } catch (_) { /* PTY may not exist */ }
+
       await this.api('DELETE', `/api/sessions/${sessionId}`);
       this.state.sessions = this.state.sessions.filter(s => s.id !== sessionId);
       if (this.state.allSessions) {
@@ -11356,7 +11391,7 @@ class CWMApp {
         const sessProvider = this.escapeHtml(s.provider || 'claude'); /* gsd:provider-literal-allowed */
         return `<div class="ws-session-item${isHidden ? ' ws-session-hidden' : ''}" data-session-id="${s.id}" data-provider="${sessProvider}" draggable="true" title="${this.escapeHtml(s.workingDir || '')}">
           <span class="ws-session-dot${tristateAttr}" style="background: ${statusDot}"></span>
-          <span class="ws-session-name">${this.escapeHtml(name)}</span>${pip}${timeEl}
+          <span class="ws-session-name">${this.escapeHtml(name)}</span><span class="ws-session-delete" data-delete-session="${s.id}" title="Remove session">&#10005;</span>${pip}${timeEl}
           ${metaRow}
         </div>`;
       };
@@ -13483,8 +13518,10 @@ class CWMApp {
     // Auto-create a default group if none exists so sessions have somewhere to land
     if (!this._activeGroupId || !this._tabGroups.find(g => g.id === this._activeGroupId)) {
       const id = 'tg_' + Date.now().toString(36);
-      this._tabGroups.push({ id, name: 'Main', panes: [] });
+      const name = sessionName || 'Tab 1';
+      this._tabGroups.push({ id, name, panes: [] });
       this._activeGroupId = id;
+      this.renderTerminalGroupTabs();
     }
     // If the target slot already has an active terminal, find the next empty slot
     if (this.terminalPanes[slotIdx]) {
@@ -14961,6 +14998,63 @@ class CWMApp {
       if (!this._isSlotOccupied(i)) return i;
     }
     return -1;
+  }
+
+  /**
+   * Find which tab group contains a session already open in a terminal pane.
+   * Checks both the current active tab (terminalPanes) and cached tabs
+   * (_groupPaneCache) since panes are nullified when switching tabs.
+   * @param {string} sessionId - The session ID to look for.
+   * @returns {Object|null} { groupId, slotIdx } if found, null otherwise.
+   */
+  _findSessionInAnyTab(sessionId) {
+    // Check current active tab's terminalPanes
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
+        return { groupId: this._activeGroupId, slotIdx: i };
+      }
+    }
+    // Check cached panes in all other tab groups
+    for (const [groupId, cache] of Object.entries(this._groupPaneCache || {})) {
+      if (groupId === this._activeGroupId) continue;
+      if (!cache || !cache.panes) continue;
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+        if (cache.panes[i] && cache.panes[i].sessionId === sessionId) {
+          return { groupId, slotIdx: i };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Close all terminal panes that have a given session open.
+   * Checks both active tab and all cached tabs.
+   * @param {string} sessionId - The session ID whose panes to close.
+   */
+  async _closeSessionPanes(sessionId) {
+    // Close from active tab's terminalPanes
+    for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+      if (this.terminalPanes[i] && this.terminalPanes[i].sessionId === sessionId) {
+        this.closeTerminalPane(i);
+      }
+    }
+    // Close from cached tabs' panes
+    for (const [groupId, cache] of Object.entries(this._groupPaneCache || {})) {
+      if (!cache || !cache.panes) continue;
+      for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+        if (cache.panes[i] && cache.panes[i].sessionId === sessionId) {
+          // Dispose and null out the cached pane
+          try { cache.panes[i].dispose(); } catch (_) { /* already gone */ }
+          cache.panes[i] = null;
+        }
+      }
+    }
+    // Also update the tab group's panes descriptor to remove this session
+    for (const group of this._tabGroups) {
+      group.panes = group.panes.filter(p => p.sessionId !== sessionId);
+    }
+    await this.saveTerminalLayout();
   }
 
   updateTerminalGridLayout() {
@@ -17090,12 +17184,12 @@ class CWMApp {
         this._activeGroupId = layout.activeGroupId || (this._tabGroups[0]?.id ?? null);
       } else {
         // Create default group
-        this._tabGroups = [{ id: 'tg_default', name: 'Main', panes: [] }];
+        this._tabGroups = [{ id: 'tg_default', name: 'Tab 1', panes: [] }];
         this._tabFolders = [];
         this._activeGroupId = 'tg_default';
       }
     } catch (_) {
-      this._tabGroups = [{ id: 'tg_default', name: 'Main', panes: [] }];
+      this._tabGroups = [{ id: 'tg_default', name: 'Tab 1', panes: [] }];
       this._tabFolders = [];
       this._activeGroupId = 'tg_default';
     }
@@ -17760,18 +17854,18 @@ class CWMApp {
     this.showToast(`Opened ${maxPanes} sessions from "${ws.name}"${extra}`, 'success');
   }
 
-  createTerminalGroup() {
+  createTerminalGroup(name) {
     // Remove empty state when creating a new group
     document.getElementById('empty-tab-state')?.remove();
 
     const id = 'tg_' + Date.now().toString(36);
-    const name = 'Tab ' + (this._tabGroups.length + 1);
-    this._tabGroups.push({ id, name, panes: [] });
+    const tabName = name || 'Tab ' + (this._tabGroups.length + 1);
+    this._tabGroups.push({ id, name: tabName, panes: [] });
     this.saveTerminalLayout();
     this.renderTerminalGroupTabs();
     // Switch focus to the newly created tab
     this.switchTerminalGroup(id);
-    this.showToast(`Created tab group "${name}"`, 'success');
+    this.showToast(`Created tab "${tabName}"`, 'success');
   }
 
   /**
@@ -17992,7 +18086,7 @@ class CWMApp {
             // Auto-create a group if none exists
             if (this._tabGroups.length === 0) {
               const id = 'tg_' + Date.now().toString(36);
-              this._tabGroups.push({ id, name: 'Main', panes: [] });
+              this._tabGroups.push({ id, name: sessionName || 'Tab 1', panes: [] });
               this._activeGroupId = id;
               this.renderTerminalGroupTabs();
             }
@@ -18021,8 +18115,40 @@ class CWMApp {
       // Must switch to another group - this will dispose current panes and restore the new group's
       if (this._tabGroups.length === 0) {
         this._activeGroupId = null;
-        // No groups left - dispose the deleted group's cache, clear panes, show empty state
+        // No groups left - reset all terminal pane DOMs to empty state
+        for (let i = 0; i < CWMApp.MAX_PANES; i++) {
+          if (this.terminalPanes[i]) {
+            this.terminalPanes[i].dispose();
+            this.terminalPanes[i] = null;
+          }
+          const paneEl = document.getElementById(`term-pane-${i}`);
+          if (paneEl) {
+            paneEl.classList.remove('terminal-pane-active');
+            paneEl.classList.add('terminal-pane-empty');
+            paneEl.removeAttribute('data-provider');
+            const titleEl = paneEl.querySelector('.terminal-pane-title');
+            if (titleEl) titleEl.textContent = 'Drop a session here';
+            const pillEl = paneEl.querySelector('.pane-provider-pill');
+            if (pillEl) { pillEl.hidden = true; pillEl.textContent = ''; pillEl.removeAttribute('data-provider'); }
+            const closeBtn = paneEl.querySelector('.terminal-pane-close');
+            if (closeBtn) closeBtn.hidden = true;
+            const uploadBtn = paneEl.querySelector('.terminal-pane-upload');
+            if (uploadBtn) uploadBtn.hidden = true;
+            const scheduleBtn = paneEl.querySelector('.terminal-pane-schedule');
+            if (scheduleBtn) scheduleBtn.hidden = true;
+            const expandBtn = paneEl.querySelector('.terminal-pane-expand');
+            if (expandBtn) expandBtn.hidden = true;
+            const collapseBtn = paneEl.querySelector('.terminal-pane-collapse');
+            if (collapseBtn) collapseBtn.hidden = true;
+            const micBtn = paneEl.querySelector('.terminal-pane-mic');
+            if (micBtn) micBtn.hidden = true;
+            const container = document.getElementById(`term-container-${i}`);
+            if (container) container.innerHTML = '';
+          }
+        }
         this._disposeGroupCache(groupId);
+        this._activeTerminalSlot = null;
+        this.updateTerminalGridLayout();
         this.saveTerminalLayout();
         this.renderTerminalGroupTabs();
         this.renderEmptyState();
@@ -22078,14 +22204,23 @@ class CWMApp {
       await this.loadStats();
 
       // Open in a terminal pane
-      const emptySlot = this._findEmptyPaneSlot();
-      if (emptySlot !== -1) {
-        const spawnOpts = { cwd: dir };
-        if (model) spawnOpts.model = model;
+      const spawnOpts = { cwd: dir };
+      if (model) spawnOpts.model = model;
+
+      // Check if this session is already open in any tab
+      const existingTab = this._findSessionInAnyTab(session.id);
+      if (existingTab) {
+        // Session already open - switch to that tab
         this.setViewMode('terminal');
-        this.openTerminalInPane(emptySlot, session.id, session.name, spawnOpts);
+        this.switchTerminalGroup(existingTab.groupId);
+        this.showToast(`Switched to tab with "${session.name}"`, 'info');
       } else {
-        this.showToast('All terminal panes full. Close one first.', 'warning');
+        // Open in slot 0, creating a new tab if needed
+        this.setViewMode('terminal');
+        if (this._isSlotOccupied(0)) {
+          this.createTerminalGroup(session.name);
+        }
+        this.openTerminalInPane(0, session.id, session.name, spawnOpts);
       }
 
       this.closeLauncher();

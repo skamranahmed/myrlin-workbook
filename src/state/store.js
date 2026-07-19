@@ -12,6 +12,7 @@ const { EventEmitter } = require('events');
 const docsManager = require('./docs-manager');
 const { expandHome } = require('../utils/path-utils');
 const { getDataDir, migrateFromLegacy } = require('../utils/data-dir');
+const { DEFAULT_COMMAND } = require('../core/constants');
 
 // Legacy project-local state dir (for migration on first run)
 const LEGACY_STATE_DIR = path.join(__dirname, '..', '..', 'state');
@@ -926,7 +927,7 @@ class Store extends EventEmitter {
 
   // ─── Session CRUD ────────────────────────────────────────
 
-  createSession({ name, workspaceId, workingDir = '', topic = '', command = 'claude', resumeSessionId = null, tags = [], initialPrompt = null, flags = [] }) { // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
+  createSession({ name, workspaceId, workingDir = '', topic = '', command = DEFAULT_COMMAND, resumeSessionId = null, tags = [], initialPrompt = null, flags = [] }) {
     if (!this._state.workspaces[workspaceId]) return null;
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -1484,7 +1485,7 @@ class Store extends EventEmitter {
    * @param {{ name: string, command?: string, workingDir?: string, bypassPermissions?: boolean, verbose?: boolean, model?: string, agentTeams?: boolean }} params
    * @returns {object} The created template
    */
-  createTemplate({ name, command = 'claude', workingDir = '', bypassPermissions = false, verbose = false, model = '', agentTeams = false }) { // gsd:provider-literal-allowed (v1.1 back-compat default; refactor deferred to Phase 15+)
+  createTemplate({ name, command = DEFAULT_COMMAND, workingDir = '', bypassPermissions = false, verbose = false, model = '', agentTeams = false }) {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const template = {

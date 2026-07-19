@@ -34,6 +34,8 @@
 
 'use strict';
 
+const { DEFAULT_COMMAND } = require('../../core/constants');
+
 /**
  * Build a SpawnDescriptor for the Claude CLI.
  *
@@ -67,7 +69,7 @@ function spawnCommand({
   // The literal 'claude' below is the CLI binary name. This file lives inside
   // src/providers/claude/, which the grep gate (Plan 14-05) skips, so the
   // marker is defensive (extra signal for future readers) rather than required.
-  const cmd = 'claude'; // gsd:provider-literal-allowed (Claude provider CLI binary)
+  const cmd = DEFAULT_COMMAND;
 
   // Defense-in-depth validation. Mirrors pty-manager.js lines 284-291 verbatim
   // so any input that historically passed the SHELL_UNSAFE gate continues to
