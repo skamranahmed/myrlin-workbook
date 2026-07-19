@@ -1199,6 +1199,7 @@ textarea.input {
 
 .sidebar-list {
   flex: 1;
+  min-height: 0; /* allow flex item to shrink below content so overflow-y can scroll */
   overflow-y: auto;
   padding: 4px 8px;
 }
